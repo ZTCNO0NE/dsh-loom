@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.tgz
+*.log
+
+# secrets and local workspaces (never publish)
+.env-*
+meta-workspace/
+eval/
+run-records/
+
+# local editor/OS noise
+.DS_Store
+*.swp
