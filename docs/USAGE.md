@@ -40,6 +40,8 @@ dsh plugin --profile demo add ./dsh-meta-validate
 
 想 3 分钟亲历一遍"失败 → 看着它长 → 重试成功 → 成长报告"？跑 `npm run try`（仓库内体验脚本），跑完自动生成一份可分享的 HTML 成长报告。
 
+装了 npm 包后在任何机器上：`dsh-loom try`（同样流程，自动生成报告）。
+
 ## 你能看到什么
 
 | 时机 | 你会看到 |

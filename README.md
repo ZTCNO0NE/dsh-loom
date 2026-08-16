@@ -297,9 +297,15 @@ config:
 > npm run try
 > ```
 >
+> 已装 npm 包的用户（任何机器）：
+>
+> ```bash
+> dsh-loom try
+> ```
+>
 > 详细手册与常见问题见 [docs/USAGE.md](docs/USAGE.md)；更多案例：`npm run fromzero:all`、`npm run supervisor-swap-demo`、`npm run scheduled-notify-demo`（都是真实模型跑通并留档）。
 
-## 设计边界
+## 设计边界（诚实声明）
 
 - **v1 只允许改 `config | tool | skill`**，loop 层锁定（设计项，不是缺陷）；
 - 核验器是**准入门槛**，上线后真实运行 + 观察才是最终裁判；

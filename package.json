@@ -1,6 +1,6 @@
 {
   "name": "dsh-loom",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Loom (织机) — second-validator plugin for DeepSeek Harness: a silent external coach that weaves your agent's tools, skills, config and even its model from usage history, with deterministic verification and cold-apply.",
   "keywords": [
     "dsh",
@@ -27,8 +27,12 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "bin"
   ],
+  "bin": {
+    "dsh-loom": "./bin/dsh-loom.mjs"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json --noEmit",
@@ -57,7 +61,8 @@
     "scheduled-notify-demo": "node scripts/scheduled-notify-demo.mjs",
     "actor-progress-qa-demo": "node scripts/actor-progress-qa-demo.mjs"
     ,"preferences-demo": "node scripts/preferences-demo.mjs",
-    "try": "node scripts/try.mjs"
+    "try": "node scripts/try.mjs",
+    "timeline": "node scripts/timeline.mjs"
   },
   "dsh": {
     "bundle": {
