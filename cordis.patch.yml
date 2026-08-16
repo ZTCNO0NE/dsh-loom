@@ -1,0 +1,13 @@
+# Configuration layer applied when a profile lists this bundle.
+# Rows inserted here compose with @deepseek-ai/dsh-base; later layers win per row.
+- insert:
+    - id: meta-validate
+      name: dsh-loom
+      config:
+        mode: observe # observe -> propose -> apply；三档逐步放开
+        regressionDir: ./meta-regressions
+        maxPendingPatches: 8
+        maxSignalsPerCycle: 50
+        thresholds:
+          repeatedFailureCount: 3
+          regressionFailureCount: 1

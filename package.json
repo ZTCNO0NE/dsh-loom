@@ -1,0 +1,58 @@
+{
+  "name": "dsh-loom",
+  "version": "1.0.1",
+  "description": "Loom (织机) — second-validator plugin for DeepSeek Harness: a silent external coach that weaves your agent's tools, skills, config and even its model from usage history, with deterministic verification and cold-apply.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "node -e \"require('node:fs').rmSync('dist/meta-workspace', { recursive: true, force: true })\"",
+    "demo": "node scripts/demo-real-model.mjs",
+    "demo:isolation": "node scripts/demo-isolation.mjs",
+    "demo:b1": "node scripts/demo-b1-observed.mjs",
+    "fromzero:l1": "node scripts/fromzero-l1.mjs",
+    "fromzero:l2": "node scripts/fromzero-l2.mjs",
+    "fromzero:l3": "node scripts/fromzero-l3.mjs",
+    "fromzero:l4": "node scripts/fromzero-l4.mjs",
+    "fromzero:l5": "node scripts/fromzero-l5.mjs",
+    "fromzero:verify": "node scripts/fromzero-verify.mjs",
+    "fromzero:compare": "node scripts/fromzero-compare.mjs",
+    "fromzero:loop-demo": "node scripts/fromzero-loop-demo.mjs",
+    "fromzero:generic-real": "node scripts/fromzero-generic-real.mjs",
+    "fromzero:all": "node scripts/fromzero-all.mjs",
+    "host-demo": "node scripts/host-demo.mjs",
+    "config-update-demo": "node scripts/config-update-demo.mjs",
+    "repeat-update-demo": "node scripts/repeat-update-demo.mjs",
+    "refine-skill-demo": "node scripts/refine-skill-demo.mjs",
+    "model-swap-demo": "node scripts/model-swap-demo.mjs",
+    "supervisor-swap-demo": "node scripts/supervisor-swap-demo.mjs",
+    "runtime-request-demo": "node scripts/runtime-request-demo.mjs",
+    "scheduled-notify-demo": "node scripts/scheduled-notify-demo.mjs",
+    "actor-progress-qa-demo": "node scripts/actor-progress-qa-demo.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=0.1.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "file:../dsh-src/deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-tools": "file:../dsh-src/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "file:../dsh-src/deepseek-harness/vendor/schemastery",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.5.0",
+    "vitest": "^3.0.0"
+  }
+}

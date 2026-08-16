@@ -1,8 +1,8 @@
-# dsh-meta-validate（Loom · 织机）
+# dsh-loom（Loom · 织机）
 
 **让正在运行的 agent 自己变强：工具、技能、配置、甚至模型，都由一个更上层的改进模型自动设计和安装，独立的核验器把关，执行器冷替换——全程不需要你写代码。**
 
-dsh-meta-validate（对外品牌 **Loom · 织机**：把你的使用、纠正与失败"织"进 agent 的能力里）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的插件。你可以把它理解为**给你的 agent 配了一个"外部教练团队"**：
+[ZTCNO0NE/dsh-loom](https://github.com/ZTCNO0NE/dsh-loom)（对外品牌 **Loom · 织机**：把你的使用、纠正与失败"织"进 agent 的能力里）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的插件。你可以把它理解为**给你的 agent 配了一个"外部教练团队"**：
 
 - **监督员**：一直看着你的 agent 怎么干活（快不快、错不错、卡没卡），判断"该不该改进"；
 - **改进模型**：当需要改进时，它看全量信息，设计出具体修改方案（加工具、改技能、调配置、换模型）；
