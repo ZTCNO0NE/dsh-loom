@@ -1,123 +1,77 @@
 # CURRENT.md — 当前状态与交接
 
-更新：2026-08-16
+更新：2026-08-17 05:45（Asia/Shanghai）
 
 ## 一句话状态
 
-**v1 已冻结（2026-08-16，版本 1.0.0，品牌 Loom · 织机）**：核心自进化回路 + 监督员体系 + 预约式后台执行 + 进化通讯（通知/台账/偏好）全部落地；测试 **99/99**；从零成长、自主换模型、用户消息自动唤起、actor 答"优化进度"均已实证。v1.1 待办：refine-skill demo 干净重跑、偏好沉淀端到端 demo。详细状态见 `docs/project-status.md`。
+**dsh-loom v1.0.4 已发布**（npm latest + GitHub `ZTCNO0NE/dsh-loom`，tag v1.0.4，HEAD `c9504be`）；`npm test` **101/101**、`npm run check` 全绿（2026-08-17 实测）。v1 自进化闭环（从零成长 L1-L5、config/tool/skill、自主换模型、监督员、预约后台、偏好沉淀）全部实证。**当前主线：loop 层契约与放开**——行为差异实证已完成，正在向「builder 自主选候选 loop + 完整契约报告 + 真实安装」推进。
 
-## 已完成的
+## 当前进行中（loop 层放开，按序）
 
-- 项目结构：`src/{observer,meta,validate,gate}/` + `src/types.ts` + `src/index.ts`。
-- 核心类型：`MetaPatch`、`ValidationReport`、`AppliedMetaPatch`、`EvolutionSignal`、`SignalThresholds`、`RegressionCase`（`src/types.ts`）。
-- bundle 清单：`package.json`（`dsh.bundle` 声明）、`cordis.patch.yml`（`mode: observe`，阈值与回归目录可配）。
-- 设计文档：`docs/architecture.md`（支柱/分层放开/收敛纪律/路线图 M0-M4/风险清单）。
-- 开发手册：`docs/plugin-development.md`（官方流程整理 + 两张图）。
-- 背景材料：`references/background-prime-agent-learn.py`。
-- 参考系补全：validate 以 Tycho（ARC-AGI-3，arXiv:2607.28287）为主参考——actor/validate 分离 + 世界模型仿真预测与真实帧完全对齐；已同步 README、architecture、plugin-development、REFERENCES。
-- 前置 L0：pnpm 11.21（`/chenzute/dsh-src/tools/bin/pnpm`）、deepseek-harness `47f9438` 克隆并构建、本项目类型链到源码构建产物、`npm run check` 通过、dsh web（mock LLM）验证启动。
-- 前置 L1：量化验收标准草案已落地 `docs/research/01-eval-and-acceptance.md`（指标/基线/阈值，待 L5 确认）。
-- 前置 L2：参考源全部重新拉取并编目 `docs/research/00-source-map.md`（tycho `f68912a`、prime-agent `97b994c`、arc-agi3 `4743e7d`、onebot `ef160ed`、plugin-registry `6dab4de`）。
-- 基准任务集落本地：Terminal-Bench 2.1 `7131e43`（91 任务）、DeepSWE `435ee89`（~116 任务）、CyberGym 框架 `7656b71`（数据 ~240GB 按需）、verifiers `be6faf6`（自迭代 bench 参考形态），全部在 `/chenzute/dsh-src/eval/`。
+1. **行为差异实证（已完成，bh3）**：候选 fork `@deepseek-ai/dsh-agent-loop-candidate`（并行 10→1）与原版 C1-C4/C7/C8 全绿；27b 不并发发工具 → 模型层差异不可观测；证据 = 代码 diff + 契约全绿（run-log「loop-contract-bh3」）。
+2. **候选源码收编（待用户定）**：fork 在 `/chenzute/dsh-src/deepseek-harness/packages/core/dsh-agent-loop-candidate`，未进本项目 git；选项 A vendored 进本项目（推荐）/ B 独立包 / C 留 checkout 只记录路径。
+3. **完整契约报告三件套（设计已定，未实现）**：`contract-runner --report <path>` 落盘 + C6 回归 + 真实安装 before/after 快照；verifier 只认三件套，不做 LLM 主观判断（定义见 `docs/loop-layer-contracts.md`）。
+4. **builder 自主选择（设计缺口，用户已确认是问题）**：候选目录/注册表 + builder 依据需求/遥测选候选 + 产出 loop patch + gate 真实安装；否则"开发者手工造候选"只是验证闸门，不算自进化证据。
+5. **实现顺序**：① contract-runner `--report` → ② meta.auto 候选 loop 网关 + `allowLoopCandidates` 开关 → ③ 真跑完整三件套（用户已允许烧钱）→ ④ 候选目录 + builder 选择 → ⑤ 端到端案例（用户需求 → builder 选 loop → 真实安装 → actor 重跑观测差异）。
 
-## 下一步（M1，按文件）
+## 环境（2026-08-17 05:40 实测）
 
-> 实测注记（2026-08-16）：Terminal-Bench 2.1 本地切片首跑（27b + qwen-coder）→ 1/2 通过（fix-git PASS、overfull 超时），管线已通；本机容器 GitHub/Docker Hub 不通，用了 npmmirror/dockerproxy/pip 补丁，详见 `/chenzute/dsh-src/eval/README.md`。
+- Node v22.20.0 / npm 10.9.3 / pnpm 11.21.0（`/chenzute/dsh-src/tools/bin/pnpm`）；`dsh` 不在 PATH。
+- dsh checkout `/chenzute/dsh-src/deepseek-harness` 存在；插件类型链 devDependencies `file:` 正常。
+- `dist/index.js` 已构建（无 src 未编译改动）；`npm run check` ✓；`npm test` 101/101 ✓。
+- 候选 fork 已构建 `lib/index.js`，`DEFAULT_MAX_PARALLEL_TOOL_CALLS = 1` ✓。
+- env 文件在位（600）：`.env-27b`（本地 actor）、`.env-deepseek`（官方 V4 Flash builder/评审门）；禁止打印/提交。
+- 契约跑法模板：
 
-## 对外展示（2026-08-16）
+```bash
+set -a; . /chenzute/dsh-src/eval/.env-27b; set +a
+export DSH_CMD='/chenzute/dsh-src/tools/bin/pnpm dsh' DSH_CWD=/chenzute/dsh-src/deepseek-harness
+export DSH_META_VALIDATE_ROOT=/chenzute/dsh-src/eval/meta-workspace-<name>
+node scripts/contract-runner.mjs check /chenzute/dsh-src/eval/overlay-contract-candidate-fork.yml '<task>' loop-contract/golden-current.json
+```
 
-- README v2 已定稿（观察者立意版）：借势（dsh 一周 4 万星 + 700+ 插件生态）→ 反差（一切皆插件，但插件不会自己装自己）→ 证据墙 → 核心卖点 =「模型无法自己进化自己，进化需要一个外部观察者」；安全降为底线，builder/verifier 双协作让 actor 长出原本没有的能力（一切皆可被安全修改）。
-- README v3（痛点设计版，2026-08-16）：开头通俗比喻（揪头发/运动员兼裁判/运行中改自己）→ 三层自指困境（看不见/验证不了/替换不了，含 Gödel 第二不完备定理引用）→ 行业证据表（ARC-AGI-3 Tycho 79.07→100.00、SAGE、CoEvoSkills、RQGM、Gödel）→ 观察者设计。
-- README v3 已加入「区别段」（2026-08-16，用户定稿）：不点名竞品；表述 = 多数实现困在同一层（自评/代码围栏），我们把判断权整体上移到被修改者之上，从更上层接管判断，跳脱自指困境。
-- README v4 顺序重构（2026-08-16）：开头先点名下我们做了什么（第二个验证器：observe→propose→validate→cold-apply→rollback）→ 问题（通俗自指困境）→ 痛点三层（专业）→ 前沿证据表 → 评判（多数实现困在同一层）→ 我们的做法（判断权上移）；证据墙已并入「硬核数据证据链」（汇总墙 + 明细表）。
-- 生态竞品警示（2026-08-16）：`ZK-Andy/dsh-continual-evolve` 已在做 harness 状态自进化（版本化/审计/回滚/benchmark 门禁，238 测试）。README 钩子已从「没人做这件事」改为「绝大多数在做记忆/UI/小游戏，做成可验证闭环的几乎没有」；差异化靠：builder/verifier 角色分离 + 确定性帧对齐 + TCB + 从零成长硬证据。
-- 待办：4 张手绘插图（fig1-architecture / fig2-loop / fig3-cold / fig4-growth）尚未生成，README 暂未嵌图；SHOWCASE.md 待与 README 合并或删除。
-- 插图方向更新（2026-08-16，用户否决卡通/三格漫画/sketch-notes 路线）：改为「Qwen 硬核背景 + PIL/SVG 精确标注 + 真实数据图」；已生成 3 张 1536×1024 无文字背景试样：`/data2/chenzute/t2i/output/obs_hero_blueprint.png`（暗蓝堡垒蓝图）、`obs_hero_console.png`（等距机房控制台）、`obs_contrast_split.png`（左右对比：自指困境 vs 观察者协作）；等待用户选风格后做 PIL 覆盖层。
-- 插图 v2 细化（2026-08-16）：按「故事→构图分区→元素细节→光线材质→留白」重写分镜稿并重生成：`obs_hero_blueprint_v2.png`、`obs_hero_console_v2.png`、`obs_contrast_split_v2.png`（用户反馈两张 hero 可用，蓝图主用/控制台备用）。
-- 其他配图已交付（2026-08-16）：`docs/figures/evidence-compare.png`（严格同任务 off 0/3→on 3/3，真实 run-records）、`evidence-growth.png`（L1-L5 成长 + builder 轮次）、`evidence-cost.png`（builder/gate token 成本）、`fig-loop.svg`（五步回路工程图：观察者/TCB/actor 三区 + 回合边界 + 回滚分支）。待办：VLM 定位元素后给两张 hero 与对比图做 PIL 标注层。
-- README 大改版后配图同步（2026-08-16）：证据图改 90/90、术语改「改进模型/评审门」；`fig-loop.svg` 重画为新五步「观察→判断→设计→核验→安装」（外部教练团队：观察器/监督员/改进模型 + TCB：核验器/执行器 + 你的 agent）；PIL 标注成品：`fig-architecture.png`（蓝图 hero）、`fig-architecture-console.png`（控制台 hero 备用）、`fig-contrast.png`（左右对比）。标注位置按分镜稿预设坐标，未经 VLM 校验；用户人工查看后可再调。
-- 新增两张场景图（2026-08-16）：`fig-model-swap.svg`（案例 2 自主换模型：qwen3.6-27b ✗ → v4-flash 安装 1 → deepseek-chat 安装 2 → 正常回复，含可审计留档）、`fig-triggers.svg`（S1-S8 触发场景 → 监督员/改进模型/核验器/执行器管道 + 免疫记忆循环）；`fig-loop.svg` 可进化对象补充「/ 模型」。
-- 发布冲刺（2026-08-16）：README 已落 6 图（hero/换模型/触发/对比/回路/证据×2）+ OG 社交卡 `docs/figures/og.png` + 应急封面 `docs/figures/cover-article.png`；掘金草稿已建（7674103602086395947，分类人工智能，标签 Agent，仅 1 标签为平台限制）；知乎专用版已生成（SVG 全转 PNG：fig-loop/fig-model-swap/fig-triggers.png），草稿创建中；Qwen 专属封面 `cover_coach_growth` 仍在后台生成，完成后可替换草稿封面。
-- 草稿已交付（2026-08-16）：掘金草稿 https://juejin.cn/editor/drafts/7674103602086395947 ；知乎草稿 https://zhuanlan.zhihu.com/p/2072409637643612656 （SVG→PNG 后成功，SVG 直传知乎会超时）。文章文件：`docs/publish/juejin-20260816-dsh-meta-validate.md` 与 `zhihu-20260816-dsh-meta-validate.md`（PNG 版）。Qwen 专属封面首次生成 VAE OOM，已用 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` 重试（后台运行中），成功后再换两草稿封面。
-- 知乎已发布（2026-08-16）：https://zhuanlan.zhihu.com/p/2072409637643612656 ；掘金草稿已同步最新（99/99、Loom · 织机、三步上手、Qwen 封面 cover-coach-final.png），停在草稿态 https://juejin.cn/editor/drafts/7674103602086395947 。`npm test` 实测 99/99。遗留：文章结尾仓库地址仍是占位「地址稍后补充」，知乎线上已可见，需要尽快替换。
-- 仓库改名（2026-08-16）：对外仓库 = `ZTCNO0NE/dsh-loom`（https://github.com/ZTCNO0NE/dsh-loom）。知乎已原地更新（dsh-meta-validate→dsh-loom + 链接，PATCH+原地发布 200），掘金草稿已同步，README 标题/首段已改。遗留：包内 package.json name 仍是 dsh-meta-validate，与仓库名不一致，后续可决定是否改包名。
-- 安装命令定稿（2026-08-16）：npm 已发布 `dsh-loom@1.0.2`；README/文章安装方式 = `dsh plugin --profile headless add dsh-loom@1.0.2` 或 `dsh plugin --profile headless add "github:ZTCNO0NE/dsh-loom#main"`。知乎正文已原地更新（替换 2 处，PATCH+发布 200），掘金草稿已同步。
-- 第二篇知乎文章（运行逻辑/设计解剖）粗稿已写（2026-08-16）：`docs/articles/20260816-zhihu-runtime-logic-draft.md`——九个真实痛点→设计回应（自评即自欺/改裁判/热替换/自觉失效/上下文丢状态/反复踩坑/空转/资源失控/技能靠人写），每节给真实案例 + 为什么硬约束/独立/职责分离；新插图 `docs/figures/fig-pain-design.svg/png`（痛点→设计对照）；Qwen 主视觉 `cover_runtime_three` 生成中，完成后合成 `cover-runtime.png` 作为文章头图。
-- Wan 2.2 模型下载完成（2026-08-16）：T2V A14B GGUF Q4（HighNoise+LowNoise+VAE，19G）在 `/chenzute/models/wan/t2v`；I2V TI2V-5B Diffusers（32G）在 `/chenzute/models/wan/i2v`。待搭建推理脚本（diffusers/ComfyUI）与渲染测试。
-- 第二篇文章审阅定稿（2026-08-16）：按「绝对可插件/可更换/可进化」审阅修 4 个模糊点（外部 vs 自己、热替换 vs 自己换内核、绝对可换 vs v1 锁、引擎焊死 vs 一切皆插件）+ 加「总纲」段 + 压缩生态四层/案例细节；新增「八、路线图：先做自进化基准，而不是 ARC-AGI」（loom-bench 阶梯 + 对照指标 + 产出 + 3 分钟体验包 + ARC-AGI v2），`fig-roadmap.svg/png`；`fig-mode-compare.png` 最终版 = 内核固定（无治理回路）vs 机器人自己换内核（治理回路核验放行）。注意：文章推荐 `npm run fromzero:all` 为真实命令；`npm run try` 尚未实现。
-- 第二篇知乎草稿已建（2026-08-16）：https://zhuanlan.zhihu.com/p/2072464621676581950 。知乎专用版 `docs/articles/zhihu-20260816-runtime-logic.md`（两张表格转列表、正文头图移除由封面替代、代码注释去空格规避预检 H1 误报）；11 图 + cover-runtime 封面上传完成，预检通过，停在草稿态。`npm run try` 已升级六阶段实时输出 + HTML 报告（growth/loom-try/report.html），语法校验通过、端到端待跑。
-- 主封面重做（2026-08-16）：Qwen 版废弃，自主设计 `docs/figures/cover-plugins.svg/png`——「一切皆插件」工程蓝图风：中央 Loom 核心 + 工具/技能/配置/模型四可插拔模块 + 底部旧内核→核验闸门→新内核 + 治理回路轨道；文章头图引用与知乎草稿封面均已替换为 cover-plugins.png（草稿 id 不变 2072464621676581950）。
-- 封面定稿 + 小示意图（2026-08-16）：主封面 = cover-plugins.png（SVG 工程版，治理回路文字已移到顶部居中）；SDXL 英文标签版 `sdxl_plugins_cover_v2_en.png` 缩小为 900px 的 `docs/figures/sdxl-plugins-schematic.png`，插入第二节「总纲」段后作插拔式架构示意；知乎草稿已同步更新。
+- golden 快照：`loop-contract/golden-current.json`（71 事件）；候选 overlays 在 `/chenzute/dsh-src/eval/overlay-contract-*.yml`。
+- run 快照：`/chenzute/dsh-src/eval/run-records/`（含 2026-08-17-loop-contract-bh3-*.json）。
 
-前置：**L5 路线修订已完成**——`docs/architecture.md` 已并入角色三分/三层触发/固定式完整核验/回炉硬约束/帧与文件优先；`docs/m1-plan.md` 含 M1 任务拆分与 I6/I9/I15 默认 schema（**待用户确认**）。**后台运行**：原生 dsh + 27b 自建冒烟集基线（`/chenzute/dsh-src/eval/baseline/`，完成后记 run-log）。确认 3 个默认值后进入 M1 编码。
+## 已完成的里程碑（v1 实证；详见 docs/project-status.md + run-log）
 
-1. `src/observer/index.ts`
-   - `onEvent`：订阅 actor 事件流（`ctx.on('tool/result'`、session 事件），把失败/用户纠正/回归失败/可复用战术归类为 `EvolutionSignal`。
-   - `collect`：按阈值过滤（已有骨架逻辑）。
-2. `src/meta/propose.ts`
-   - `propose`：独立模型调用（与 actor 不同角色 prompt，不共享会话状态）。
-   - 输入：信号 + 当前组合配置快照（`--dump-config` 产物）。
-   - 输出：候选 `MetaPatch`（config 层优先；`targetKind` 仅 `config | tool | skill`）**+ 预期轨迹**（validator 的对齐基准）。
-3. `src/index.ts`
-   - 事件订阅接线：actor 事件 -> `observer.onEvent` -> 阈值收集 -> `proposer.propose` -> `gate.enqueue`（propose 模式）。
-   - 用 `@deepseek-ai/dsh-tools` 的 `defineTool` 注册工具：`meta.propose` / `meta.validate` / `meta.apply`。
-   - Config 接线：`cordis.patch.yml` 的 `mode`、`thresholds`、`regressionDir`。
+- 发布：dsh-loom@1.0.4（npm latest），tags v1.0.2/v1.0.3/v1.0.4；便携 CLI `dsh-loom try` 已发布（真机留档待做）。
+- 从零成长：off 0/3 → L1-L5 全过；严格同任务集 off 0/3 → on 3/3。
+- 宿主闭环：host-demo pass=true；meta_auto/meta_iterate 真实链路（评审门 → builder → 隔离探测 → verifier → gate）。
+- 演示留档：model-swap、supervisor-swap、scheduled-notify、preferences、refine-skill、actor-progress-qa。
+- loop 契约 v0：contract-runner（record/check/rollback/--regression）+ golden + C1-C8；良改/坏改/整包替换差分已验。
 
-## 决策记录
+## 决策记录（保持简短；细节见 docs/research/08 等）
 
-- 开发环境：Windows 本机写代码/文档/类型检查；Linux 服务器跑 dsh 真机验证、隔离冒烟、回归集与发布前验收。若在 Windows 快速体验 dsh，用 WSL2，不用原生 Windows（bash 沙箱兼容问题）。
-- 三档模式：observe -> propose -> apply；当前 `mode: observe`，只采集不动作。
-- 验证器隔离：优先用 dsh 的 plugin-group + `isolate` 机制（`docs/plugin-development.md` 3.6），或临时 profile 跑冒烟。
-- validate 判定方式：学 Tycho 的确定性对齐（仿真预测 vs 真实帧，逐格/哈希），不做 LLM 主观打分；prime-agent 只参考冷替换与回滚（见 `docs/architecture.md` 2.3）。
-- 评测先行：先落地量化验收标准（`docs/research/01-eval-and-acceptance.md`）再做实现；所有参考源从公开源重新拉取，不用本机旧副本。
-- 回滚模板：参考 prime-agent refine 的 before/after 快照 + rollback（见背景材料 learn.py 数据模型章节）。
+- 角色：builder（迭代者）+ verifier（固定式核验）完全分离；verifier 不通过强制回炉，无 force-apply。
+- 文件优先：上下文不可信，状态落盘 `$DSH_HOME/meta-validate/`。
+- 模型分工：actor = 本地 27b；builder/评审门 = 官方 V4 Flash。
+- loop 放开门槛：完整契约报告三件套（C1-C8 + C6 回归 + 实装 before/after）；builder 必须自主选候选。
+- v1 锁定：`agent`/`agent-loop`/`meta-validate` 行禁止修改。
+
+## 待用户决策/待办
+
+- 候选 loop 收编方式（A/B/C，推荐 A）。
+- 是否开工实现「完整契约报告 + 候选 loop 网关」：用户已口头同意烧钱真跑，说"做"即开工。
+- awesome-dsh-plugin PR：fork 分支 `ZTCNO0NE:add-dsh-loom` 已推；仓库满 1 天后（北京时间 08-17 20:35 后）`gh pr create --repo awesome-dsh-plugin/awesome-dsh-plugin --base main --head ZTCNO0NE:add-dsh-loom --title "Add ZTCNO0NE/dsh-loom to the plugin list"`。
+- README 竞品定位段（prime-agent 合并 + 偏好沉淀证据）未推送，等用户审阅。
+- 曝光待办：GitHub Discussions 自荐 → 其他 awesome 列表 PR → Discord/公众号/掘金/知乎。
+- 官方 DeepSeek key 曾短暂泄漏进 git 历史（已 force push），建议用户撤销换新（未确认）。
 
 ## 风险与注意
 
-- **运行留档纪律**：每次基准/评测运行必须追加 `docs/research/run-log.md`（模板见该文件），并在 `/chenzute/dsh-src/eval/run-records/` 存结果快照；未留档不算完成。
-- M1 完成（2026-08-16）：`npm run check` 全绿、`npm test` 11/11；dsh headless + overlay 加载插件并落盘 workspace。细节见 `docs/m1-plan.md` §4。
-- 触发频率设计（2026-08-16）：**两级频率控制**——确定性前置（阈值，免费）+ 独立 LLM 评审门（prime-agent review gate 风格，判 shouldRefine/focus）→ 才启动 builder；评审门只能否决启动、不能批准 patch（verifier 唯一验收）；频率用阈值 × 值得率 × 冷却上限三个旋钮收敛，不拍死。详见 08 §15。
-- 模型分工（2026-08-16 用户确认，暂定）：**actor = 本地 27b（qwen/qwen3.6-27b）**，**builder + 评审门 = DeepSeek 官方 V4 Flash（deepseek-v4-flash）**；官方适配器 `src/llm/official.ts`（OpenAI 兼容 SSE + JSON 模式，读 `DEEPSEEK_BASE_URL/DEEPSEEK_API_KEY`）；`demo:b1` 已切换为 V4 Flash builder 并验证通过。官方 key 存 `.env-deepseek`（600）。
-- 主实验方向（2026-08-16 用户确认）：**从零成长实验**——actor 从 bare loop 开始，builder 按用户意图逐步补齐工具/技能/提示词，直到完成任务；新任务超出再触发 builder 继续完善。设计见 `docs/research/10-builder-capability-experiment.md` §9。**M4 最小集由此逼出**：insert 新行语义 + skill/tool patch + 模块写入 + 隔离加载校验。
-- 从零实验进度（2026-08-16）：**步骤 1 完成**——bare-loop off 基线 0/3（L1/L2/L3 全失败，run-log 已记），从零前提成立。下一步：**M4 最小集**（insert 新行 + skill/tool patch + 模块写入 + 隔离加载校验）。
-- **M4 最小集完成**（2026-08-16）：insert 新行（gate insert/回滚/冲突）、builder 模块草稿写入 staging、verifier 隔离加载即校验（node --check）、isolation insert overlay；测试 **56/56** 全绿。遗留：.ts 模块校验、skill 白名单细化、从零端到端 L1-L5。详见 `docs/m4-plan.md`。
-- **从零成长 L1 闭环成功**（2026-08-16）：bare actor（off 0/3）→ 硬触发/评审门 → V4 Flash builder 产出 fs-write 工具 insert patch → 隔离 probe 真实执行 → verifier approved → 安装 → 升级后 actor 重试 L1 成功。run-log「from-zero-L1」已记。下一步：L2（加 bash 工具）。
-- **从零成长 L2 闭环成功**（2026-08-16）：builder 一次产出 ls-dir 工具，verifier approved，升级后 actor L2 成功且 **L1 回归通过**。成长轨迹：off 0/3 → L1 ✓ → L2 ✓。下一步 L3（编辑+验证，可能引入 skill 层）。
-- **从零成长 L3 闭环成功**（2026-08-16）：两级迭代（bash-run、file-read），升级后 actor 完整 L3 任务成功，**L1/L2 回归全绿**。成长轨迹：off 0/3 → L1 ✓ → L2 ✓ → L3 ✓。下一步 L4：泛化/行为级任务（skill 层候选）。
-- **从零成长 L4 闭环成功**（2026-08-16）：builder 产出 edit-verify 技能（SKILL.md），隔离 probe 真实加载 → approved → 安装；**无验证提示的任务中 actor 自动 wc -l 并报告行数**（技能层行为改变生效），L1/L3 回归通过。成长轨迹：off 0/3 → L1 ✓ → L2 ✓ → L3 ✓ → L4 ✓。下一步 L5 泛化。
-- **从零成长 L5 泛化闭环成功**（2026-08-16）：off 尝试只做行数验证（缺 JSON 校验）→ builder 新增 json-verify 技能 → probe 真实加载 → approved → 重试 "valid ✓"。成长轨迹：**off 0/3 → L1-L5 全部 ✓（含泛化）**，从零成长实验四关卡完成。
-- **skill patch 已接入插件 gate**（2026-08-16）：installSkill/removeSkill/skillExists + skillRoot 配置 + 回滚/冲突留痕；测试 **59/59** 全绿。详见 m4-plan M4.6。
-- **从零成长可重复验收完成**（2026-08-16）：`npm run fromzero:verify` 全绿（L1-L5，L4 第 2 次尝试）；对照总结 `docs/research/from-zero-summary.md`（off 0/3 vs on 5/5，builder 6 轮，回归不降）。
-- **token 成本记账接入**（2026-08-16）：官方适配器捕获 usage（流内去重）→ Proposer/ReviewGate onUsage → `cost-log.jsonl`；L1 实测 builder ~974 in/4681 out、gate ~182/118。测试仍 59/59。
-- **严格同任务集对照完成**（2026-08-16）：`npm run fromzero:compare`——L1/L2/L3 同任务集 **off 0/3 → on 3/3，Δsuccess +3**（记录 `eval/run-records/fromzero-strict-comparison.json`）。
-- **M4 全部闭合**（2026-08-16）：skill 隔离验证已接入 verifier 通用路径（`skillIsolation` + `skillStagingRoot` + catalog probe，未配置/探测失败即拒）；测试 **62/62** 全绿。
-- **通用循环驱动从零成长验证**（2026-08-16）：`fromzero:loop-demo`（stub）证明 IterationLoop+gate ops 可直接完成工具/技能 insert（各 1 次迭代 applied）；测试 **64/64** 全绿。
-- **真实模型完整通用路径闭环**（2026-08-16）：`fromzero:generic-real`——AutoPilot（硬触发→评审门→builder→collectFrames 隔离探测→verifier→gate insert）真实 V4 Flash 跑 L3a，**2 轮迭代（真实回炉）后 approved+applied**，重试通过；测试 **65/65**。
-- **collectFrames 接入宿主触发路径**（2026-08-16）：`meta.iterate` / `meta.auto` / TurnBoundaryHook 共用的 loop 现在都会在 builder 后跑真实隔离探测再验证；测试 **69/69** 全绿。
-- **一键验收链**（2026-08-16）：`npm run fromzero:all`（默认 verify+compare；`-- --fresh` 全量重跑）实跑全绿——L1-L5 全过 + 严格 Δsuccess +3/3，记录 `eval/run-records/fromzero-all.json`。
-- **宿主路径首跑**（2026-08-16）：dsh 内 27b 调 `meta.auto`/`meta.iterate` 真实触发闭环（2 次×3 轮，均卡 isolation probe exit=1）；已修工具返回 undefined 与 meta/actor 环境拆分；**待查：父 dsh 环境内子进程 ERR_MODULE_NOT_FOUND（shell 复现成功）**。
-- **宿主路径闭环成功**（2026-08-16）：dsh 内 27b 调 `meta.auto` → 评审门/builder（V4 Flash）→ collectFrames 隔离探测 → verifier **approved** → gate **insert 应用（applied=true）**。修复双隔离/嵌套目录/schema 约束/env 清理；成本记账接入 index。测试 69/69。
-- **宿主演示可重复验收**（2026-08-16）：`npm run host-demo` 实跑 **pass=true**（产物证据判据），记录 `eval/run-records/host-demo.json`。
-- **项目总览文档**（2026-08-16）：`docs/project-status.md` 归档设计/证据/命令/遗留，README 已链接。
-- 角色口径（2026-08-16 用户确认）：validator 子系统 = **builder（迭代者，看用户需求）+ verifier（核验者，只看预期 vs 真实帧）**；actor 只执行/感受/产出真实帧，不自行迭代、不改自己 loop。详见 `docs/research/08-actor-validator-protocol.md` §8。
-- 迭代闭环（2026-08-16 用户确认）：builder 与 verifier **完全分离**；verifier 第一版**固定式 + 完整验证**（全量指标/全量回归，不抽样）；builder 自评（置信度/完整度/自跑确定性自检）达标才提交；**verifier 不通过强制回炉补完整性**，无 force-apply；带收敛预算（maxIterations，超限升级人工）。详见 08 §10。
-- 文件优先（2026-08-16 用户确认）：**上下文不可完全信任**（compaction 丢细节、注意力稀疏、记忆不可靠）；actor/builder/verifier/gate 内部关键状态一律落盘到 `$DSH_HOME/meta-validate/`（trajectory/builder world-model/signals/patches/history），恢复只读文件不依赖 LLM 摘要；验证器重放需 `persistenceCompression: 'none'`。详见 08 §11。
-- v1 信息闭环（2026-08-16 核对）：**08 §12 信息目录 I1-I15 已定**，补齐 7 个缺口（requirements/triggers/run 产物/smoke/哈希并入 report 等）；每个消费者输入都有生产者。L5 剩余确认：I6 世界模型 v1 最小 schema、I9 预期轨迹格式终稿、I15 冒烟范围。
-- builder/actor 边界（2026-08-16 确认）：builder 只看 actor 可观察行为（帧），不看完整 runtime；不直接改 actor；想实测走 `probe-request` → verifier 隔离执行（与正式验证同路径），不调起生产 actor。详见 08 §13。
-- 两级验证环（2026-08-16 确认）：**隔离验证是准入门槛不是最终裁判**；最终裁判 = 上线后真实 actor 运行 + observer 观察（expectedOutcome/回归/新失败），不达标回滚并带真实帧证据多轮回炉。详见 08 §14。
-- 验证集落地（2026-08-16）：`docs/research/09-validation-sets.md`——合成集 A1-A4（功能验收，离线确定性）+ 任务对照集 B1-B4（效果验收）+ 基线锚点；**已跑基线**：TB 2.1 切片 1/2、自建冒烟集 5/5（run-log 两条）。
-- dsh v0.1 是 developer preview，接口会变；注入点收敛在 `src/index.ts`。
-- patch 按行覆盖且 **config 整行替换不深合并**：写 bundle 的 patch 要重述整行所有键。
-- GitHub 安装 dsh 插件需要 `prepare` 脚本 + pnpm `allowBuilds`；我们分发优先 npm/tarball/本地 link。
-- 验证成本：跑一次回归 = 一轮完整任务 token；用最小回归集 + 冒烟任务控制。
-- 信任根基泄漏：任何让 actor 可写验证链路的设计都是泄漏。
+- 烧钱敏感：优先本地 27b / 零成本验证；官方调用（builder/评审门/基准）跑前确认。
+- dsh v0.1 developer preview，接口会变；注入点收敛 `src/index.ts`。
+- 候选 fork 在 dsh checkout 内，上游更新会冲突 → 尽快定收编。
+- 每次运行必须留档（run-log + run-records）；未留档不算完成。
 
 ## 里程碑
 
-| 里程碑 | 内容 | 状态 |
-|---|---|---|
-| M0 | 骨架：类型、接口、目录、配置层、文档 | 完成 |
-| M1 | observer 事件采集 + proposer 独立模型 + 工具注册 | 下一步 |
-| M2 | validator（Tycho 对齐式）：预期轨迹 + 回归集 + 隔离执行；gate 人工确认应用 + 回滚 | 待 M1 |
-| M3 | gate 自动应用（回合边界执行），全程留痕 | 待 M2 |
-| M4 | 放开 tool/skill 层；评估 loop 层契约测试 | 待 M3 |
+| 里程碑 | 状态 |
+| --- | --- |
+| M0-M4（config/tool/skill 进化 + gate + 回滚） | 完成 |
+| v1.0.0-v1.0.4（监督员/后台/通知/偏好/便携 CLI） | 完成 |
+| loop 契约 runner + golden + C1-C8 差分 | 完成 |
+| 完整契约报告三件套 + 候选 loop 网关 | 未开始 |
+| builder 自主选择候选 loop + 端到端案例 | 未开始 |
+| loom-bench / Web 成长面板 / `dsh-loom try` 真机留档 | 后续 |

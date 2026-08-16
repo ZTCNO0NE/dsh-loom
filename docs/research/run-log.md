@@ -259,3 +259,15 @@
 - 结果：**pass=true**（run-records/preferences-demo.json）：fired、ledgerCount=2、preferences 2 条（output-format ×2 合并）、preferenceVisible=true。
 - 修复：① verifier coverage 允许 nameAliases（config/persona 无命名事件，探针目标即覆盖证据）；② 最终 meta_growth headless 缺 LOCAL overlay（actor 模型路由错）；③ harness 脚本补 onApplied（ledger/report 落盘）。
 - 测试：101/101。
+
+### 2026-08-17 loop-contract-bh3（行为差异实证：并行度 10→1 候选 fork）
+
+- 基准/任务集：loop 层契约探针（bh3，C1-C4/C7/C8）
+- 任务切片：单回合「同一条回复消息里发出两个 bash 工具调用（两个 tool_calls 一起：echo A / echo B，不要分两步）」
+- Agent/模型：dsh headless + `qwen/qwen3.6-27b`（本地 `http://124.221.77.140:4000/v1`）
+- 配置：`overlay-contract.yml`（原版 loop）vs `overlay-contract-candidate-fork.yml`（候选 = `@deepseek-ai/dsh-agent-loop-candidate` 本地 fork，`DEFAULT_MAX_PARALLEL_TOOL_CALLS` 10→1）
+- 结果：**两者 C1-C4/C7/C8 全绿**（原版 114 事件、候选 131 事件；事件数差异为模型非确定性）；核心序列完全一致；**maxParallelAdjacency 均为 1**——27b 在明确要求下仍未在同一条 assistant 消息里并发发出两个 tool/call
+- 指标：纯本地 27b，无官方 token 成本
+- 产物路径：`/tmp/bh3-original.txt`、`/tmp/bh3-candidate-fork.txt`（契约摘要）；`eval/meta-workspace-bh3-{original,candidate-fork}/workspace/loom-contract/trajectory/frames.jsonl`（完整帧）；快照 `run-records/2026-08-17-loop-contract-bh3-{original,candidate-fork}.json`
+- 本地补丁/偏差：候选 loop 是本地 fork（源码在 `/chenzute/dsh-src/deepseek-harness/packages/core/dsh-agent-loop-candidate`，**尚未收编进本项目仓库**）
+- 结论与下一步：**行为确实变了（代码层 10→1），契约未坏（C1-C8 全绿）**；但模型层行为差异当前不可观测（27b 不并发发工具），实证证据落为「代码 diff + 契约全绿」，不再为此烧模型轮次。下一步：确定候选源码收编方式，再实现「完整契约报告」（C1-C8 + C6 回归 + 真实安装前后 before/after）并作为 agent-loop 放开准入门槛。

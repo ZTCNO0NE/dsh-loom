@@ -48,3 +48,20 @@
   3. 候选差分已验证：良改（agent-loop 显式配置）过、整包替换路径（name 指向官方构建入口）过、坏改（禁用 agent-loop）干净拦截；
   4. C6 回归联动已点亮（check --regression 调 fromzero:verify）。
 - 候选 overlay 样例（本地）：`eval/overlay-contract-candidate-{benign,broken,reimpl}.yml`。
+
+### 2026-08-17 行为差异实证（bh3）
+
+- 候选：`@deepseek-ai/dsh-agent-loop-candidate`（本地 fork，唯一差异 `DEFAULT_MAX_PARALLEL_TOOL_CALLS` 10→1）；
+- 结果：原版与候选 **C1-C4/C7/C8 全绿**（原版 114 事件、候选 131 事件），核心事件序列完全一致；
+- 局限：27b 在明确要求"一条回复里发两个 tool_calls"时仍拆成两步（maxParallelAdjacency 两轮均为 1），**模型层并行差异不可观测**；实证证据 = 代码 diff（10→1）+ 契约全绿，不强求模型层可观测对比；
+- 含义：这正好说明"行为变了、契约没坏"的正确验收方式——契约管**语义不变式**，行为差异管**可观测效果**；两者是不同维度的证据，不能互相替代。
+
+### 完整契约报告（agent-loop 放开准入件）
+
+一个候选 loop 的"完整契约报告" = 三件套：
+
+1. **契约报告**：contract-runner 对候选 overlay 跑探针任务，C1-C8 全绿的机器可校验结果（事件协议/回合生命周期/持久化/工具配对/监督员帧/模型路由）；
+2. **回归报告**：C6 联动（fromzero:verify 等现有验收集）在候选 loop 上不降；
+3. **实装记录**：候选真正走一遍 gate 冷替换，记录 before/after 快照 + 冒烟 + 回滚演练，证明"装得上、坏了能还原"。
+
+意义：契约报告把「环境语义没变」变成机器证据，回归把「能力没降」变成可复现证据，实装记录把「真的能换上去」变成可审计证据。verifier 只认这份三件套 + 报告路径，不做 LLM 主观判断；任何一项缺失 = 候选不可准入。
