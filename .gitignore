@@ -8,6 +8,7 @@ node_modules/
 meta-workspace/
 eval/
 run-records/
+scripts/
 
 # local editor/OS noise
 .DS_Store

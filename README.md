@@ -281,7 +281,7 @@ config:
 
 > 改进模型 / 监督员默认走 DeepSeek V4 Flash（`DEEPSEEK_API_KEY`）；你的 agent 可以接本地模型（示例 qwen3.6-27b）。换模型类案例需要目标模型在 agent 的路由上可用。
 
-> 详细手册与常见问题见 [docs/USAGE.md](docs/USAGE.md)；想看它怎么工作，跑 `npm run fromzero:all`、`npm run supervisor-swap-demo`、`npm run scheduled-notify-demo`（都是真实模型跑通并留档）。
+> 详细手册与常见问题见 [docs/USAGE.md](docs/USAGE.md)；3 分钟亲历自进化跑 `npm run try`（失败 → 看着它长 → 重试成功 → 成长报告）；更多案例：`npm run fromzero:all`、`npm run supervisor-swap-demo`、`npm run scheduled-notify-demo`（都是真实模型跑通并留档）。
 
 ## 设计边界（诚实声明）
 
