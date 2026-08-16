@@ -8,7 +8,8 @@ node_modules/
 meta-workspace/
 eval/
 run-records/
-scripts/
+scripts/*
+!scripts/contract-runner.mjs
 
 # local editor/OS noise
 .DS_Store

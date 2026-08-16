@@ -43,7 +43,8 @@
 
 - 现状：`agent-loop` 行在 deny-list（v1 锁定）；无契约测试实现；
 - 下一步：
-  1. 实现 `scripts/contract-runner.mjs` v0：事件序列校验器（C1/C2/C4）+ 黄金快照录制；
-  2. 在现有 loop 上录制黄金快照（一次本地运行，无模型成本）；
-  3. 用黄金快照跑现有 loop 自检（应全绿）；
-  4. 之后再做候选 loop 差分与回归联动。
+  1. `scripts/contract-runner.mjs` v0 已落地（record/check/rollback/--regression）；
+  2. 黄金快照：`loop-contract/golden-current.json`（71 事件，C1-C4/C7/C8 自检通过后录制）；
+  3. 候选差分已验证：良改（agent-loop 显式配置）过、整包替换路径（name 指向官方构建入口）过、坏改（禁用 agent-loop）干净拦截；
+  4. C6 回归联动已点亮（check --regression 调 fromzero:verify）。
+- 候选 overlay 样例（本地）：`eval/overlay-contract-candidate-{benign,broken,reimpl}.yml`。
