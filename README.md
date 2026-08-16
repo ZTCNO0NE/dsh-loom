@@ -47,6 +47,8 @@ dsh-loom 是**运行中的治理回路**：它把 dsh 的一切——工具、�
 | 一句话改运行时 | 手动改配置 | 自动消化并执行 |
 | 跨会话成长 | 无 | 技能/偏好/台账落盘，下次继续 |
 
+![极简模式 vs dsh-loom 对比](docs/figures/table-minimal-compare.png)
+
 一句话：**极简模式能加装手脚，但内核没有可插拔的治理回路；dsh-loom 把内核也当成可替换插件——什么时候换、换对了没有、换坏了怎么还原，都由治理回路决定。**
 
 ## 一个完整的例子（读者视角）
@@ -184,6 +186,8 @@ npm run fromzero:all   # 含 L5 泛化：json-verify 技能
 
 ### 与 dsh 理念的契合
 
+![dsh 生态分层](docs/figures/fig-ecosystem-layer.png)
+
 dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 
 - 工具 = 插件行，技能 = `SKILL.md` 文件，配置 = 插件配置——**它们都是可进化的对象**；
@@ -205,6 +209,8 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 4. **越用越懂你**。同样的回路既做"能力补齐"（工具/技能/配置/模型），也做"个性化沉淀"（纠正过的格式、你的领域习惯、你的垂直技能库）——改进不是一次性事件，是持续发生的。
 
 ### 与行业自进化方案的对照
+
+![行业方案对照](docs/figures/table-industry-compare.png)
 
 | 方案 | 它做什么 | dsh-loom 的不同点 |
 | --- | --- | --- |
@@ -285,7 +291,13 @@ config:
 
 > 改进模型 / 监督员默认走 DeepSeek V4 Flash（`DEEPSEEK_API_KEY`）；你的 agent 可以接本地模型（示例 qwen3.6-27b）。换模型类案例需要目标模型在 agent 的路由上可用。
 
-> 详细手册与常见问题见 [docs/USAGE.md](docs/USAGE.md)；3 分钟亲历自进化跑 `npm run try`（失败 → 看着它长 → 重试成功 → 成长报告）；更多案例：`npm run fromzero:all`、`npm run supervisor-swap-demo`、`npm run scheduled-notify-demo`（都是真实模型跑通并留档）。
+> 如果你也想亲眼看看「agent 自己长能力」是什么感觉，装一条命令就够了。从 0 开始的 agent，会像打一场自己的军备竞赛：从一无所有开始，先长出第一件工具，然后是技能、配置、模型，一步步武装自己，直到有一天换掉自己的内核、装上更聪明的 loop。
+>
+> ```bash
+> npm run try
+> ```
+>
+> 详细手册与常见问题见 [docs/USAGE.md](docs/USAGE.md)；更多案例：`npm run fromzero:all`、`npm run supervisor-swap-demo`、`npm run scheduled-notify-demo`（都是真实模型跑通并留档）。
 
 ## 设计边界（诚实声明）
 
