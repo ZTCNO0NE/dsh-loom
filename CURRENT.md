@@ -54,7 +54,7 @@ node scripts/contract-runner.mjs check /chenzute/dsh-src/eval/overlay-contract-c
 - 候选 loop 收编方式（A/B/C，推荐 A）。
 - 是否开工实现「完整契约报告 + 候选 loop 网关」：用户已口头同意烧钱真跑，说"做"即开工。
 - awesome-dsh-plugin PR：fork 分支 `ZTCNO0NE:add-dsh-loom` 已推；仓库满 1 天后（北京时间 08-17 20:35 后）`gh pr create --repo awesome-dsh-plugin/awesome-dsh-plugin --base main --head ZTCNO0NE:add-dsh-loom --title "Add ZTCNO0NE/dsh-loom to the plugin list"`。
-- README 竞品定位段（prime-agent 合并 + 偏好沉淀证据）未推送，等用户审阅。
+- README 竞品定位段（prime-agent 合并 + 偏好沉淀证据）已入库（commit `386269a`），如需调整再改。
 - 曝光待办：GitHub Discussions 自荐 → 其他 awesome 列表 PR → Discord/公众号/掘金/知乎。
 - 官方 DeepSeek key 曾短暂泄漏进 git 历史（已 force push），建议用户撤销换新（未确认）。
 
