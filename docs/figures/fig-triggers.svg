@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="trigTitle trigDesc">
+  <title id="trigTitle">监督员触发场景 S1-S8 与免疫记忆</title>
+  <desc id="trigDesc">八个触发场景汇入监督员判断、改进模型设计、核验器验证、执行器安装，修复后沉淀回归集形成免疫记忆。</desc>
+  <defs>
+    <pattern id="dot" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.2" fill="#DDE7F2"/>
+    </pattern>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2F5E8E"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="1000" fill="#FFFFFF"/>
+  <rect width="1600" height="1000" fill="url(#dot)"/>
+
+  <text x="80" y="68" font-family="Noto Sans CJK SC, sans-serif" font-size="38" font-weight="700" fill="#0F2A4A">监督员触发场景 S1-S8</text>
+  <text x="82" y="106" font-family="Noto Sans CJK SC, sans-serif" font-size="17" fill="#5A7290">任何一条被命中 → 判断 → 设计 → 核验 → 安装 → 沉淀（免疫记忆）</text>
+
+  <!-- S1-S8 芯片 -->
+  <g font-family="Noto Sans CJK SC, sans-serif" font-size="16" font-weight="700" fill="#0F2A4A">
+    <rect x="100" y="180" width="250" height="64" rx="10" fill="#FFFFFF" stroke="#D9686A" stroke-width="2"/>
+    <text x="225" y="218" text-anchor="middle">S1 反复失败</text>
+    <rect x="380" y="180" width="250" height="64" rx="10" fill="#FFFFFF" stroke="#D9686A" stroke-width="2"/>
+    <text x="505" y="218" text-anchor="middle">S2 进度不足</text>
+    <rect x="100" y="268" width="250" height="64" rx="10" fill="#FFFFFF" stroke="#D9686A" stroke-width="2"/>
+    <text x="225" y="306" text-anchor="middle">S3 用户纠正</text>
+    <rect x="380" y="268" width="250" height="64" rx="10" fill="#FFFFFF" stroke="#D9686A" stroke-width="2"/>
+    <text x="505" y="306" text-anchor="middle">S4 回归失败</text>
+    <rect x="100" y="356" width="250" height="64" rx="10" fill="#FFFFFF" stroke="#D9686A" stroke-width="2"/>
+    <text x="225" y="394" text-anchor="middle">S5 回合异常</text>
+    <rect x="380" y="356" width="250" height="64" rx="10" fill="#FFFFFF" stroke="#D9686A" stroke-width="2"/>
+    <text x="505" y="394" text-anchor="middle">S6 资源异常</text>
+    <rect x="100" y="444" width="250" height="64" rx="10" fill="#FFFFFF" stroke="#D9686A" stroke-width="2"/>
+    <text x="225" y="482" text-anchor="middle">S7 能力不足</text>
+    <rect x="380" y="444" width="250" height="64" rx="10" fill="#FFFFFF" stroke="#D9686A" stroke-width="2"/>
+    <text x="505" y="482" text-anchor="middle">S8 泛化缺口</text>
+  </g>
+
+  <!-- 汇聚线 -->
+  <line x1="660" y1="212" x2="660" y2="476" stroke="#2F5E8E" stroke-width="2"/>
+  <line x1="660" y1="476" x2="712" y2="476" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
+  <text x="676" y="350" font-family="Noto Sans CJK SC, sans-serif" font-size="14" fill="#8A5A5B">任意命中</text>
+
+  <!-- 处理管道 -->
+  <g>
+    <rect x="715" y="432" width="195" height="88" rx="12" fill="#FFFFFF" stroke="#2A6FB0" stroke-width="2"/>
+    <text x="812" y="472" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#0F2A4A">监督员</text>
+    <text x="812" y="500" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13" fill="#5A7290">判断要不要改进</text>
+    <rect x="935" y="432" width="195" height="88" rx="12" fill="#FFFFFF" stroke="#2A6FB0" stroke-width="2"/>
+    <text x="1032" y="472" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#0F2A4A">改进模型</text>
+    <text x="1032" y="500" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13" fill="#5A7290">设计方案 + 预期轨迹</text>
+    <rect x="1155" y="432" width="195" height="88" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2"/>
+    <text x="1252" y="472" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#0F2A4A">核验器</text>
+    <text x="1252" y="500" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13" fill="#5A7290">隔离执行 + 帧对齐</text>
+    <rect x="1375" y="432" width="195" height="88" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2"/>
+    <text x="1472" y="472" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#0F2A4A">执行器</text>
+    <text x="1472" y="500" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13" fill="#5A7290">安装 / 回滚</text>
+    <line x1="910" y1="476" x2="933" y2="476" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
+    <line x1="1130" y1="476" x2="1153" y2="476" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
+    <line x1="1350" y1="476" x2="1373" y2="476" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
+  </g>
+
+  <!-- 免疫记忆 -->
+  <rect x="70" y="600" width="1460" height="330" rx="16" fill="#F0FAF6" stroke="#7EC9A8" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="100" y="636" font-family="Noto Sans CJK SC, sans-serif" font-size="20" font-weight="700" fill="#2F8F6B">免疫记忆：同一个坑不掉第二次</text>
+  <g>
+    <rect x="150" y="680" width="330" height="120" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2"/>
+    <text x="315" y="726" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="18" font-weight="700" fill="#0F2A4A">修复成功</text>
+    <text x="315" y="760" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="14" fill="#5A7290">核验通过 · 执行器安装</text>
+    <rect x="600" y="680" width="330" height="120" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2"/>
+    <text x="765" y="726" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="18" font-weight="700" fill="#0F2A4A">失败用例沉淀</text>
+    <text x="765" y="760" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="14" fill="#5A7290">自动进回归集</text>
+    <rect x="1050" y="680" width="330" height="120" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2"/>
+    <text x="1215" y="726" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="18" font-weight="700" fill="#0F2A4A">每次进化先跑</text>
+    <text x="1215" y="760" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="14" fill="#5A7290">旧能力不许退化</text>
+    <line x1="480" y1="740" x2="598" y2="740" stroke="#2F8F6B" stroke-width="3" marker-end="url(#arr)"/>
+    <line x1="930" y1="740" x2="1048" y2="740" stroke="#2F8F6B" stroke-width="3" marker-end="url(#arr)"/>
+    <path d="M1380,740 Q1470,740 1470,840 Q1470,900 1215,900 Q400,900 315,900 Q170,900 170,840 Q170,800 148,800" fill="none" stroke="#2F8F6B" stroke-width="3" stroke-dasharray="8 6" marker-end="url(#arr)"/>
+  </g>
+  <text x="800" y="880" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="15" fill="#3F7A64">S4 回归失败 = 这个环被打破时，强制修复</text>
+</svg>
