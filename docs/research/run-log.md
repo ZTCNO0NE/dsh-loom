@@ -228,3 +228,11 @@
 - 通知链路同步验证：start/progress/completion 三条通知（notices.jsonl）
 - 结论：**用户零学习成本，问 actor 即可看到优化进度**；`meta.growth` 提供成长/偏好查询（本 demo 未触发，单测覆盖）
 - 记录：`run-records/actor-progress-qa-demo.json`（手动补录，headless 进程手动终止）
+
+### 2026-08-16 publish-and-usability（npm 发布 + 真机可用验证）
+
+- **发布**：dsh-loom@1.0.0 → npm（2026-08-16）；发现并修复工具名 bug 后发 **1.0.1**（`meta.*` → `meta_*`，官方 API 函数名只允许 `^[a-zA-Z0-9_-]+$`，本地 27b 代理不校验所以之前未暴露）。
+- **真机可用验证（1.0.1）**：全新 DSH_HOME → `dsh plugin --profile headless add dsh-loom@1.0.1` → `dsh --profile headless "调用 meta_status..."` → **exit 0，actor 成功调用 meta_status 并返回 JSON**（`{"mode":"observe","growthCount":0,...}`）。
+- 备注：`--profile demo` 一次性 headless 运行会挂起（demo profile 含 web UI 生命周期，不退出），脚本/CI 请用 headless profile；交互使用走 web 正常。
+- **GitHub**：`ZTCNO0NE/dsh-loom` 已推送源码（src/docs/figures，scripts 因含密钥暂未推）；提交 `a296c3d`（76580a2..a296c3d）；HEAD 无 `sk-166`/`sk-mi4k`/`.env`/eval/scripts 泄漏。
+- 测试 99/99。
