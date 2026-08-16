@@ -116,9 +116,17 @@ npm run runtime-request-demo
 3. 执行器把它装进技能库；
 4. 之后 agent 在陌生任务上失败时，会**主动发起改进请求**，而不是硬撑或放弃。
 
+**为什么值得单独说**：prime-agent 是当前自进化方向最具代表性的开源工程之一，核心就是 refine——任务失败时，actor 提出对自身 `harness_state` 的修改，宿主负责 apply 与回滚，第一次把"agent 改自己的运行状态"做成了可审计的工程协议。dsh-loom 的证明更小：**这个入口不需要预置**。两次独立复现产物一致：`/tmp/refine-skill-demo.txt` = `refine-skill-ok`。
+
+这是**模拟，不是等价**。初版技能的完善程度取决于底层模型能力与需求复杂度：模型强、需求清晰，一次安装就能接近 prime-agent 的体验；模型弱、需求模糊，则需要多轮回炉补齐。prime-agent 的优势在工程化协议——actor/validator 分工、宿主状态管理、长期迭代打磨；dsh-loom 目前只是在行为技能层复刻其入口语义。
+
+但「长出来」与「预置好」有一个本质差别：预置方案的能力边界由设计者定义，长出来的能力由需求本身驱动。随着需求不断攀升——更多失败模式、更复杂的治理协议、loop 层契约——这套一句话长出来的 refine 会一步步逼近，最终有望与预置方案并驾齐驱。
+
 ```bash
 npm run refine-skill-demo
 ```
+
+> 留档说明：refine 演示当前为产物证据留档；脚本退出问题已修复，正式快照可随时低成本补跑。
 
 ### 案例 5：什么都不说，越用越懂你
 
@@ -129,6 +137,12 @@ npm run refine-skill-demo
 - 你的垂直领域用得越多（嵌入式 / 数据 / 前端……），技能库就越往那个方向长。
 
 这是**用出来的个性化**：改进不是你说出来的，是它观察出来的。
+
+偏好沉淀已实测闭环：你纠正"输出用纯文本、不要 markdown 代码块"后，监督员唤起 → 改进模型更新 system-prompt 并声明偏好 → 核验通过 → 应用落盘（`preferences.json` 2 条、ledger 2 条）→ headless 下 `meta_growth` 可见。留档 `eval/run-records/preferences-demo.json`。
+
+```bash
+npm run preferences-demo
+```
 
 ### 案例 6：你的垂直方向，长成你的专属技能库
 
@@ -215,7 +229,7 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 | 方案 | 它做什么 | dsh-loom 的不同点 |
 | --- | --- | --- |
 | Tycho（ARC-AGI-3 满分） | 离线求解：世界模型仿真 vs 真实帧确定性验证 | 借了帧对齐；但我们做的是**运行中的 agent 治理** |
-| prime-agent | refine 改自己的 harness_state，宿主 apply/回滚 | 站在外面改 + 独立 verifier 硬校验 + 回炉/台账 |
+| prime-agent | 预置 refine 协议：actor 提 harness_state 修改，宿主 apply/回滚 | 不预置入口：一句话长出 refine 行为技能（模拟非等价）+ 独立 verifier 硬校验 + 回炉/台账 |
 | SAGE | 多 agent 协作，外部 verifier | 角色与 TCB 的物理隔离更彻底 |
 | CoEvoSkills | 技能共进化 + 确定性验证 | 不止技能：工具/配置/模型 + 跨会话偏好沉淀 |
 | RQGM | 评估者本身也被进化 | 安全分界：v1 verifier/loop 锁死，评估不可被进化 |
@@ -251,7 +265,9 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 - 真实模型回炉：改进模型（V4 Flash）2 轮迭代后通过并安装；
 - 改进模型提交前会主动申请隔离试运行（`probes[]`），失败回传修改；
 - Terminal-Bench 2.1 官方 API 切片：fix-git **PASS（1.0）**（overfull 超时，基准阶段复测）；
-- 成本记账：cost-log.jsonl，L1 样例改进模型 ~974 in / 4681 out。
+- 成本记账：cost-log.jsonl，L1 样例改进模型 ~974 in / 4681 out；
+- 一句话 refine 复刻 prime-agent 核心语义：产物证据两次独立复现（`/tmp/refine-skill-demo.txt` = `refine-skill-ok`），留档 `eval/run-records/refine-skill-demo.json`；
+- 偏好沉淀闭环：pass=true，偏好 2 条落盘、ledger 2 条、headless 下 `meta_growth` 可见，留档 `eval/run-records/preferences-demo.json`。
 
 ## 快速开始
 
