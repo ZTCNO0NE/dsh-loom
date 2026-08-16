@@ -5,7 +5,7 @@
     <pattern id="dot" width="28" height="28" patternUnits="userSpaceOnUse">
       <circle cx="1.5" cy="1.5" r="1.2" fill="#DDE7F2"/>
     </pattern>
-    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#2F5E8E"/>
     </marker>
   </defs>
@@ -13,45 +13,45 @@
   <rect width="1600" height="900" fill="url(#dot)"/>
 
   <text x="80" y="68" font-family="Noto Sans CJK SC, sans-serif" font-size="38" font-weight="700" fill="#0F2A4A">案例 2：它自己决定换模型</text>
-  <text x="82" y="106" font-family="Noto Sans CJK SC, sans-serif" font-size="17" fill="#5A7290">没有任何人提示它换模型 · 两次自主安装 · before/after 完整留档</text>
+  <text x="82" y="106" font-family="Noto Sans CJK SC, sans-serif" font-size="25" fill="#5A7290">没有任何人提示它换模型 · 两次自主安装 · before/after 完整留档</text>
 
-  <!-- 状态卡片 -->
+  <!-- 状态卡片（放大） -->
   <g>
-    <rect x="110" y="250" width="380" height="160" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="2"/>
-    <text x="300" y="296" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#9E3B3D">qwen/qwen3.6-27b</text>
-    <text x="300" y="332" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="15" fill="#8A5A5B">初始配置 · 路由不提供该模型</text>
-    <text x="300" y="380" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="18" font-weight="700" fill="#D9686A">✗ 连"回复一句话"都失败</text>
-    <text x="80" y="228" font-family="Noto Sans CJK SC, sans-serif" font-size="16" font-weight="700" fill="#9E3B3D">初始</text>
+    <rect x="10" y="210" width="500" height="210" rx="16" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+    <text x="260" y="272" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="32" font-weight="700" fill="#9E3B3D">qwen/qwen3.6-27b</text>
+    <text x="260" y="316" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="25" fill="#8A5A5B">初始配置 · 路由不提供该模型</text>
+    <text x="260" y="384" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="29" font-weight="700" fill="#D9686A">✗ 连"回复一句话"都失败</text>
+    <text x="30" y="176" font-family="Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#9E3B3D">初始</text>
   </g>
   <g>
-    <rect x="610" y="250" width="380" height="160" rx="14" fill="#FFF8EC" stroke="#E3A84F" stroke-width="2"/>
-    <text x="800" y="296" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#8A611C">deepseek-v4-flash</text>
-    <text x="800" y="332" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="15" fill="#8A6F3F">第 1 次安装 · 监督员唤醒 → 改进模型 → 核验 → 安装</text>
-    <text x="800" y="380" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="18" font-weight="700" fill="#B07D22">✓ 安装留档</text>
-    <text x="580" y="228" font-family="Noto Sans CJK SC, sans-serif" font-size="16" font-weight="700" fill="#8A611C">安装 1</text>
+    <rect x="550" y="210" width="500" height="210" rx="16" fill="#FFF8EC" stroke="#E3A84F" stroke-width="3"/>
+    <text x="800" y="272" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="32" font-weight="700" fill="#8A611C">deepseek-v4-flash</text>
+    <text x="800" y="316" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="25" fill="#8A6F3F">第 1 次安装（监督→设计→核验→安装）</text>
+    <text x="800" y="384" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="29" font-weight="700" fill="#B07D22">✓ 安装留档</text>
+    <text x="570" y="176" font-family="Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#8A611C">安装 1</text>
   </g>
   <g>
-    <rect x="1110" y="250" width="380" height="160" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="2"/>
-    <text x="1300" y="296" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#1E5C47">deepseek-chat</text>
-    <text x="1300" y="332" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="15" fill="#3F7A64">第 2 次安装 · 监督员再次唤醒 → 继续迭代</text>
-    <text x="1300" y="380" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="18" font-weight="700" fill="#2F8F6B">✓ 最终配置重跑，正常回复</text>
-    <text x="1080" y="228" font-family="Noto Sans CJK SC, sans-serif" font-size="16" font-weight="700" fill="#1E5C47">安装 2</text>
+    <rect x="1090" y="210" width="500" height="210" rx="16" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+    <text x="1340" y="272" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="32" font-weight="700" fill="#1E5C47">deepseek-chat</text>
+    <text x="1340" y="316" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="25" fill="#3F7A64">第 2 次安装 · 监督员再次唤醒 → 继续迭代</text>
+    <text x="1340" y="384" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="29" font-weight="700" fill="#2F8F6B">✓ 最终配置重跑，正常回复</text>
+    <text x="1110" y="176" font-family="Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#1E5C47">安装 2</text>
   </g>
 
-  <!-- 时间轴 -->
-  <line x1="150" y1="470" x2="1450" y2="470" stroke="#2F5E8E" stroke-width="3"/>
-  <circle cx="300" cy="470" r="9" fill="#D9686A"/>
-  <circle cx="800" cy="470" r="9" fill="#E3A84F"/>
-  <circle cx="1300" cy="470" r="9" fill="#2F8F6B"/>
-  <line x1="490" y1="470" x2="608" y2="470" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
-  <text x="549" y="452" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="16" font-weight="700" fill="#2A6FB0">第 1 次进化</text>
-  <line x1="990" y1="470" x2="1108" y2="470" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
-  <text x="1049" y="452" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="16" font-weight="700" fill="#2A6FB0">第 2 次进化</text>
+  <!-- 时间轴（加粗） -->
+  <line x1="150" y1="500" x2="1450" y2="500" stroke="#2F5E8E" stroke-width="4"/>
+  <circle cx="260" cy="500" r="12" fill="#D9686A"/>
+  <circle cx="800" cy="500" r="12" fill="#E3A84F"/>
+  <circle cx="1310" cy="500" r="12" fill="#2F8F6B"/>
+  <line x1="510" y1="500" x2="548" y2="500" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+  <text x="529" y="478" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#2A6FB0">第 1 次进化</text>
+  <line x1="1050" y1="500" x2="1088" y2="500" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+  <text x="1069" y="478" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#2A6FB0">第 2 次进化</text>
 
-  <text x="800" y="515" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="16" fill="#5A7290">每次安装：before/after 快照 · 验证证据 · 回放命令 —— 可审计进化史</text>
+  <text x="800" y="555" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="26" fill="#5A7290">每次安装：before/after 快照 · 验证证据 · 回放命令 —— 可审计进化史</text>
 
-  <!-- 底部总结 -->
-  <rect x="110" y="600" width="1380" height="110" rx="14" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="2"/>
-  <text x="800" y="648" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="20" font-weight="700" fill="#0F2A4A">模型太慢、太贵、想节约成本时同理</text>
-  <text x="800" y="684" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="16" fill="#5A7290">它会自己评估并重新调度，而不是等你手动改配置</text>
+  <!-- 底部总结（放大） -->
+  <rect x="10" y="620" width="1580" height="150" rx="16" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="2"/>
+  <text x="800" y="688" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="31" font-weight="700" fill="#0F2A4A">模型太慢、太贵、想节约成本时同理</text>
+  <text x="800" y="734" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="26" fill="#5A7290">它会自己评估并重新调度，而不是等你手动改配置</text>
 </svg>

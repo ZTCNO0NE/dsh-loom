@@ -100,8 +100,11 @@ agent 只有自己的上下文和轨迹，而这些全部由它自己产生。�
 npm install
 npm run check
 npm run build
-dsh plugin --profile demo add ./dsh-loom
-dsh --profile demo --dump-config
+# 方式一：npm 包
+dsh plugin --profile headless add dsh-loom@1.0.2
+# 方式二：GitHub 仓库
+dsh plugin --profile headless add "github:ZTCNO0NE/dsh-loom#main"
+dsh --profile headless --dump-config
 ```
 
 开一个开关（后台优化，不卡对话）：

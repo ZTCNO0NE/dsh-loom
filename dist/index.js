@@ -17,7 +17,7 @@ import { officialDeepSeekLlm } from './llm/official.js';
 import { DEFAULT_LOCKED_TARGETS } from './policy.js';
 import { appendLedger, appendReport, readLedger, readPreferences, scenarioOf, } from './growth/index.js';
 export const name = 'dsh-meta-validate';
-export const inject = ['tools', 'agents'];
+export const inject = ['tools', 'agents', 'loader'];
 export const Config = Schema.object({
     mode: Schema.union(['observe', 'propose', 'apply']).default('observe'),
     scheduled: Schema.boolean().default(false),
@@ -551,12 +551,22 @@ export function apply(ctx, config) {
             stallAbort: config.reviewGate.stallAbort,
             refineRunning: () => refineState.running,
             onTrigger: async (turn) => {
-                await withRefineRunning(async () => {
-                    const cases = await validator.loadRegressionCases();
-                    const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline);
-                    const currentConfig = currentConfigOf(ctx, baseline);
-                    await autopilot.step(turn, currentConfig, undefined, { actualEvents: [] }, ops);
-                });
+                try {
+                    await withRefineRunning(async () => {
+                        const cases = await validator.loadRegressionCases();
+                        const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline);
+                        const currentConfig = currentConfigOf(ctx, baseline);
+                        await autopilot.step(turn, currentConfig, undefined, { actualEvents: [] }, ops);
+                    });
+                }
+                catch (error) {
+                    appendJsonl(paths.errors(root, config.sessionId), {
+                        schemaVersion: PROTOCOL_VERSION,
+                        at: new Date().toISOString(),
+                        turn,
+                        error: String(error),
+                    });
+                }
             },
         });
         hook.attach();
@@ -625,7 +635,13 @@ function currentConfigOf(ctx, baseline) {
 }
 function buildApplyOps(ctx, validator, cases, meta, baseline) {
     baseline.ensureLoaded();
-    const loader = ctx.loader;
+    let loader;
+    try {
+        loader = ctx.loader;
+    }
+    catch {
+        loader = undefined;
+    }
     if (!loader)
         return undefined;
     const installedByTarget = new Map();

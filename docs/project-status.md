@@ -4,8 +4,9 @@
 
 - 对外品牌：**Loom · 织机**（把使用、纠正与失败"织"进 agent 的能力）；包名/插件 id 保持 `dsh-meta-validate`，版本 **1.0.0**。
 - 功能冻结范围：角色三分（agent/监督员/改进模型/核验器/执行器）、observe→judge→design→verify→install 回路、config/tool/skill 进化、自主换模型、用户消息自动唤起、预约式后台执行、进化通讯（启动/进度/完成通知 + growth 台账/偏好/报告）、监督员偏向唤起 + post-loop + 轮询主动暂停、TCB 自锁（agent/agent-loop/meta-validate）。
-- 验收基准：`npm test` **99/99**；fromzero L1-L5（0/3→5/5，Δsuccess+3）；host-demo pass=true；supervisor-swap（qwen→v4-flash→deepseek-chat）pass；scheduled-notify（三条通知 + 台账）pass；actor-progress-qa（actor 答"优化进度怎么样？"）pass；TB 官方切片 fix-git PASS（1/2）。
-- **v1.1 待办（已记录，未阻塞冻结）**：① refine-skill demo 干净重跑（builder 给 agent 造 refine 能力）；② 偏好沉淀端到端 demo（builder 声明偏好 → preferences.json → meta_growth 可见）；③ 周期定时报告与长基准（用户指示延后）。
+- 验收基准：`npm test` **101/101**；fromzero L1-L5（0/3→5/5，Δsuccess+3）；host-demo pass=true；supervisor-swap（qwen→v4-flash→deepseek-chat）pass；scheduled-notify（三条通知 + 台账）pass；actor-progress-qa（actor 答"优化进度怎么样？"）pass；preferences-demo pass=true；TB 官方切片 fix-git PASS（1/2）。
+- **v1.1 完成（2026-08-17）**：① refine-skill —— builder 造出 `actor-refine` 技能，actor 在全新失败场景自己调 meta_auto、builder 装 fs-write、actor 写出目标文件（两次独立产物证据，见 run-log）；② 偏好沉淀 —— builder 自主更新 system-prompt + 声明 preferences → preferences.json → meta_growth 可见（pass=true，run-records/preferences-demo.json）；③ 周期定时报告与长基准（用户指示延后）。
+- 版本：**1.0.3**（含 reasoning 空流、loader inject、coverage nameAliases、回合计时、gate fail-open、spawn 进程组等修复）。
 
 ## 一句话
 

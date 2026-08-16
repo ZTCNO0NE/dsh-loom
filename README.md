@@ -235,7 +235,7 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 
 | 单元测试 | 从零成长 | 严格对照 | 宿主闭环 | 自主换模型 | 用户消息自动唤起 |
 | --- | --- | --- | --- | --- | --- |
-| **99/99** | **L1-L5 全过** | **off 0/3 → on 3/3** | **pass=true** | **qwen3.6-27b → v4-flash → deepseek-chat** | **自动改 runtime 配置** |
+| **101/101** | **L1-L5 全过** | **off 0/3 → on 3/3** | **pass=true** | **qwen3.6-27b → v4-flash → deepseek-chat** | **自动改 runtime 配置** |
 
 ![严格同任务集对照](docs/figures/evidence-compare.png)
 ![从零成长 L1-L5](docs/figures/evidence-growth.png)

@@ -125,4 +125,11 @@ describe('observer A1', () => {
     const signals = observer.collect({ repeatedFailureCount: 3, regressionFailureCount: 1 })
     expect(signals).toHaveLength(0)
   })
+
+  it('resets turn age on turn/end so the next turn is not treated as stalled', () => {
+    const { observer } = setup()
+    observer.recordFrame('turn/start', { turn: 1 }, Date.now() - 400_000)
+    observer.recordFrame('turn/end', { turn: 1, reason: { kind: 'completed' } }, Date.now() - 100)
+    expect(observer.currentTurnStart()).toBeNull()
+  })
 })

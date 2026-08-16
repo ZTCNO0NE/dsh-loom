@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
 import { type LockedTargetPolicy } from './policy.js';
 export declare const name = "dsh-meta-validate";
-export declare const inject: readonly ["tools", "agents"];
+export declare const inject: readonly ["tools", "agents", "loader"];
 export interface MetaValidateConfig {
     mode: 'observe' | 'propose' | 'apply';
     /** Scheduled background refine: meta tools return immediately, completion is injected. */

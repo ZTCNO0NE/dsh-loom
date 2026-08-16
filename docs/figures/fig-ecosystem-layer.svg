@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="ecoTitle ecoDesc">
+  <title id="ecoTitle">dsh 生态四层：怎么装、怎么管、怎么维护、装错了怎么办</title>
+  <desc id="ecoDesc">官方插件机制解决怎么装，plugin-registry 人工管理安装态，静态 skills 目录手动维护；dsh-loom 补的是治理回路。</desc>
+  <defs>
+    <pattern id="dot" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.2" fill="#DDE7F2"/>
+    </pattern>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2F5E8E"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="900" fill="#FFFFFF"/>
+  <rect width="1600" height="900" fill="url(#dot)"/>
+
+  <text x="80" y="68" font-family="Noto Sans CJK SC, sans-serif" font-size="38" font-weight="700" fill="#0F2A4A">dsh 生态四层</text>
+  <text x="82" y="106" font-family="Noto Sans CJK SC, sans-serif" font-size="17" fill="#5A7290">怎么装 · 怎么管 · 怎么维护 · 装错了怎么办</text>
+
+  <g font-family="Noto Sans CJK SC, sans-serif">
+    <!-- 三个现状层 -->
+    <rect x="90" y="170" width="420" height="300" rx="14" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="2"/>
+    <text x="300" y="210" text-anchor="middle" font-size="20" font-weight="700" fill="#0F2A4A">官方插件机制</text>
+    <text x="300" y="244" text-anchor="middle" font-size="15" fill="#5A7290">bundle / insert</text>
+    <text x="300" y="286" text-anchor="middle" font-size="16" fill="#2A6FB0">解决「怎么装」</text>
+    <text x="300" y="330" text-anchor="middle" font-size="14" fill="#8A5A5B">不回答「该不该装」</text>
+
+    <rect x="590" y="170" width="420" height="300" rx="14" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="2"/>
+    <text x="800" y="210" text-anchor="middle" font-size="20" font-weight="700" fill="#0F2A4A">plugin-registry</text>
+    <text x="800" y="244" text-anchor="middle" font-size="15" fill="#5A7290">插件控制台</text>
+    <text x="800" y="286" text-anchor="middle" font-size="16" fill="#2A6FB0">人工管理安装态</text>
+    <text x="800" y="330" text-anchor="middle" font-size="14" fill="#8A5A5B">不回答「装错了怎么办」</text>
+
+    <rect x="1090" y="170" width="420" height="300" rx="14" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="2"/>
+    <text x="1300" y="210" text-anchor="middle" font-size="20" font-weight="700" fill="#0F2A4A">静态 skills 目录</text>
+    <text x="1300" y="244" text-anchor="middle" font-size="15" fill="#5A7290">SKILL.md 手动维护</text>
+    <text x="1300" y="286" text-anchor="middle" font-size="16" fill="#2A6FB0">决定「用什么」</text>
+    <text x="1300" y="330" text-anchor="middle" font-size="14" fill="#8A5A5B">不回答「什么时候长新能力」</text>
+  </g>
+
+  <line x1="300" y1="470" x2="300" y2="540" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
+  <line x1="800" y1="470" x2="800" y2="540" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
+  <line x1="1300" y1="470" x2="1300" y2="540" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
+
+  <rect x="90" y="560" width="1420" height="250" rx="16" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="2"/>
+  <text x="800" y="610" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="22" font-weight="700" fill="#1E5C47">dsh-loom 补的是它们都没有的那一层：治理回路</text>
+  <text x="800" y="662" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="17" fill="#3F7A64">装什么 · 什么时候装 · 装错了怎么办 —— 由治理回路决定，不是由人盯、不是靠模型自觉</text>
+  <text x="800" y="740" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="16" fill="#5A7290">观察 → 判断 → 设计 → 核验 → 安装 → 回滚（快照留痕）</text>
+</svg>

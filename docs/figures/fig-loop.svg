@@ -1,101 +1,90 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="loopTitle loopDesc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="loopTitle loopDesc">
   <title id="loopTitle">外部教练团队：观察 → 判断 → 设计 → 核验 → 安装</title>
   <desc id="loopDesc">外部教练团队、TCB 信任根基与你的 agent 三层的五步自进化回路工程图。</desc>
   <defs>
     <pattern id="dot" width="28" height="28" patternUnits="userSpaceOnUse">
       <circle cx="1.5" cy="1.5" r="1.2" fill="#DDE7F2"/>
     </pattern>
-    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#2F5E8E"/>
     </marker>
-    <marker id="arrCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <marker id="arrCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#1C8E7E"/>
     </marker>
-    <marker id="arrDashed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#B0761F"/>
-    </marker>
   </defs>
-  <rect width="1600" height="1000" fill="#FFFFFF"/>
-  <rect width="1600" height="1000" fill="url(#dot)"/>
+  <rect width="1600" height="1180" fill="#FFFFFF"/>
+  <rect width="1600" height="1180" fill="url(#dot)"/>
 
-  <text x="80" y="68" font-family="Noto Sans CJK SC, sans-serif" font-size="38" font-weight="700" fill="#0F2A4A">外部教练团队：观察 → 判断 → 设计 → 核验 → 安装</text>
-  <text x="82" y="106" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#5A7290">observe → judge → design → verify → install · 安装后监督员复检，多轮收敛</text>
+  <text x="80" y="70" font-family="Noto Sans CJK SC, sans-serif" font-size="48" font-weight="700" fill="#0F2A4A">外部教练团队：观察 → 判断 → 设计 → 核验 → 安装</text>
+  <text x="82" y="120" font-family="Noto Sans CJK SC, sans-serif" font-size="22" fill="#5A7290">observe → judge → design → verify → install · 安装后监督员复检，多轮收敛</text>
 
   <!-- 三个分区 -->
-  <rect x="70" y="140" width="770" height="330" rx="16" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="2" stroke-dasharray="7 5"/>
-  <text x="100" y="174" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#2A6FB0">外部教练团队（更上层模型）</text>
-  <text x="100" y="198" font-family="Noto Sans CJK SC, sans-serif" font-size="14" fill="#6B8DB0">观察你、判断要不要改、设计修改方案</text>
+  <rect x="60" y="150" width="780" height="400" rx="18" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="3" stroke-dasharray="8 6"/>
+  <text x="90" y="196" font-family="Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#2A6FB0">外部教练团队（更上层模型）</text>
+  <text x="90" y="230" font-family="Noto Sans CJK SC, sans-serif" font-size="23" fill="#6B8DB0">观察你、判断要不要改、设计修改方案</text>
 
-  <rect x="900" y="140" width="620" height="790" rx="16" fill="#F2FBF6" stroke="#7EC9A8" stroke-width="2" stroke-dasharray="7 5"/>
-  <text x="930" y="174" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#2F8F6B">TCB 信任根基（核验器 + 执行器）</text>
-  <text x="930" y="198" font-family="Noto Sans CJK SC, sans-serif" font-size="14" fill="#6FA98E">你的 agent 永远够不到验证链路；所有修改留快照可回滚</text>
+  <rect x="900" y="150" width="640" height="840" rx="18" fill="#F2FBF6" stroke="#7EC9A8" stroke-width="3" stroke-dasharray="8 6"/>
+  <text x="930" y="196" font-family="Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#2F8F6B">TCB 信任根基（核验器 + 执行器）</text>
+  <text x="930" y="230" font-family="Noto Sans CJK SC, sans-serif" font-size="23" fill="#6FA98E">你的 agent 永远够不到验证链路；所有修改留快照可回滚</text>
 
-  <rect x="70" y="560" width="770" height="370" rx="16" fill="#FFF8EE" stroke="#E8C48A" stroke-width="2" stroke-dasharray="7 5"/>
-  <text x="100" y="594" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#B0761F">你的 agent（Cordis 底盘）</text>
-  <text x="100" y="618" font-family="Noto Sans CJK SC, sans-serif" font-size="14" fill="#B99A63">只干活、只体验；不参与对自己的判断</text>
+  <rect x="60" y="640" width="780" height="420" rx="18" fill="#FFF8EE" stroke="#E8C48A" stroke-width="3" stroke-dasharray="8 6"/>
+  <text x="420" y="1000" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#B0761F">你的 agent（Cordis 底盘）</text>
+  <text x="420" y="1034" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="23" fill="#B99A63">只干活、只体验；不参与对自己的判断</text>
 
   <!-- 教练团队节点 -->
   <g>
-    <rect x="110" y="230" width="210" height="95" rx="12" fill="#FFFFFF" stroke="#4A82B8" stroke-width="2"/>
-    <text x="215" y="268" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="20" font-weight="700" fill="#0F2A4A">观察器</text>
-    <text x="215" y="300" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#5A7290">信号 · 完整帧 · 时延/成本</text>
+    <rect x="90" y="280" width="250" height="130" rx="16" fill="#FFFFFF" stroke="#4A82B8" stroke-width="3"/>
+    <text x="215" y="330" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#0F2A4A">观察器</text>
+    <text x="215" y="376" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="24" fill="#5A7290">失败信号 / 轨迹 / 指标</text>
+    <rect x="340" y="280" width="250" height="130" rx="16" fill="#FFFFFF" stroke="#4A82B8" stroke-width="3"/>
+    <text x="465" y="330" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#0F2A4A">监督员</text>
+    <text x="465" y="376" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="24" fill="#5A7290">关键摘要 · 判定</text>
+    <rect x="590" y="280" width="250" height="130" rx="16" fill="#FFFFFF" stroke="#4A82B8" stroke-width="3"/>
+    <text x="715" y="330" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#0F2A4A">改进模型</text>
+    <text x="715" y="376" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="24" fill="#5A7290">全量感知 · 设计方案</text>
+    <line x1="338" y1="345" x2="340" y2="345" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="588" y1="345" x2="590" y2="345" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
   </g>
-  <g>
-    <rect x="350" y="230" width="210" height="95" rx="12" fill="#FFFFFF" stroke="#4A82B8" stroke-width="2"/>
-    <text x="455" y="268" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="20" font-weight="700" fill="#0F2A4A">监督员</text>
-    <text x="455" y="300" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#5A7290">只看关键摘要，判断要不要改进</text>
-  </g>
-  <g>
-    <rect x="590" y="230" width="220" height="95" rx="12" fill="#FFFFFF" stroke="#4A82B8" stroke-width="2"/>
-    <text x="700" y="268" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="20" font-weight="700" fill="#0F2A4A">改进模型</text>
-    <text x="700" y="300" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#5A7290">全量感知 · 方案 + 预期轨迹</text>
-  </g>
-  <line x1="320" y1="277" x2="348" y2="277" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
-  <line x1="560" y1="277" x2="588" y2="277" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
 
   <!-- TCB 节点 -->
   <g>
-    <rect x="960" y="230" width="340" height="95" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2"/>
-    <text x="1130" y="268" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="20" font-weight="700" fill="#0F2A4A">核验器</text>
-    <text x="1130" y="300" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#5A7290">隔离真实执行 · 帧对齐 · 回归</text>
-  </g>
-  <g>
-    <rect x="960" y="430" width="340" height="95" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2"/>
-    <text x="1130" y="468" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="20" font-weight="700" fill="#0F2A4A">执行器</text>
-    <text x="1130" y="500" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#5A7290">预约 · 回合边界安装 · 回滚</text>
+    <rect x="970" y="290" width="500" height="140" rx="16" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="3"/>
+    <text x="1220" y="345" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#0F2A4A">核验器</text>
+    <text x="1220" y="392" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="24" fill="#5A7290">隔离真实执行 · 帧对齐 · 回归</text>
+    <rect x="970" y="500" width="500" height="140" rx="16" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="3"/>
+    <text x="1220" y="555" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#0F2A4A">执行器</text>
+    <text x="1220" y="602" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="24" fill="#5A7290">预约 · 回合边界安装 · 回滚</text>
   </g>
 
   <!-- 你的 agent 节点 -->
   <g>
-    <rect x="110" y="670" width="260" height="110" rx="12" fill="#FFFFFF" stroke="#B0761F" stroke-width="2"/>
-    <text x="240" y="712" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#0F2A4A">Agent Loop（v1 锁定）</text>
-    <text x="240" y="746" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#5A7290">正在运行的循环</text>
+    <rect x="90" y="760" width="340" height="160" rx="16" fill="#FFFFFF" stroke="#B0761F" stroke-width="3"/>
+    <text x="260" y="820" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#0F2A4A">Agent Loop（v1 锁定）</text>
+    <text x="260" y="868" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="24" fill="#5A7290">正在运行的循环</text>
+    <rect x="470" y="760" width="370" height="160" rx="16" fill="#FFFFFF" stroke="#B0761F" stroke-width="3"/>
+    <text x="655" y="820" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#0F2A4A">工具 / 技能 / 配置 / 模型</text>
+    <text x="655" y="868" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="24" fill="#5A7290">可进化对象</text>
+    <line x1="430" y1="840" x2="468" y2="840" stroke="#B0761F" stroke-width="4" marker-end="url(#arr)"/>
   </g>
-  <g>
-    <rect x="430" y="670" width="300" height="110" rx="12" fill="#FFFFFF" stroke="#B0761F" stroke-width="2"/>
-    <text x="580" y="712" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="19" font-weight="700" fill="#0F2A4A">工具 / 技能 / 配置 / 模型</text>
-    <text x="580" y="746" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#5A7290">可进化对象</text>
-  </g>
-  <line x1="370" y1="725" x2="428" y2="725" stroke="#B0761F" stroke-width="3" marker-end="url(#arr)"/>
 
   <!-- 主回路箭头 -->
-  <path d="M300,560 L300,470 L215,470 L215,327" fill="none" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
-  <text x="312" y="505" font-family="Noto Sans CJK SC, sans-serif" font-size="15" fill="#5A7290">失败 / 用户消息 / 停滞</text>
+  <path d="M300,760 L300,660 L215,660 L215,412" fill="none" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+  <text x="185" y="700" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="23" fill="#5A7290">失败 / 用户消息 / 停滞</text>
 
-  <path d="M810,277 L900,277 L900,477 L958,477" fill="none" stroke="#2F5E8E" stroke-width="3" marker-end="url(#arr)"/>
-  <text x="855" y="264" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1C8E7E">方案 + 预期轨迹</text>
+  <path d="M840,345 L860,345 L860,470 L900,470 L900,570 L968,570" fill="none" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+  <text x="880" y="448" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="23" font-weight="700" fill="#1C8E7E">方案 + 预期轨迹</text>
 
-  <line x1="1080" y1="430" x2="1080" y2="327" stroke="#2F8F6B" stroke-width="3" marker-end="url(#arr)"/>
-  <text x="1092" y="382" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#2F8F6B">隔离执行 + 真实帧</text>
-  <line x1="1200" y1="327" x2="1200" y2="428" stroke="#2F8F6B" stroke-width="3" marker-end="url(#arr)"/>
-  <text x="1212" y="372" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#2F8F6B">通过 / 回炉</text>
+  <line x1="1120" y1="500" x2="1120" y2="432" stroke="#2F8F6B" stroke-width="4" marker-end="url(#arr)"/>
+  <text x="1110" y="470" text-anchor="end" font-family="Noto Sans CJK SC, sans-serif" font-size="23" fill="#2F8F6B">隔离执行 + 真实帧</text>
+  <line x1="1250" y1="432" x2="1250" y2="498" stroke="#2F8F6B" stroke-width="4" marker-end="url(#arr)"/>
+  <text x="1320" y="470" text-anchor="start" font-family="Noto Sans CJK SC, sans-serif" font-size="23" fill="#2F8F6B">通过 / 回炉</text>
 
-  <path d="M1130,525 L1130,590 L580,590 L580,668" fill="none" stroke="#1C8E7E" stroke-width="4" marker-end="url(#arrCyan)"/>
-  <text x="855" y="580" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="15" font-weight="700" fill="#1C8E7E">冷替换（回合边界安装）</text>
+  <path d="M1220,640 L1220,700 L655,700 L655,758" fill="none" stroke="#1C8E7E" stroke-width="5" marker-end="url(#arrCyan)"/>
+  <text x="920" y="688" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="23" font-weight="700" fill="#1C8E7E">冷替换（回合边界安装）</text>
 
-  <!-- 回合边界 -->
-  <line x1="870" y1="590" x2="870" y2="930" stroke="#B0761F" stroke-width="2" stroke-dasharray="4 5"/>
-  <text x="884" y="790" transform="rotate(-90 884 790)" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="14" font-weight="700" fill="#B0761F">回合边界（原子切换点）</text>
+  <!-- 回合边界（底部横向） -->
+  <line x1="60" y1="1100" x2="1540" y2="1100" stroke="#B0761F" stroke-width="3" stroke-dasharray="8 6"/>
+  <text x="800" y="1084" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="23" font-weight="700" fill="#B0761F">回合边界（原子切换点）</text>
 
-  <text x="1120" y="575" font-family="Noto Sans CJK SC, sans-serif" font-size="13.5" fill="#6FA98E">安装后监督员复检，无证据即收敛（多轮）</text>
+  <text x="1220" y="960" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="23" fill="#6FA98E">安装后监督员复检，无证据即收敛（多轮）</text>
 </svg>

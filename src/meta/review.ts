@@ -108,28 +108,38 @@ export class ReviewGate {
     if (!llm) {
       return JSON.stringify({ shouldRefine: false, rationale: 'review gate: no llm service available' })
     }
-    let out = ''
-    let inText = false
-    for await (const chunk of llm.stream({
-      provider: this.options.provider,
-      model: this.options.model,
-      prompt,
-      temperature: 0,
-      maxTokens: 500,
-      sessionId: `${this.options.sessionId}:meta-review`,
-    })) {
-      if (chunk.kind === 'block-start') inText = chunk.type === 'text'
-      else if (chunk.kind === 'block-end') inText = false
-      else if (chunk.kind === 'text-delta' && inText && typeof chunk.text === 'string') out += chunk.text
-      else if (chunk.kind === 'usage' && typeof (chunk as { usage?: unknown }).usage === 'object') {
-        const usage = (chunk as { usage: { prompt?: number; completion?: number } }).usage
-        this.options.onUsage?.({
-          prompt: usage.prompt ?? 0,
-          completion: usage.completion ?? 0,
-        })
+    let lastError: unknown
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let out = ''
+      let inText = false
+      try {
+        for await (const chunk of llm.stream({
+          provider: this.options.provider,
+          model: this.options.model,
+          prompt,
+          temperature: 0,
+          maxTokens: 500,
+          sessionId: `${this.options.sessionId}:meta-review`,
+        })) {
+          if (chunk.kind === 'block-start') inText = chunk.type === 'text'
+          else if (chunk.kind === 'block-end') inText = false
+          else if (chunk.kind === 'text-delta' && inText && typeof chunk.text === 'string') out += chunk.text
+          else if (chunk.kind === 'usage' && typeof (chunk as { usage?: unknown }).usage === 'object') {
+            const usage = (chunk as { usage: { prompt?: number; completion?: number } }).usage
+            this.options.onUsage?.({
+              prompt: usage.prompt ?? 0,
+              completion: usage.completion ?? 0,
+            })
+          }
+        }
+        if (out.trim()) return out
+        throw new Error('review gate: empty stream')
+      } catch (error) {
+        lastError = error
+        await new Promise((resolve) => setTimeout(resolve, 1500))
       }
     }
-    return out
+    throw lastError instanceof Error ? lastError : new Error('review gate: stream failed')
   }
 
   private parseJson(text: string): Record<string, unknown> {

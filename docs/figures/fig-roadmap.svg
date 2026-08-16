@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="rmTitle rmDesc">
+  <title id="rmTitle">loom-bench：自进化基准路线图</title>
+  <desc id="rmDesc">从需要工具到需要换 loop 的任务阶梯，配对照指标与产出；先证明 agent 会自己长，再打高难度基准。</desc>
+  <defs>
+    <pattern id="dot" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.2" fill="#DDE7F2"/>
+    </pattern>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2F5E8E"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="1000" fill="#FFFFFF"/>
+  <rect width="1600" height="1000" fill="url(#dot)"/>
+
+  <text x="80" y="66" font-family="Noto Sans CJK SC, sans-serif" font-size="40" font-weight="700" fill="#0F2A4A">loom-bench：自进化基准路线图</text>
+  <text x="82" y="106" font-family="Noto Sans CJK SC, sans-serif" font-size="20" fill="#5A7290">先证明“agent 会自己长”，再去打高难度基准（ARC-AGI 放 v2）</text>
+
+  <!-- 任务阶梯 -->
+  <text x="80" y="156" font-family="Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#0F2A4A">任务阶梯：从缺能力到缺内核</text>
+  <g font-family="Noto Sans CJK SC, sans-serif">
+    <rect x="60" y="180" width="290" height="170" rx="14" fill="#EEF6FF" stroke="#4A82B8" stroke-width="2.5"/>
+    <text x="205" y="228" text-anchor="middle" font-size="23" font-weight="700" fill="#0F2A4A">L1 · 需要工具</text>
+    <text x="205" y="266" text-anchor="middle" font-size="20" fill="#5A7290">写文件 / 列目录</text>
+    <text x="205" y="312" text-anchor="middle" font-size="20" font-weight="700" fill="#2F8F6B">已跑通（fs-write/ls-dir）</text>
+    <rect x="370" y="180" width="290" height="170" rx="14" fill="#EEF6FF" stroke="#4A82B8" stroke-width="2.5"/>
+    <text x="515" y="228" text-anchor="middle" font-size="23" font-weight="700" fill="#0F2A4A">L2 · 需要技能</text>
+    <text x="515" y="266" text-anchor="middle" font-size="20" fill="#5A7290">编辑后必须验证</text>
+    <text x="515" y="312" text-anchor="middle" font-size="20" font-weight="700" fill="#2F8F6B">已跑通（edit-verify）</text>
+    <rect x="680" y="180" width="290" height="170" rx="14" fill="#EEF6FF" stroke="#4A82B8" stroke-width="2.5"/>
+    <text x="825" y="228" text-anchor="middle" font-size="23" font-weight="700" fill="#0F2A4A">L3 · 需要配置</text>
+    <text x="825" y="266" text-anchor="middle" font-size="20" fill="#5A7290">超时 / 权限</text>
+    <text x="825" y="312" text-anchor="middle" font-size="20" font-weight="700" fill="#2F8F6B">已跑通（500ms-10000ms）</text>
+    <rect x="990" y="180" width="290" height="170" rx="14" fill="#EEF6FF" stroke="#4A82B8" stroke-width="2.5"/>
+    <text x="1135" y="228" text-anchor="middle" font-size="23" font-weight="700" fill="#0F2A4A">L4 · 需要模型调度</text>
+    <text x="1135" y="266" text-anchor="middle" font-size="20" fill="#5A7290">慢 / 贵 / 路由错</text>
+    <text x="1135" y="312" text-anchor="middle" font-size="20" font-weight="700" fill="#2F8F6B">已跑通（自主换模型）</text>
+    <rect x="1300" y="180" width="250" height="170" rx="14" fill="#FFF8EE" stroke="#E3A84F" stroke-width="2.5" stroke-dasharray="6 4"/>
+    <text x="1425" y="228" text-anchor="middle" font-size="23" font-weight="700" fill="#0F2A4A">L5 · 需要换 loop</text>
+    <text x="1425" y="266" text-anchor="middle" font-size="20" fill="#8A6F3F">内核当作可替换插件</text>
+    <text x="1425" y="312" text-anchor="middle" font-size="20" font-weight="700" fill="#B0761F">设计方向 · v1 锁 loop 层</text>
+    <line x1="350" y1="265" x2="368" y2="265" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="660" y1="265" x2="678" y2="265" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="970" y1="265" x2="988" y2="265" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="1280" y1="265" x2="1298" y2="265" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+  </g>
+
+  <!-- 对照指标 -->
+  <text x="80" y="402" font-family="Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#0F2A4A">对照指标：off（裸 agent）vs on（接入 Loom）</text>
+  <g font-family="Noto Sans CJK SC, sans-serif" font-size="20" fill="#0F2A4A">
+    <rect x="70" y="426" width="360" height="92" rx="12" fill="#FFFFFF" stroke="#9CC3E8" stroke-width="2.5"/>
+    <text x="250" y="477" text-anchor="middle">成功率增量（同任务集开/关）</text>
+    <rect x="460" y="426" width="360" height="92" rx="12" fill="#FFFFFF" stroke="#9CC3E8" stroke-width="2.5"/>
+    <text x="640" y="477" text-anchor="middle">builder 用了多少轮</text>
+    <rect x="850" y="426" width="360" height="92" rx="12" fill="#FFFFFF" stroke="#9CC3E8" stroke-width="2.5"/>
+    <text x="1030" y="477" text-anchor="middle">回归保持率（能力只涨不跌）</text>
+    <rect x="1240" y="426" width="290" height="92" rx="12" fill="#FFFFFF" stroke="#9CC3E8" stroke-width="2.5"/>
+    <text x="1385" y="477" text-anchor="middle">成本（token / 轮）</text>
+  </g>
+
+  <!-- 产出 -->
+  <rect x="70" y="560" width="1460" height="200" rx="16" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="2.5"/>
+  <text x="110" y="610" font-family="Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#1E5C47">产出：一张成长曲线 + 每级 run-record</text>
+  <text x="110" y="664" font-family="Noto Sans CJK SC, sans-serif" font-size="20" fill="#3F7A64">“第 1 天 0/3，第 N 轮 5/5，而且越往后长得越快”，这是推荐页最有力的素材</text>
+  <text x="110" y="712" font-family="Noto Sans CJK SC, sans-serif" font-size="20" fill="#5A7290">已有素材：fromzero 严格对照 成功率增量 +3、自主换模型、配置调度、成本记账，loom-bench 只是把它们串成可复现的阶梯 + 一张图</text>
+
+  <!-- 体验包 -->
+  <rect x="70" y="790" width="1460" height="150" rx="16" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="2.5"/>
+  <text x="110" y="840" font-family="Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#2A6FB0">3 分钟体验包：一条命令接入，一条命令看它自己长</text>
+  <text x="110" y="890" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" fill="#0F2A4A">dsh plugin --profile headless add dsh-loom@1.0.2</text>
+  <text x="110" y="922" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" fill="#0F2A4A">npm run fromzero:all </text>
+</svg>

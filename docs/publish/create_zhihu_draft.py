@@ -23,6 +23,7 @@ def main() -> None:
     ap.add_argument("--cover", default="")
     ap.add_argument("--draft-id", default="", help="更新已有草稿时传草稿 id")
     ap.add_argument("--publish", action="store_true", help="更新后直接发布")
+    ap.add_argument("--topics", default="", help="逗号分隔的知乎话题 id，如 1862547279613046600,2071646635214616004")
     args = ap.parse_args()
 
     md_path = Path(args.md_path)
@@ -80,9 +81,12 @@ def main() -> None:
         draft_id = resp.json().get("id", "")
         if not draft_id:
             sys.exit(f"建草稿失败: {resp.text[:300]}")
+    patch_body = {"title": title, "content": html}
+    if args.topics:
+        patch_body["topics"] = [t.strip() for t in args.topics.split(",") if t.strip()]
     patch = client._session.patch(
         f"{ZHIHU_ZHUANLAN_API}/articles/{draft_id}/draft",
-        json={"title": title, "content": html},
+        json=patch_body,
         timeout=30,
     )
     if patch.status_code not in (200, 204):

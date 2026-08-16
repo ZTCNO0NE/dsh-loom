@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1024" viewBox="0 0 1536 1024" role="img" aria-labelledby="cpTitle cpDesc">
+  <title id="cpTitle">一切皆插件：dsh-loom 主封面</title>
+  <desc id="cpDesc">中央 Loom 核心，四周工具/技能/配置/模型可插拔模块，底部旧内核经核验闸门更换为新内核，外圈治理回路。</desc>
+  <defs>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#132A4A" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="glow" cx="50%" cy="58%" r="55%">
+      <stop offset="0%" stop-color="#0F2E55" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#0A1628" stop-opacity="1"/>
+    </radialGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#35D0BA"/>
+    </marker>
+  </defs>
+  <rect width="1536" height="1024" fill="url(#glow)"/>
+  <rect width="1536" height="1024" fill="url(#grid)"/>
+
+  <!-- 顶部标题 -->
+  <text x="768" y="92" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="78" font-weight="700" fill="#E8F3FF">一切皆插件</text>
+  <text x="768" y="146" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="24" fill="#7FA3CC">工具 · 技能 · 配置 · 模型 · 内核 —— 每一条都有一条被治理地替换的路径</text>
+  <text x="768" y="202" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="22" fill="#35D0BA">治理回路：观察 → 判断 → 设计 → 核验 → 安装 → 回滚</text>
+
+  <!-- 治理回路轨道 -->
+  <circle cx="768" cy="560" r="390" fill="none" stroke="#1E3A5F" stroke-width="2" stroke-dasharray="10 8"/>
+  <path d="M1130,510 A390,390 0 0 1 1152,640" fill="none" stroke="#35D0BA" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- 中央 Loom 核心 -->
+  <g>
+    <polygon points="768,320 918,395 918,545 768,620 618,545 618,395" fill="#0E2A4A" stroke="#35D0BA" stroke-width="3"/>
+    <path d="M618,395 L918,545 M618,545 L918,395 M768,320 L768,620 M680,375 L856,595 M856,375 L680,595" stroke="#1F7F72" stroke-width="1.5" fill="none"/>
+    <circle cx="768" cy="470" r="36" fill="#35D0BA" opacity="0.9"/>
+    <text x="768" y="664" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="22" font-weight="700" fill="#E8F3FF">Loom 核心</text>
+    <text x="768" y="696" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="15" fill="#5A7A9C">织：使用、纠正与失败 → 能力</text>
+  </g>
+
+  <!-- 四个可插拔模块 -->
+  <g font-family="Noto Sans CJK SC, sans-serif">
+    <!-- 工具 -->
+    <rect x="300" y="288" width="260" height="112" rx="12" fill="#0E2A4A" stroke="#4A82B8" stroke-width="2"/>
+    <text x="430" y="330" text-anchor="middle" font-size="24" font-weight="700" fill="#E8F3FF">工具 · Tools</text>
+    <text x="430" y="362" text-anchor="middle" font-size="15" fill="#7FA3CC">可插拔模块</text>
+    <circle cx="330" cy="384" r="5" fill="#35D0BA"/>
+    <!-- 技能 -->
+    <rect x="976" y="288" width="260" height="112" rx="12" fill="#0E2A4A" stroke="#4A82B8" stroke-width="2"/>
+    <text x="1106" y="330" text-anchor="middle" font-size="24" font-weight="700" fill="#E8F3FF">技能 · Skills</text>
+    <text x="1106" y="362" text-anchor="middle" font-size="15" fill="#7FA3CC">可插拔模块</text>
+    <circle cx="1006" cy="384" r="5" fill="#35D0BA"/>
+    <!-- 配置 -->
+    <rect x="270" y="508" width="260" height="112" rx="12" fill="#0E2A4A" stroke="#4A82B8" stroke-width="2"/>
+    <text x="400" y="550" text-anchor="middle" font-size="24" font-weight="700" fill="#E8F3FF">配置 · Config</text>
+    <text x="400" y="582" text-anchor="middle" font-size="15" fill="#7FA3CC">可插拔模块</text>
+    <circle cx="300" cy="604" r="5" fill="#35D0BA"/>
+    <!-- 模型 -->
+    <rect x="1006" y="508" width="260" height="112" rx="12" fill="#0E2A4A" stroke="#4A82B8" stroke-width="2"/>
+    <text x="1136" y="550" text-anchor="middle" font-size="24" font-weight="700" fill="#E8F3FF">模型 · Model</text>
+    <text x="1136" y="582" text-anchor="middle" font-size="15" fill="#7FA3CC">可插拔模块</text>
+    <circle cx="1036" cy="604" r="5" fill="#35D0BA"/>
+  </g>
+
+  <!-- 底部：内核更换 -->
+  <g font-family="Noto Sans CJK SC, sans-serif">
+    <rect x="230" y="788" width="240" height="112" rx="12" fill="#241A1A" stroke="#E0606A" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="350" y="830" text-anchor="middle" font-size="22" font-weight="700" fill="#FFB2B7">旧内核 · 被抽出</text>
+    <text x="350" y="862" text-anchor="middle" font-size="14" fill="#B98A8A">快照留档 · 可回滚</text>
+    <line x1="472" y1="844" x2="680" y2="844" stroke="#E0606A" stroke-width="3" marker-end="url(#arrow)"/>
+    <!-- 核验闸门 -->
+    <path d="M700,844 A68,68 0 0 1 836,844" fill="none" stroke="#FFC46B" stroke-width="4"/>
+    <line x1="700" y1="844" x2="836" y2="844" stroke="#FFC46B" stroke-width="4"/>
+    <text x="768" y="966" text-anchor="middle" font-size="20" font-weight="700" fill="#FFC46B">核验 → 放行（确定性对齐）</text>
+    <!-- 新内核 -->
+    <rect x="1066" y="788" width="240" height="112" rx="12" fill="#0F3A36" stroke="#35D0BA" stroke-width="3"/>
+    <text x="1186" y="830" text-anchor="middle" font-size="22" font-weight="700" fill="#B8F0E4">新内核 · 核验通过</text>
+    <text x="1186" y="862" text-anchor="middle" font-size="14" fill="#6FA98E">装上更聪明的 loop</text>
+    <line x1="838" y1="844" x2="1062" y2="844" stroke="#35D0BA" stroke-width="3" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- 底部品牌 -->
+  <line x1="368" y1="982" x2="1168" y2="982" stroke="#1E3A5F" stroke-width="1.5"/>
+  <text x="768" y="1008" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="18" fill="#5A7A9C">dsh-loom · Loom 织机 · DeepSeek Harness 插件</text>
+</svg>

@@ -26,6 +26,9 @@ export function officialDeepSeekLlm(options = {}) {
                     temperature: call.temperature ?? 0,
                     max_tokens: call.maxTokens ?? 4000,
                     response_format: { type: 'json_object' },
+                    // JSON-mode calls must not burn the budget on reasoning_content:
+                    // the adapter only consumes `content`, so reasoning must be off.
+                    reasoning: { efforts: ['off'], defaultEffort: 'off' },
                     messages: [{ role: 'user', content: call.prompt }],
                 }),
             });
@@ -36,6 +39,7 @@ export function officialDeepSeekLlm(options = {}) {
             const decoder = new TextDecoder();
             let buffer = '';
             let usageYielded = false;
+            let sawContent = false;
             yield { kind: 'block-start', type: 'text' };
             for (;;) {
                 const { done, value } = await reader.read();
@@ -54,8 +58,10 @@ export function officialDeepSeekLlm(options = {}) {
                     try {
                         const chunk = JSON.parse(payload);
                         const delta = chunk.choices?.[0]?.delta;
-                        if (delta?.content)
+                        if (delta?.content) {
+                            sawContent = true;
                             yield { kind: 'text-delta', text: delta.content };
+                        }
                         if (chunk.usage && !usageYielded) {
                             usageYielded = true;
                             yield {
@@ -71,6 +77,9 @@ export function officialDeepSeekLlm(options = {}) {
                         // skip malformed SSE lines
                     }
                 }
+            }
+            if (!sawContent) {
+                throw new Error('officialDeepSeekLlm: stream ended without content');
             }
             yield { kind: 'block-end', type: 'text' };
         },

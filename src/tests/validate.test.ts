@@ -107,6 +107,24 @@ describe('validator A3', () => {
     expect(report.failureSummary).toContain('coverage')
   })
 
+  it('accepts named probe aliases as coverage for config/persona patches', async () => {
+    const p = patch()
+    p.expectedTrajectory!.coverage = { claimedBehaviors: ['输出格式偏好生效'] }
+    p.expectedTrajectory!.events = [
+      { type: 'turn/start', turn: 1 },
+      { type: 'turn/end', turn: 1, reason: 'success' },
+    ]
+    const v = validator()
+    const report = await v.run(p, await v.loadRegressionCases(), {
+      actualEvents: [
+        { type: 'turn/start', turn: 1 },
+        { type: 'turn/end', turn: 1, reason: 'success' },
+      ],
+      nameAliases: ['system-prompt'],
+    })
+    expect(report.verdict).toBe('approved')
+  })
+
   it('rejects on config invariance violation', async () => {
     const report = await reportFor({
       actualEvents: OK_EVENTS,

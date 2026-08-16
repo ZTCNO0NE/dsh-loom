@@ -23,6 +23,7 @@ export declare const paths: {
     readonly events: (root: string, sessionId: string) => string;
     readonly frames: (root: string, sessionId: string) => string;
     readonly handoff: (root: string, sessionId: string) => string;
+    readonly errors: (root: string, sessionId: string) => string;
     readonly notices: (root: string, sessionId: string) => string;
     readonly worldState: (root: string, sessionId: string) => string;
     readonly actorProfile: (root: string, sessionId: string) => string;

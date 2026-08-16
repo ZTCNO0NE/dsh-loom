@@ -97,6 +97,7 @@ export const paths = {
   events: (root: string, sessionId: string) => join(workspaceDir(root, sessionId), 'trajectory', 'events.jsonl'),
   frames: (root: string, sessionId: string) => join(workspaceDir(root, sessionId), 'trajectory', 'frames.jsonl'),
   handoff: (root: string, sessionId: string) => join(workspaceDir(root, sessionId), 'handoff', 'stall.jsonl'),
+  errors: (root: string, sessionId: string) => join(workspaceDir(root, sessionId), 'errors.jsonl'),
   notices: (root: string, sessionId: string) => join(workspaceDir(root, sessionId), 'notices.jsonl'),
   worldState: (root: string, sessionId: string) => join(workspaceDir(root, sessionId), 'trajectory', 'world-state.json'),
   actorProfile: (root: string, sessionId: string) => join(workspaceDir(root, sessionId), 'trajectory', 'actor-profile.json'),

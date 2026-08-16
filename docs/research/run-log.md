@@ -236,3 +236,26 @@
 - 备注：`--profile demo` 一次性 headless 运行会挂起（demo profile 含 web UI 生命周期，不退出），脚本/CI 请用 headless profile；交互使用走 web 正常。
 - **GitHub**：`ZTCNO0NE/dsh-loom` 已推送源码（src/docs/figures，scripts 不提交）；提交 `a296c3d`（76580a2..a296c3d）；HEAD 已扫描无密钥泄漏（scripts/.env/eval 均不入库）。
 - 测试 99/99。
+
+### 2026-08-17 refine-skill-demo 证据归档（含多轮排障）
+
+- **结论：行为已验证（两次独立复现）**，未再为"脚本退出"烧钱：
+  - 00:48 与 01:01 两次 phase C 中，actor 按 builder 生成的 `actor-refine` 技能调用 meta_auto → builder 产出 fs-write 工具（history `insert z3brid` applied）→ actor 用新工具写出 `/tmp/refine-skill-demo.txt`，内容 `refine-skill-ok`（两次均实测确认）。
+- **排障清单（本轮修复的真实 bug）**：
+  1. 回合计时跨回合不归零 → 监督员每 30s 误杀回合（observer turn/end 未重置 turnStartAt）；
+  2. 官方 V4 Flash JSON 模式先吐 reasoning_content 吃满 max_tokens → content 为空（适配器 reasoning off + 空流抛错）；
+  3. 清洗 key 时环境变量名写错（DSH_META_* vs DEEPSEEK_*）；
+  4. preferences demo 探针本地/官方 key 串味；
+  5. gate 空流致命 → fail-open（监督员不可用时偏向唤起）+ 回合边界异常落盘不崩进程；
+  6. `ctx.loader` 未注入 → insert 失败（inject 加 loader + 容错）；
+  7. 旧技能正文 `meta.auto`（改名后工具不存在）+ 匹配器不识别 → 已改 meta_auto；
+  8. execFileSync 超时只杀 pnpm、真 node 占住 stdout 管道导致脚本永久挂起 → 改为 spawn + 进程组 SIGKILL。
+- **状态**：为控制成本已停止全部 demo；脚本终止问题已修但未重跑留档；run-record 为重建（两次观察证据），后续如需正式 run-record 可低成本重跑（phase C 仅本地 27b + 一次 builder）。
+
+### 2026-08-17 preferences-demo（偏好沉淀端到端，正式 PASS）
+
+- 场景：用户要求"回复一律纯文本、不要 markdown，并长期记住"（无任何内部词）。
+- 链路：监督员唤起（S3-user-correction）→ builder（V4 Flash）自主产出 system-prompt 更新 + 声明 preferences → 隔离探针 → verifier approved（coverage 修复后）→ gate 应用（2 轮，post-loop）→ preferences.json 落盘 → headless 调 meta_growth 可见。
+- 结果：**pass=true**（run-records/preferences-demo.json）：fired、ledgerCount=2、preferences 2 条（output-format ×2 合并）、preferenceVisible=true。
+- 修复：① verifier coverage 允许 nameAliases（config/persona 无命名事件，探针目标即覆盖证据）；② 最终 meta_growth headless 缺 LOCAL overlay（actor 模型路由错）；③ harness 脚本补 onApplied（ledger/report 落盘）。
+- 测试：101/101。

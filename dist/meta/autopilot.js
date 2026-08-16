@@ -40,9 +40,23 @@ export class AutoPilot {
         const signals = observer.collect(thresholds);
         const actorModel = currentConfig['agent-default-model']?.config?.model;
         observer.collectTelemetry(typeof actorModel === 'string' ? actorModel : undefined);
-        let decision = gate.decideOnDigest
-            ? await gate.decideOnDigest(digest)
-            : await gate.decide(signals, `最近 ${Math.min(signals.length, 5)} 条信号；硬触发规则：${triggers.map((trigger) => trigger.rule).join(', ')}`, `epoch=${state.epoch} iterationsThisEpoch=${state.iterationsThisEpoch} lastApplyTurn=${state.lastApplyTurn}`, triggers.flatMap((trigger) => trigger.evidenceRefs));
+        let decision;
+        try {
+            decision = gate.decideOnDigest
+                ? await gate.decideOnDigest(digest)
+                : await gate.decide(signals, `最近 ${Math.min(signals.length, 5)} 条信号；硬触发规则：${triggers.map((trigger) => trigger.rule).join(', ')}`, `epoch=${state.epoch} iterationsThisEpoch=${state.iterationsThisEpoch} lastApplyTurn=${state.lastApplyTurn}`, triggers.flatMap((trigger) => trigger.evidenceRefs));
+        }
+        catch (error) {
+            // Supervisor is advisory: if it cannot decide, bias to invoking the
+            // builder (the verifier still guards quality downstream).
+            decision = {
+                schemaVersion: PROTOCOL_VERSION,
+                shouldRefine: true,
+                rationale: `supervisor unavailable, bias to fire: ${String(error)}`,
+                evidenceRefs: [],
+                createdAt: new Date().toISOString(),
+            };
+        }
         // User messages alone go through the supervisor (filtered); runtime
         // malfunction evidence (failures/regression/stall) forces the wake.
         // Explicit requirements (meta.auto with text / meta.iterate) are S9:

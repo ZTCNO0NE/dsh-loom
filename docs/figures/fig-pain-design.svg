@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="pdTitle pdDesc">
+  <title id="pdTitle">九个真实痛点 → 一个设计回应</title>
+  <desc id="pdDesc">自进化常见痛点与 dsh-loom 设计约束的对照图：每个硬约束背后都是一个真实踩过的坑。</desc>
+  <defs>
+    <pattern id="dot" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.2" fill="#DDE7F2"/>
+    </pattern>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2F5E8E"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="1180" fill="#FFFFFF"/>
+  <rect width="1600" height="1180" fill="url(#dot)"/>
+
+  <text x="80" y="70" font-family="Noto Sans CJK SC, sans-serif" font-size="48" font-weight="700" fill="#0F2A4A">九个真实痛点 → 一个设计回应</text>
+  <text x="82" y="120" font-family="Noto Sans CJK SC, sans-serif" font-size="22" fill="#5A7290">每个硬约束背后，都是一个真实踩过的坑</text>
+
+  <text x="330" y="158" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#9E3B3D">自进化的真实痛点</text>
+  <text x="1270" y="158" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#1E5C47">dsh-loom 的硬约束</text>
+
+  <g font-family="Noto Sans CJK SC, sans-serif" font-size="26">
+    <g>
+      <rect x="70" y="168" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="224" text-anchor="middle" fill="#7A2E30">① 自己给自己当裁判：自评越改越自信</text>
+      <rect x="830" y="168" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="224" text-anchor="middle" fill="#1E5C47">核验器独立 · 帧对齐 · 第一次分歧即失败（LLM 不进判定）</text>
+    </g>
+    <g>
+      <rect x="70" y="272" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="328" text-anchor="middle" fill="#7A2E30">② 顺手改了验证器：信任根基泄漏</text>
+      <rect x="830" y="272" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="328" text-anchor="middle" fill="#1E5C47">TCB 只读：验证器/回归集对 agent 物理不可写</text>
+    </g>
+    <g>
+      <rect x="70" y="376" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="432" text-anchor="middle" fill="#7A2E30">③ 运行中改自己：热更新崩溃、状态丢失</text>
+      <rect x="830" y="376" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="432" text-anchor="middle" fill="#1E5C47">冷替换 · 回合边界停机 · before/after 快照 · 自动回滚</text>
+    </g>
+    <g>
+      <rect x="70" y="480" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="536" text-anchor="middle" fill="#7A2E30">④ 靠提示词让 agent 自觉：长任务里衰减</text>
+      <rect x="830" y="480" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="536" text-anchor="middle" fill="#1E5C47">监督员硬触发（S1-S8）· 信号落盘，不依赖模型自觉</text>
+    </g>
+    <g>
+      <rect x="70" y="584" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="640" text-anchor="middle" fill="#7A2E30">⑤ 上下文压缩丢状态：忘了为什么改</text>
+      <rect x="830" y="584" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="640" text-anchor="middle" fill="#1E5C47">文件优先：signals / patches / world-model 全部落盘</text>
+    </g>
+    <g>
+      <rect x="70" y="688" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="744" text-anchor="middle" fill="#7A2E30">⑥ 同一个坑反复踩：旧能力退化没人管</text>
+      <rect x="830" y="688" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="744" text-anchor="middle" fill="#1E5C47">免疫记忆：失败用例沉淀回归集 · 能力只涨不跌</text>
+    </g>
+    <g>
+      <rect x="70" y="792" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="848" text-anchor="middle" fill="#7A2E30">⑦ 空转死循环没人管：烧时间烧钱</text>
+      <rect x="830" y="792" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="848" text-anchor="middle" fill="#1E5C47">观察器完整帧 · 阶段预算 + 进度增量判定 · 主动暂停</text>
+    </g>
+    <g>
+      <rect x="70" y="896" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="952" text-anchor="middle" fill="#7A2E30">⑧ 模型路由错/太慢太贵：没人感知资源</text>
+      <rect x="830" y="896" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="952" text-anchor="middle" fill="#1E5C47">资源感知调度：时延 / token / 成本超预算自动换模型</text>
+    </g>
+    <g>
+      <rect x="70" y="1000" width="620" height="88" rx="14" fill="#FFF4F2" stroke="#D9686A" stroke-width="3"/>
+      <text x="380" y="1056" text-anchor="middle" fill="#7A2E30">⑨ 垂直技能靠人写：每次都重新教</text>
+      <rect x="830" y="1000" width="730" height="88" rx="14" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="3"/>
+      <text x="1195" y="1056" text-anchor="middle" fill="#1E5C47">从使用史沉淀技能/偏好 · 跨会话成长 · 技能库可导出</text>
+    </g>
+    <line x1="690" y1="212" x2="828" y2="212" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="690" y1="316" x2="828" y2="316" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="690" y1="420" x2="828" y2="420" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="690" y1="524" x2="828" y2="524" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="690" y1="628" x2="828" y2="628" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="690" y1="732" x2="828" y2="732" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="690" y1="836" x2="828" y2="836" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="690" y1="940" x2="828" y2="940" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+    <line x1="690" y1="1044" x2="828" y2="1044" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+  </g>
+
+  <rect x="70" y="1100" width="1460" height="70" rx="14" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="3"/>
+  <text x="800" y="1144" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#0F2A4A">职责分离不是洁癖：提议者、裁判、执行者、体验者各管一件事，反而每件事都可靠</text>
+</svg>

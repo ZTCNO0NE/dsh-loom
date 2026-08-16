@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="govTitle govDesc">
+  <title id="govTitle">能力问题 vs 治理问题</title>
+  <desc id="govDesc">行业方案大多回答怎么让 agent 改自己（能力层）；dsh-loom 回答谁有权让它改、怎么证明改对了、改坏了谁兜底（治理层）。</desc>
+  <defs>
+    <pattern id="dot" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.2" fill="#DDE7F2"/>
+    </pattern>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2F5E8E"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="900" fill="#FFFFFF"/>
+  <rect width="1600" height="900" fill="url(#dot)"/>
+
+  <text x="80" y="66" font-family="Noto Sans CJK SC, sans-serif" font-size="52" font-weight="700" fill="#0F2A4A">能力问题 vs 治理问题</text>
+  <text x="82" y="106" font-family="Noto Sans CJK SC, sans-serif" font-size="28" fill="#5A7290">能力可以叠加，治理必须先于能力</text>
+
+  <!-- 能力层 -->
+  <rect x="70" y="150" width="1460" height="310" rx="16" fill="#EEF6FF" stroke="#9CC3E8" stroke-width="2.5"/>
+  <text x="110" y="198" font-family="Noto Sans CJK SC, sans-serif" font-size="32" font-weight="700" fill="#2A6FB0">能力层：怎么让 agent 改自己</text>
+  <g font-family="Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#0F2A4A">
+    <rect x="110" y="230" width="330" height="96" rx="12" fill="#FFFFFF" stroke="#9CC3E8" stroke-width="2.5"/>
+    <text x="275" y="283" text-anchor="middle">self-refine / LLM-judge</text>
+    <rect x="480" y="230" width="330" height="96" rx="12" fill="#FFFFFF" stroke="#9CC3E8" stroke-width="2.5"/>
+    <text x="645" y="283" text-anchor="middle">prime-agent refine</text>
+    <rect x="850" y="230" width="330" height="96" rx="12" fill="#FFFFFF" stroke="#9CC3E8" stroke-width="2.5"/>
+    <text x="1015" y="283" text-anchor="middle">SAGE / CoEvoSkills</text>
+    <rect x="1220" y="230" width="270" height="96" rx="12" fill="#FFFFFF" stroke="#9CC3E8" stroke-width="2.5"/>
+    <text x="1355" y="283" text-anchor="middle">Tycho 帧对齐</text>
+  </g>
+  <text x="110" y="410" font-family="Noto Sans CJK SC, sans-serif" font-size="25" fill="#6B8DB0">同一个问题：让模型把自己改得更好 —— 能力可以互相叠加、互相借鉴</text>
+
+  <!-- 治理层 -->
+  <rect x="70" y="560" width="1460" height="270" rx="16" fill="#F0FAF6" stroke="#2F8F6B" stroke-width="2.5"/>
+  <text x="110" y="608" font-family="Noto Sans CJK SC, sans-serif" font-size="32" font-weight="700" fill="#1E5C47">治理层：谁有权让它改 · 怎么证明改对了 · 改坏了谁兜底</text>
+  <g font-family="Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#0F2A4A">
+    <rect x="110" y="640" width="440" height="96" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2.5"/>
+    <text x="330" y="693" text-anchor="middle">判断权整体上移（不当裁判）</text>
+    <rect x="590" y="640" width="440" height="96" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2.5"/>
+    <text x="810" y="693" text-anchor="middle">确定性核验 + TCB 只读</text>
+    <rect x="1070" y="640" width="420" height="96" rx="12" fill="#FFFFFF" stroke="#2F8F6B" stroke-width="2.5"/>
+    <text x="1280" y="693" text-anchor="middle">冷替换 + 快照回滚 + 免疫记忆</text>
+  </g>
+  <text x="110" y="792" font-family="Noto Sans CJK SC, sans-serif" font-size="25" fill="#3F7A64">dsh-loom 的位置：不是又一个"怎么改"的方案，而是把"改"放进治理框架里</text>
+
+  <line x1="800" y1="460" x2="800" y2="558" stroke="#2F5E8E" stroke-width="4" marker-end="url(#arr)"/>
+  <text x="812" y="518" font-family="Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#B0761F">治理必须先于能力</text>
+</svg>

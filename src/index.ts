@@ -40,7 +40,7 @@ type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string
 
 export const name = 'dsh-meta-validate'
 
-export const inject = ['tools', 'agents'] as const
+export const inject = ['tools', 'agents', 'loader'] as const
 
 export interface MetaValidateConfig {
   mode: 'observe' | 'propose' | 'apply'
@@ -635,12 +635,21 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       stallAbort: config.reviewGate.stallAbort,
       refineRunning: () => refineState.running,
       onTrigger: async (turn) => {
-        await withRefineRunning(async () => {
-          const cases = await validator.loadRegressionCases()
-          const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline)
-          const currentConfig = currentConfigOf(ctx, baseline)
-          await autopilot.step(turn, currentConfig, undefined, { actualEvents: [] }, ops)
-        })
+        try {
+          await withRefineRunning(async () => {
+            const cases = await validator.loadRegressionCases()
+            const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline)
+            const currentConfig = currentConfigOf(ctx, baseline)
+            await autopilot.step(turn, currentConfig, undefined, { actualEvents: [] }, ops)
+          })
+        } catch (error) {
+          appendJsonl(paths.errors(root, config.sessionId), {
+            schemaVersion: PROTOCOL_VERSION,
+            at: new Date().toISOString(),
+            turn,
+            error: String(error),
+          })
+        }
       },
     })
     hook.attach()
@@ -745,7 +754,12 @@ function buildApplyOps(
   baseline: { ensureLoaded(): void; rows: Record<string, { name?: string; config: Record<string, unknown> }>; set(targetId: string, name: string | undefined, config: Record<string, unknown>): void },
 ): Parameters<IterationLoop['run']>[4] {
   baseline.ensureLoaded()
-  const loader = (ctx as unknown as { loader?: LoaderLike }).loader
+  let loader: LoaderLike | undefined
+  try {
+    loader = (ctx as unknown as { loader?: LoaderLike }).loader
+  } catch {
+    loader = undefined
+  }
   if (!loader) return undefined
   const installedByTarget = new Map<string, { dir: string; entryId: string }>()
   const entries = (): LoaderEntry[] => [...(loader.entries() as Iterable<LoaderEntry>)]

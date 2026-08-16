@@ -62,7 +62,11 @@ export class Validator {
         // claimed behaviors semantically.
         const claimed = expected.coverage?.claimedBehaviors ?? [];
         const namedExpected = expected.events.filter((event) => typeof event.name === 'string' && event.name);
-        const coverage = claimed.length > 0 ? (namedExpected.length > 0 ? 1 : 0) : null;
+        // Config/persona patches legitimately have no named tool events; a successful
+        // isolation probe still proves the target loaded/behaved (collectFrames maps
+        // nameAliases to the candidate row id), so coverage counts that as satisfied.
+        const namedAliases = input.nameAliases ?? [];
+        const coverage = claimed.length > 0 ? (namedExpected.length > 0 || namedAliases.length > 0 ? 1 : 0) : null;
         return {
             accuracy: nGraded > 0 ? nMatched / nGraded : null,
             strictAccuracy: nGraded > 0 ? nMatched / nGraded : null,

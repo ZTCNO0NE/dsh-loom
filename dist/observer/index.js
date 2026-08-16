@@ -123,6 +123,11 @@ export class Observer {
             this.currentTurnStartAt = time;
             this.currentStep = 0;
         }
+        if (type === 'turn/end') {
+            // A closed turn must not keep inflating turnAge for the next turn;
+            // otherwise the stall supervisor aborts every subsequent turn.
+            this.currentTurnStartAt = null;
+        }
         if (type === 'step/start')
             this.currentStep = Number(data.step ?? this.currentStep + 1);
         const frame = {
