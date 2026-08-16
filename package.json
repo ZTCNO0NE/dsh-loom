@@ -1,7 +1,27 @@
 {
   "name": "dsh-loom",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Loom (织机) — second-validator plugin for DeepSeek Harness: a silent external coach that weaves your agent's tools, skills, config and even its model from usage history, with deterministic verification and cold-apply.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "deepseek",
+    "plugin",
+    "agent",
+    "self-evolution",
+    "self-improvement",
+    "second-verifier",
+    "llm",
+    "ai-agent"
+  ],
+  "homepage": "https://github.com/ZTCNO0NE/dsh-loom",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZTCNO0NE/dsh-loom.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZTCNO0NE/dsh-loom/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
