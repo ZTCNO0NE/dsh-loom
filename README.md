@@ -184,6 +184,19 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 3. **改错了能还原，验证链碰不到**。所有修改都留 before/after 快照，安装失败自动回滚；核验器、回归集对 agent 只读；所有关键状态落盘文件（不信任上下文，因为压缩会丢、注意力会稀疏）。
 4. **越用越懂你**。同样的回路既做"能力补齐"（工具/技能/配置/模型），也做"个性化沉淀"（纠正过的格式、你的领域习惯、你的垂直技能库）——改进不是一次性事件，是持续发生的。
 
+### 和 dsh 极简模式的区别
+
+dsh 自带的"极简模式"（minimal agent preset）是**出厂配置**：两个工具、固定提示词、无压缩，选一次就固定。dsh-loom 是**运行中的治理回路**：它作用于任何 agent 之上，让 agent 在运行中自动长出工具/技能/配置，自己换模型，跨会话沉淀偏好。
+
+| 维度 | 极简模式 | dsh-loom |
+| --- | --- | --- |
+| 本质 | 静态预设（配置态） | 动态进化回路（治理态） |
+| 工具/技能/配置 | 出厂定好 | 运行中自动长出 |
+| 自己换模型 | 不能 | 能（qwen3.6-27b → v4-flash → deepseek-chat） |
+| 一句话改运行时 | 手动改配置 | 自动消化并执行 |
+| 跨会话成长 | 无 | 技能/偏好/台账落盘，下次继续 |
+| 改 runtime/内核 | 没有这个维度 | 设计方向；v1 锁 loop 层，验证成熟后放开 |
+
 ## 工作原理（一分钟）
 
 ![五步回路：观察 → 判断 → 设计 → 核验 → 安装](docs/figures/fig-loop.svg)
@@ -223,11 +236,16 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 **1. 安装**
 
 ```bash
-dsh plugin add dsh-loom
-dsh --profile demo --dump-config   # 确认组合树
+# 方式一：npm 包
+dsh plugin --profile headless add dsh-loom@1.0.2
+
+# 方式二：GitHub 仓库
+dsh plugin --profile headless add "github:ZTCNO0NE/dsh-loom#main"
+
+dsh --profile headless --dump-config   # 确认组合树
 ```
 
-想从源码构建？`npm install && npm run build`，然后 `dsh plugin add ./dsh-loom`（或 tarball：`dsh plugin add ./dsh-loom-1.0.0.tgz`）。
+想从源码构建？`npm install && npm run build`，然后 `dsh plugin add ./dsh-loom`（或 tarball：`dsh plugin add ./dsh-loom-1.0.2.tgz`）。
 
 **2. 开一个开关**（后台优化，不卡对话）
 
