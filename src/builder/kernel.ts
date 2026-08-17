@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join, relative, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { appendJsonl, atomicWriteJson, readJson, readJsonl, sha256, workspaceDir } from '../protocol/index.js'
@@ -47,6 +48,16 @@ export type BuilderToolAction =
   | { name: 'read_journal'; limit: number }
   | { name: 'write_world_model'; value: Record<string, unknown> }
   | { name: 'write_plan'; value: Record<string, unknown> }
+  /** Read-only host exploration. Deployment decides the readable scope. */
+  | { name: 'read_file'; path: string }
+  | { name: 'list_directory'; path: string }
+  /** Builder-owned, persistent multi-file scratch space. */
+  | { name: 'write_workspace_file'; path: string; content: string }
+  | { name: 'read_workspace_file'; path: string }
+  /** Trusted-development command tool; stdout/stderr are durable feedback. */
+  | { name: 'run_workspace_command'; command: string; args: string[]; timeoutMs?: number }
+  /** Generic frozen proposal for a capability; it never applies a target change. */
+  | { name: 'write_submission'; proposal: Record<string, unknown> }
   /** Typed draft write; this is deliberately not a general filesystem tool. */
   | { name: 'write_candidate_draft'; proposal: Record<string, unknown> }
   | { name: 'inspect_staging'; path: string }
@@ -64,9 +75,11 @@ export function builderRunPaths(root: string, sessionId: string, id: string) {
     plan: join(base, 'state', 'plan.json'),
     journal: join(base, 'state', 'journal.jsonl'),
     snapshots: join(base, 'state', 'snapshots.jsonl'),
+    workspace: join(base, 'workspace'),
     staging: join(base, 'staging'),
     preflight: join(base, 'preflight'),
     proposal: join(base, 'submission', 'proposal.json'),
+    submissionDraft: join(base, 'submission', 'draft.json'),
   }
 }
 
@@ -122,7 +135,7 @@ export class BuilderKernel {
     const result: Record<string, unknown> = { kind: decision.kind }
     if (decision.kind === 'tool') result.action = decision.action.name
     if (decision.kind === 'continue') result.summary = decision.summary.slice(0, 1000)
-    if (decision.kind === 'submit') result.draftHash = sha256(readJson<Record<string, unknown>>(join(builderRunPaths(this.root, this.sessionId, id).staging, 'candidate.json')) ?? null)
+    if (decision.kind === 'submit') result.draftHash = sha256(this.submissionDraft(id) ?? null)
     if (decision.kind === 'abort') result.reason = decision.reason.slice(0, 1000)
     this.append(id, 'model', 'decision', result)
   }
@@ -153,9 +166,11 @@ export class BuilderKernel {
       return { state: 'aborted' }
     }
     if (decision.kind === 'submit') {
-      if (this.load(id).state !== 'ready_to_submit') throw new Error('builder run must pass preflight before submit')
-      const draft = readJson<Record<string, unknown>>(join(builderRunPaths(this.root, this.sessionId, id).staging, 'candidate.json'))
-      if (!draft) throw new Error('builder submission requires a preflighted candidate draft')
+      const draft = this.submissionDraft(id)
+      if (!draft) throw new Error('builder submission requires a proposal draft')
+      if (existsSync(join(builderRunPaths(this.root, this.sessionId, id).staging, 'candidate.json')) && this.load(id).state !== 'ready_to_submit') {
+        throw new Error('legacy candidate draft must pass preflight before submit')
+      }
       atomicWriteJson(builderRunPaths(this.root, this.sessionId, id).proposal, draft)
       this.snapshot(id, 'submission/proposal.json', draft)
       this.append(id, 'state', 'submit', { proposalHash: sha256(draft) })
@@ -201,8 +216,53 @@ export class BuilderKernel {
     if (action.name === 'write_plan') {
       atomicWriteJson(paths.plan, action.value)
       this.snapshot(id, 'state/plan.json', action.value)
-      this.transition(id, 'preflighting')
       return { written: 'plan', hash: sha256(action.value) }
+    }
+    if (action.name === 'read_file') {
+      const file = resolve(action.path)
+      if (!existsSync(file) || !statSync(file).isFile()) throw new Error('file is unavailable')
+      const content = readFileSync(file, 'utf8')
+      return { path: file, content: content.slice(0, 64_000), truncated: content.length > 64_000 }
+    }
+    if (action.name === 'list_directory') {
+      const directory = resolve(action.path)
+      if (!existsSync(directory) || !statSync(directory).isDirectory()) throw new Error('directory is unavailable')
+      const entries = readdirSync(directory, { withFileTypes: true }).slice(0, 500).map(entry => ({
+        name: entry.name,
+        type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
+      }))
+      return { path: directory, entries, truncated: readdirSync(directory).length > entries.length }
+    }
+    if (action.name === 'write_workspace_file') {
+      const file = this.workspacePath(paths.workspace, action.path)
+      mkdirSync(resolve(file, '..'), { recursive: true })
+      writeFileSync(file, action.content, 'utf8')
+      this.snapshot(id, `workspace/${action.path}`, action.content)
+      return { path: action.path, bytes: Buffer.byteLength(action.content, 'utf8'), hash: sha256(action.content) }
+    }
+    if (action.name === 'read_workspace_file') {
+      const file = this.workspacePath(paths.workspace, action.path)
+      if (!existsSync(file) || !statSync(file).isFile()) throw new Error('workspace file is unavailable')
+      const content = readFileSync(file, 'utf8')
+      return { path: action.path, content: content.slice(0, 64_000), truncated: content.length > 64_000 }
+    }
+    if (action.name === 'run_workspace_command') {
+      mkdirSync(paths.workspace, { recursive: true })
+      const timeout = Math.max(1_000, Math.min(300_000, Math.floor(action.timeoutMs ?? 120_000)))
+      const output = spawnSync(action.command, action.args, {
+        cwd: paths.workspace, encoding: 'utf8', timeout, maxBuffer: 256 * 1024,
+      })
+      return {
+        command: action.command, args: action.args, cwd: paths.workspace,
+        exitCode: output.status, signal: output.signal ?? undefined,
+        stdout: String(output.stdout ?? '').slice(-64_000), stderr: String(output.stderr ?? '').slice(-64_000),
+        ...(output.error ? { error: String(output.error) } : {}),
+      }
+    }
+    if (action.name === 'write_submission') {
+      atomicWriteJson(paths.submissionDraft, action.proposal)
+      this.snapshot(id, 'submission/draft.json', action.proposal)
+      return { written: 'submission_draft', hash: sha256(action.proposal) }
     }
     if (action.name === 'write_candidate_draft') {
       if (!action.proposal || Array.isArray(action.proposal)) throw new Error('candidate draft must be an object')
@@ -258,5 +318,17 @@ export class BuilderKernel {
       ref,
       hash: sha256(value),
     })
+  }
+
+  private submissionDraft(id: string): Record<string, unknown> | null {
+    const paths = builderRunPaths(this.root, this.sessionId, id)
+    return readJson<Record<string, unknown>>(paths.submissionDraft)
+      ?? readJson<Record<string, unknown>>(join(paths.staging, 'candidate.json'))
+  }
+
+  private workspacePath(workspace: string, requestedPath: string): string {
+    const path = resolve(workspace, requestedPath)
+    if (relative(workspace, path).startsWith('..')) throw new Error('workspace path escapes builder workspace')
+    return path
   }
 }

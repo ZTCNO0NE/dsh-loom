@@ -88,34 +88,32 @@ export class BuilderDriver {
 
   private prompt(context: ReturnType<BuilderKernel['context']>): string {
     const journal = context.journal.slice(-24)
-    const draftWritten = journal.some((entry) => entry.kind === 'tool' && entry.action === 'write_candidate_draft')
-    const preflightPassed = journal.some((entry) => entry.kind === 'tool' && entry.action === 'preflight_staging_entry' && entry.result?.passed === true)
-    const nextAction = !draftWritten
-      ? '当前没有 draft：先用 read_input/read_journal 理解证据（可选），随后 write_candidate_draft。'
-      : !preflightPassed
-        ? this.options.draftKind === 'loop_candidate'
-          ? 'loop candidate draft 已存在：下一回合必须只输出 preflight_staging_entry(candidate.json)；不要 inspect、重写或使用其它动作。'
-          : 'candidate draft 已存在：现在必须 inspect_staging 或 preflight_staging_entry；不要再次 write_candidate_draft，除非上一条 preflight 明确报错且你正在修复。'
-        : 'preflight 已通过：现在只能 submit 同一份 proposal，或 abort；不要再写 draft。'
     return [
       this.options.systemPrompt,
-      '你是受限 builder 微循环的一回合。你没有 verifier、gate、install 权限；不能调用 shell、网络或任意文件系统。',
+      '你是持久化 Builder 的一个极简 loop 回合。你可以按需读取输入、全局文件与目录，在自己的 workspace 写多文件，并运行工作区命令获得真实反馈。你自己决定下一步、是否继续探索或何时提交。',
+      '你没有 verifier、gate、install 权限；提交只会冻结 proposal，绝不会直接改变 actor、builder 或 loop 的 live target。',
       '只输出一个严格 JSON decision，禁止 Markdown、解释和额外字段。允许的形式：',
-      JSON.stringify({ kind: 'tool', action: { name: 'write_candidate_draft', proposal: this.options.draftKind === 'loop_candidate' ? { candidate: {} } : { patch: {} } } }),
       JSON.stringify({ kind: 'tool', action: { name: 'read_input', document: 'actor' } }),
       JSON.stringify({ kind: 'tool', action: { name: 'read_journal', limit: 20 } }),
+      JSON.stringify({ kind: 'tool', action: { name: 'read_file', path: '/path/to/source.ts' } }),
+      JSON.stringify({ kind: 'tool', action: { name: 'list_directory', path: '/path/to/source' } }),
+      JSON.stringify({ kind: 'tool', action: { name: 'write_workspace_file', path: 'notes/idea.md', content: '...' } }),
+      JSON.stringify({ kind: 'tool', action: { name: 'read_workspace_file', path: 'notes/idea.md' } }),
+      JSON.stringify({ kind: 'tool', action: { name: 'run_workspace_command', command: 'git', args: ['status', '--short'] } }),
       JSON.stringify({ kind: 'tool', action: { name: 'write_world_model', value: {} } }),
       JSON.stringify({ kind: 'tool', action: { name: 'write_plan', value: {} } }),
+      JSON.stringify({ kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'loop-evolution', changes: [] } } }),
+      '兼容旧 capability 的动作：',
+      JSON.stringify({ kind: 'tool', action: { name: 'write_candidate_draft', proposal: this.options.draftKind === 'loop_candidate' ? { candidate: {} } : { patch: {} } } }),
       JSON.stringify({ kind: 'tool', action: { name: 'inspect_staging', path: 'candidate.json' } }),
       JSON.stringify({ kind: 'tool', action: { name: 'preflight_staging_entry', entry: 'candidate.json' } }),
       JSON.stringify({ kind: 'continue', summary: '根据刚才工具反馈继续' }),
       JSON.stringify({ kind: 'submit' }),
       JSON.stringify({ kind: 'abort', reason: '证据不足或不能安全提交' }),
-      '提交前必须按顺序写 candidate draft、读取/检查反馈、预检 candidate.json；submit 没有 payload，只会冻结已预检 draft，不能携带或改写 proposal。',
-      '工具报错是下一轮可见反馈；可纠正时继续，不可纠正时 abort。预检不是 verifier 通过。',
-      `当前工作流硬提示：${nextAction}`,
+      '`write_submission` 写入通用 proposal draft，之后 `submit` 冻结它。旧 `write_candidate_draft` 保持兼容，但仍须 legacy preflight 才能提交。',
+      '工具报错和命令的 stdout/stderr 是下一轮可见反馈；由你判断可否纠正、继续或 abort。预检不是 verifier 通过。',
       this.options.draftKind === 'loop_candidate'
-        ? '本 run 的 draft 是 { candidate: CandidateAcquisitionRequest, rationale: string }；candidate.source 可以是受限 HTTPS Git source，也可以是固定 DSH baseline 上的 builder-generated edits。提交后核心 importer 才会执行校验、构建并只写 staging。你可以 abort 表示没有可审计候选。'
+        ? '本 run 可将 loop candidate 作为 `loop-evolution` capability proposal。你可先探索来源、源码、构建和测试，再选择提交何种可审计变更。'
         : '本 run 的 draft 是 { patch: MetaPatch, expectedTrajectory, selfCheck, worldModel? }。',
       `任务上下文：\n${this.options.taskContext.slice(0, 28_000)}`,
       `内核上下文（不可修改输入）：\n${JSON.stringify({ run: context.run, input: context.input, journal })}`.slice(0, 28_000),
@@ -161,6 +159,15 @@ export class BuilderDriver {
     if (action.name === 'read_journal' && typeof action.limit === 'number' && Number.isFinite(action.limit)) return { name: action.name, limit: action.limit }
     if (action.name === 'write_world_model' && isObject(action.value)) return { name: action.name, value: action.value }
     if (action.name === 'write_plan' && isObject(action.value)) return { name: action.name, value: action.value }
+    if (action.name === 'read_file' && typeof action.path === 'string') return { name: action.name, path: action.path }
+    if (action.name === 'list_directory' && typeof action.path === 'string') return { name: action.name, path: action.path }
+    if (action.name === 'write_workspace_file' && typeof action.path === 'string' && typeof action.content === 'string') return { name: action.name, path: action.path, content: action.content }
+    if (action.name === 'read_workspace_file' && typeof action.path === 'string') return { name: action.name, path: action.path }
+    if (action.name === 'run_workspace_command' && typeof action.command === 'string' && Array.isArray(action.args) && action.args.every(arg => typeof arg === 'string')
+      && (action.timeoutMs === undefined || typeof action.timeoutMs === 'number')) {
+      return { name: action.name, command: action.command, args: action.args, ...(action.timeoutMs === undefined ? {} : { timeoutMs: action.timeoutMs }) }
+    }
+    if (action.name === 'write_submission' && isObject(action.proposal)) return { name: action.name, proposal: action.proposal }
     if (action.name === 'write_candidate_draft' && isObject(action.proposal)) return { name: action.name, proposal: action.proposal }
     if (action.name === 'inspect_staging' && typeof action.path === 'string') return { name: action.name, path: action.path }
     if (action.name === 'preflight_staging_entry' && typeof action.entry === 'string') return { name: action.name, entry: action.entry }

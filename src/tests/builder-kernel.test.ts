@@ -25,6 +25,34 @@ describe('BuilderKernel', () => {
     expect(() => kernel.transition(run.id, 'exploring')).toThrow(/terminal/)
   })
 
+  it('gives the base builder global read, a persistent workspace, command feedback, and a generic frozen submission', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-'))
+    const source = join(root, 'actor-state.txt')
+    writeFileSync(source, 'actor failed at step 2\n', 'utf8')
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: { task: 'repair' }, targetBefore: { version: 'before' } })
+
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })).toMatchObject({
+      path: source,
+      content: 'actor failed at step 2\n',
+    })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'list_directory', path: root } })).toMatchObject({
+      entries: expect.arrayContaining([expect.objectContaining({ name: 'actor-state.txt', type: 'file' })]),
+    })
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_workspace_file', path: 'notes/diagnosis.txt', content: 'inspect actor trace' } })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_workspace_file', path: 'notes/diagnosis.txt' } })).toMatchObject({
+      content: 'inspect actor trace',
+    })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'run_workspace_command', command: process.execPath, args: ['-e', 'console.log("probe-ok")'] } })).toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining('probe-ok'),
+    })
+    const proposal = { capability: 'loop-evolution', changes: [{ kind: 'candidate-diff', path: 'src/index.ts' }] }
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_submission', proposal } })
+    expect(kernel.decide(run.id, { kind: 'submit' })).toMatchObject({ state: 'submitted' })
+    expect(kernel.proposal(run.id)).toEqual(proposal)
+  })
+
   it('records allowlisted tool feedback, freezes submission, and hands rejection to a fresh run', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-'))
     const kernel = new BuilderKernel(root, 's')

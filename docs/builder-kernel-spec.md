@@ -1,5 +1,7 @@
 # BuilderKernel v1
 
+> 2026-08-18 修订：本文记录 v1 的封闭 JSON Kernel 和兼容路径。新的架构基线是 [`builder-foundation-spec.md`](./builder-foundation-spec.md)：Builder 是具有全局读取、持久 workspace 与真实命令反馈的极简基础 loop；`loop-evolution` 是 capability，不是 Kernel 内置候选网关。新能力以 `read_file`、`list_directory`、workspace 文件读写、`run_workspace_command` 与 `write_submission` 实现；本文的 `candidate.json`/preflight 只为既有 patch/candidate 流程保留。
+
 ## 目标
 
 Builder 是独立、有限步、可恢复的工具 agent；不是一次 JSON 调用，也不是拥有验收权的长驻 actor。它在自己的 workspace 内把输入证据转成一个可提交的草稿。verifier 和 gate 保持在它的写权限之外。
@@ -55,9 +57,11 @@ created -> exploring <-> preflighting -> ready_to_submit -> submitted
 
 每次模型回复只能选择 `tool`、`continue`、`submit`、`abort`。Kernel 对每个 tool action 先记 journal，再执行 allowlisted action，再记结果；下一次模型调用附带 plan、world model、journal tail 和 snapshot index。限制为可配置的 model turns、tool steps、token、wall time；耗尽时持久化 `aborted`，不触发 verifier。
 
-v1 action allowlist 是 `read_input`、`read_journal`、`write_world_model`、`write_plan`、`write_candidate_draft`、`inspect_staging`、`preflight_staging_entry`。`write_candidate_draft` 是唯一的候选内容写入动作：它只能原子写 `staging/candidate.json`，不是泛用文件写入器；已有 draft 时须先 inspect/preflight，只有 preflight 明确报错才允许覆写修复。`inspect_staging` 只能读取当前 run 的 `staging/` 下的既有文件，任何路径逃逸都会被 Kernel 拒绝并写 error journal。`preflight_staging_entry` 对 draft 的 JSON、非空 module entry 与受限路径作确定性静态检查，成功后才把 run 标为 `ready_to_submit`。`submit` 没有模型 payload；它只能在该状态冻结 `submission/proposal.json` 为已预检的 `candidate.json`，因此不存在提交时偷换内容；它不调用 verifier。
+兼容 action 是 `read_input`、`read_journal`、`write_world_model`、`write_plan`、`write_candidate_draft`、`inspect_staging`、`preflight_staging_entry`。基础 loop 另提供全局 `read_file` / `list_directory`、Builder workspace 的读写、带 stdout/stderr/exit code 回传的 `run_workspace_command`，以及通用 `write_submission`。后者写入 proposal draft，`submit` 只冻结它，永不执行安装。旧 `write_candidate_draft` 仍要求 preflight，保证既有 patch/candidate 流程兼容。
 
 `BuilderDriver` 是真实执行器：每一 model turn 都只能返回严格 JSON `tool | continue | submit | abort`，Kernel 先落 model decision，再落 tool result/error；下一 turn 的 prompt 读入 journal tail。model turn、tool step、tokens、wall time 都由配置上限控制，超限永远 `aborted`。因此“模型声称已经检查过”不构成记录，只有 Kernel journal/snapshots 构成记录。
+
+候选 importer、verifier、probe 或 gate 的失败均作为 immutable `previous-attempt.json` 回注。Builder 自己选择是否读取、如何探索、是否修复或 abort；Kernel 不再以固定 fallback 文案替它指定策略。
 
 ## 验收边界
 

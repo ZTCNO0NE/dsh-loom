@@ -83,4 +83,17 @@ describe('BuilderDriver', () => {
       expect.objectContaining({ kind: 'error', action: 'budget' }),
     ]))
   })
+
+  it('lets a reopened builder choose its own response to failure feedback', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-'))
+    const kernel = new BuilderKernel(root, 's')
+    const prompts: string[] = []
+    const run = kernel.create({ actor: {}, targetBefore: {}, previousAttempt: { failureClass: 'source_rate_limited', retryable: true } })
+    const outcome = await new BuilderDriver({
+      llm: decisionsLlm([{ kind: 'abort', reason: 'switch strategy requires a suitable source' }], prompts),
+      provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task',
+    }).run(kernel, run.id)
+    expect(outcome.state).toBe('aborted')
+    expect(prompts[0]).not.toContain('switch_git_source、builder_generated 或 abort')
+  })
 })
