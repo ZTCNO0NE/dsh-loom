@@ -1,10 +1,10 @@
 # CURRENT.md — 当前状态与交接
 
-更新：2026-08-17 20:25（Asia/Shanghai）
+更新：2026-08-17 21:15（Asia/Shanghai）
 
 ## 一句话状态
 
-**终局已完成并通过最终全测**：dsh-loom v1.0.4 已发布（npm latest + GitHub `ZTCNO0NE/dsh-loom`，tag v1.0.4，HEAD `c9504be`）。自主 loop 候选已在同一隔离链路完成 **官方 builder Kernel → commit-pinned Git acquisition → 无网络受限 build → C0/C1–C8/C6 verifier → gate cold install → actor 重跑 → C5 rollback → restore**；生产与用户 profile 均未触及。终局记录为 `eval/run-records/2026-08-17-loop-autonomous-final-lifecycle-proof.json`；最终检查 `npm run check`、`npm test`（120/120）、`npm run build`、`git diff --check` 全部通过。
+**终局已完成并通过最终全测**：`v1.1.0` GitHub source release 正在发布；npm latest 仍为 `dsh-loom@1.0.4`（本机无 npm 登录，待独立凭据发布）。自主 loop 候选已在同一隔离链路完成 **官方 builder Kernel → commit-pinned Git acquisition → 无网络受限 build → C0/C1–C8/C6 verifier → gate cold install → actor 重跑 → C5 rollback → restore**；生产与用户 profile 均未触及。终局记录为 `eval/run-records/2026-08-17-loop-autonomous-final-lifecycle-proof.json`；最终检查 `npm run check`、`npm test`（120/120）、`npm run build`、`git diff --check` 全部通过。
 
 ## 当前进行中（loop 层放开，按序）
 
