@@ -353,3 +353,10 @@
 - 限制：最多 4 个文件、单文件 48 KiB、总替换 96 KiB；拒绝路径逃逸、重复路径、symlink、空/超限内容和 hash 不匹配；强制 `sandboxed-dsh-workspace` 无网络 build。manifest 记录 baseline、edit-plan hash 及每文件 before/after hash；候选仍只进入 staging。
 - 验证：新增精确替换、hash mismatch、路径 allowlist 单元测试；当前 `npm run check` 与 `npm test` **122/122** 通过，尚未宣称真实 loop 性能提升，也尚未用网络 acquisition/build/verifier/gate 证明 generated candidate。
 - 真实尝试：隔离 runtime `meta-workspace-builder-generated-acquisition-20260817` 使用 baseline `47f943859bef60e4160492346772ded9b24f765a` 和 `constants.ts` 10→20 edit；GitHub API 解析成功后，codeload 返回 HTTP **429**，importer 清理了临时 staging，registry 无残留记录。该次只记为外部限流阻断，不计入候选通过或失败。
+
+### 2026-08-17 loop-generated-edit-build-local（网络阻断下的机制证据）
+
+- 为避免把 codeload 429 当成代码失败，从同一固定 baseline commit 做隔离 `git archive`，再由 `applyBuilderGeneratedEdits` 应用 `constants.ts` 的 10→20 exact edit。
+- 结果：beforeHash 校验、afterHash、artifact hash 和固定 `bwrap --unshare-all` networkless build 全部通过，入口产物为 `packages/core/agent-loop/lib/index.js`。
+- 该记录明确是 `claimLevel=mechanism-only`；没有外部 acquisition、C0/C1–C8/C6、gate、actor 或 rollback，不得作为候选安装或性能提升证据。机器记录：`/chenzute/dsh-src/eval/run-records/2026-08-17-loop-generated-edit-build-local.json`。
+- P1 12-way probe harness 已准备：`parallel-probe-plugin.mjs` 保留 A/B 兼容并新增 `delay_probe_01`–`delay_probe_12`；plugin SHA-256 为 `4e21f7d99db2382791a97b413917d25228cf4c0e8fabb1bdda3a1ab978255e62`。
