@@ -7,14 +7,21 @@ import { Proposer, type LlmStreamLike } from '../meta/propose.js'
 import { Gate } from '../gate/index.js'
 import type { ApplyOps } from '../gate/index.js'
 import { paths, readJson } from '../protocol/index.js'
+import { BuilderKernel } from '../builder/kernel.js'
 import type { MetaPatch, PatchStatus, RegressionCase, ValidationReport } from '../types.js'
 import type { VerifierInput } from '../validate/index.js'
 
 function stubLlm(json: string): LlmStreamLike {
   return {
-    async *stream() {
+    async *stream(options) {
+      const prompt = String(options.prompt)
+      const decision = prompt.includes('"passed":true')
+        ? { kind: 'submit' }
+        : prompt.includes('"written":"candidate_draft"')
+          ? { kind: 'tool', action: { name: 'preflight_staging_entry', entry: 'candidate.json' } }
+          : { kind: 'tool', action: { name: 'write_candidate_draft', proposal: JSON.parse(json) } }
       yield { kind: 'block-start', type: 'text' }
-      yield { kind: 'text-delta', text: json }
+      yield { kind: 'text-delta', text: JSON.stringify(decision) }
       yield { kind: 'block-end', type: 'text' }
     },
   }
@@ -143,6 +150,21 @@ describe('iteration loop', () => {
     expect(result.patch).toBeNull()
   })
 
+  it('hands a verifier rejection to a new immutable builder run before rethinking', async () => {
+    const { loop, root, sessionId } = makeLoop([
+      rejectedReport('first'),
+      { patchId: 'second', verdict: 'approved', score: 1, evidence: [], validatedAt: new Date().toISOString() },
+    ])
+    const result = await loop.run([], {})
+    const ref = readJson<{ runId?: string }>(paths.builderRun(root, sessionId, result.patch!.id))
+    expect(ref?.runId).toBeTruthy()
+    const resumed = new BuilderKernel(root, sessionId).context(ref!.runId!)
+    expect(resumed.input.previousAttempt).toMatchObject({
+      source: 'verifier',
+      report: { failureSummary: 'alignment mismatch' },
+    })
+  })
+
   it('auto-applies without confirmation in apply mode', async () => {
     const { loop } = makeLoop([{ patchId: 'p1', verdict: 'approved', score: 1, evidence: [], validatedAt: new Date().toISOString() }], true)
     const ops: ApplyOps = {
@@ -244,8 +266,15 @@ describe('iteration loop', () => {
     const llm: LlmStreamLike = {
       async *stream(options) {
         calls++
+        const prompt = String(options.prompt)
+        const proposal = JSON.parse(prompt.includes('上一轮隔离探测结果') ? second : first)
+        const decision = prompt.includes('"passed":true')
+          ? { kind: 'submit' }
+          : prompt.includes('"written":"candidate_draft"')
+            ? { kind: 'tool', action: { name: 'preflight_staging_entry', entry: 'candidate.json' } }
+            : { kind: 'tool', action: { name: 'write_candidate_draft', proposal } }
         yield { kind: 'block-start', type: 'text' }
-        yield { kind: 'text-delta', text: String(options.prompt).includes('上一轮隔离探测结果') ? second : first }
+        yield { kind: 'text-delta', text: JSON.stringify(decision) }
         yield { kind: 'block-end', type: 'text' }
       },
     }
@@ -260,7 +289,7 @@ describe('iteration loop', () => {
       async (_patch, task) => { probeCalls.push(task); return { exit: task === 'run x' ? 1 : 0, outputTail: 'boom' } },
     )
     const result = await loop.run([], {})
-    expect(calls).toBe(2)
+    expect(calls).toBe(6)
     expect(probeCalls).toEqual(['run x'])
     expect(result.iterations).toBe(2)
     expect(result.report.verdict).toBe('approved')

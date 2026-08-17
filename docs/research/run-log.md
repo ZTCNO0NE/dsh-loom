@@ -271,3 +271,78 @@
 - 产物路径：`/tmp/bh3-original.txt`、`/tmp/bh3-candidate-fork.txt`（契约摘要）；`eval/meta-workspace-bh3-{original,candidate-fork}/workspace/loom-contract/trajectory/frames.jsonl`（完整帧）；快照 `run-records/2026-08-17-loop-contract-bh3-{original,candidate-fork}.json`
 - 本地补丁/偏差：候选 loop 是本地 fork（源码在 `/chenzute/dsh-src/deepseek-harness/packages/core/dsh-agent-loop-candidate`，**尚未收编进本项目仓库**）
 - 结论与下一步：**行为确实变了（代码层 10→1），契约未坏（C1-C8 全绿）**；但模型层行为差异当前不可观测（27b 不并发发工具），实证证据落为「代码 diff + 契约全绿」，不再为此烧模型轮次。下一步：确定候选源码收编方式，再实现「完整契约报告」（C1-C8 + C6 回归 + 真实安装前后 before/after）并作为 agent-loop 放开准入门槛。
+
+### 2026-08-17 loop-vendoring-and-entry-resolution（A 收编 + 防假阳性修正）
+
+- A 收编完成：`vendored/serial-tool-calls/` 保存候选可运行构建产物；`loop-candidates/serial-tool-calls.manifest.json` 固定上游 commit `47f943859bef60e4160492346772ded9b24f765a`、10→1 delta、入口与目录 hash。
+- 新代码：`src/candidates/` 提供候选生命周期、验证证据门、before/after 安装记录、rollback 与受限 Git importer；本项目检查全绿，测试 **104/104**。
+- runner：新增 `--report`、C6 同 overlay 回归、每 probe 隔离 frames，以及 `--expected-entry` 的 **C0** 检查。
+- 真实核查：`dsh --profile headless --patch overlay-contract-candidate-fork.yml --dump-config` 解析出的 `agent-loop.name` 是 `@deepseek-ai/dsh-agent-loop`，而不是候选路径。原因是 include 的 `PatchOptions.name` 为 matcher（name mismatch 会跳过 patch），不能更新模块名。
+- 因此：此前/本轮在该 overlay 下得到的 C1-C8/C6 只能说明官方 loop 环境可跑，**不构成候选 fork 已加载或真实冷替换的证据**。一次 gate smoke 的 C3 帧混合失败已自动 rollback；修正 frame isolation 后的“成功”同样因 C0 缺失被撤销。运行目录已恢复。
+- 下一步：实现完整 profile/宿主 Loader entry replacement adapter；要求 C0=pass 后，才重跑三件套并允许 candidate 从 approved 进入 installed。
+
+### 2026-08-17 candidate-profile-proof（真实候选 entry 的短 probe）
+
+- 临时 profile 在 eval workspace 中创建：自定义 `@loom/candidate-base` bundle 复制 DSH base bundle，并在**组合前**把 `agent-loop` 行改为候选 `lib/index.js`；随后叠加官方 `@deepseek-ai/dsh-headless` bundle。
+- `--dump-config` 已解析到候选绝对入口（C0 pass）；同 profile 下真实 headless actor probe 的 **C1/C2/C3/C4/C7/C8 全绿**，132 events，exit 0。
+- 报告：`/chenzute/dsh-src/eval/meta-workspace-loop-gate-JAAWGH/reports/profile-candidate-contract.json`。
+- 局限：C6 脚本尚未支持传入 profile（当前只会叠加 overlay），因此此条是“候选真的加载且协议 probe 通过”，不是完整三件套；下一步将 profile generator/entry assertion 收敛为 gate adapter，再把同一 profile 注入 C6 与 before/after/rollback。
+
+### 2026-08-17 vendored-loader-gate（正式 profile 替换 + 完整三件套 + 冷安装）
+
+- 正式 adapter：`src/candidates/profile.ts` 在 runtime-owned DSH_HOME 中复制 base bundle，并在 Loader 组合**之前**把 `agent-loop` entry 改为隔离的 vendored candidate；不改 DSH checkout 或用户 profile。source-run 的 module-local scheduler Symbol 由受记录的 `scheduler-symbol-v1` Loader bridge 兼容，vendored 原件及其 hash 保持不变。
+- C0/C1-C4/C7/C8：`meta-workspace-loop-adapter-20260817/reports/profile-candidate-contract.json` 全绿（实际 resolved entry 为 runtime `@loom/candidate-loop/lib/index.js`）。
+- C6：`profile-candidate-full-contract.json` 全绿；`from-zero-verify.json` 明确记录 `profile=loom-serial-tool-calls` 和其 isolated `profileHome`，L1-L5 全过（L4 第 2 次通过）。
+- 实装：`meta-workspace-loop-gate-final-20260817/candidates/installations/serial-tool-calls.json` 记录 `before.exists=false → after.exists=true`、C0 smoke pass、状态 installed；随后同一 gate profile actor 重跑 `reports/gate-installed-actor-contract.json`，C0/C1-C4/C7/C8 全绿。
+- C5 回滚演练：同目录 `installations/serial-loop-rollback.json` 注入错误 entry-resolution；gate 创建的 profile 被自动移除，`before.exists=false`、`after.exists=false`、`rollback.succeeded=true`。保留已安装 serial candidate，未触碰生产/用户 profile。
+
+### 2026-08-17 loop-candidate-autonomy-proof（meta.auto 候选网关 → builder 发现 → staging）
+
+- 任务：本地 27b actor 调用 `meta_auto(discoverLoopCandidate=true)`；独立 V4 Flash builder 只生成候选请求，候选来源限制在指定公开 GitHub 上游。
+- 配置：`/chenzute/dsh-src/eval/overlay-loop-candidate-autonomy.yml`；`allowLoopCandidates.enabled=true`、Git host allowlist 仅 `github.com`、独立 runtime root；actor 继续本地 LiteLLM，builder 使用官方接口且 `thinking.type=disabled`。
+- 结果：**PASS**。builder 输出 `agentloop` 请求；importer 用解析后的 commit `7d06bc0cac89c9bd0c9d8510a3e12972919948e2` 从 HTTPS GitHub 来源拉取并记录 content hash `5c949c2f6abc817226fddeea2f07091f1010112badad8c71b47697cd149a7bac`。
+- 状态：注册表中唯一记录为 **staging**；没有 `pending`、`verified`、`approved`、`installed` 或 installation record。候选未执行 build、未被加载，也未改变 actor loop。
+- 传输修正：本环境对 Git smart-HTTP clone 有不稳定超时；GitHub 来源改为 GitHub API 将 ref 解析为 commit + codeload 归档拉取。来源仍是 allowlisted HTTPS Git URL，commit/hash 固定；非 GitHub allowlist 来源仍走 shallow partial Git clone。
+- 产物：`/chenzute/dsh-src/eval/run-records/2026-08-17-loop-candidate-autonomy-proof.json`；runtime registry/discovery/artifact 路径均写入该快照。
+- 结论：③候选网关、④builder 自主请求/受限拉取/暂存、⑤端到端 staging 案例完成；该外部候选尚无正式契约证据，必须继续 verifier 三件套后才可能进入 pending 之后的状态。
+
+### 2026-08-17 builder-kernel-real-feedback-proof（官方 BuilderDriver 微循环 + 拒绝回注）
+
+- 运行：官方 `deepseek-v4-flash`，适配器请求固定 `thinking: { type: 'disabled' }`；隔离 workspace 为 `eval/meta-workspace-builder-kernel-real3-20260817`，没有 install、没有生产路径写入。
+- 第一个 run：模型依次选择 `write_candidate_draft → preflight_staging_entry → submit`，3 个 model turns、2 个 allowlisted tool actions、0 errors；Kernel 冻结的是已预检 draft，builder 无 verifier/gate/install 调用能力。
+- 回注：先以刻意 rejection 演练 durable handoff；随后用项目真实的确定性 `Validator` 对第一份 candidate 的空 actual frames 执行对齐，得到 `rejected`（`first_divergence at 0: fields (missing event)`）。真实 report 通过 `patches/<patch>/builder-run.json` 关联旧 run；`reopenFromFeedback()` 新建 immutable run，并把完整 report/first divergence 放到 `input/previous-attempt.json`。
+- 第二个 run 完成一次 handoff 演练；**第三个 run** 消费真实 `Validator` rejection 后完成 `write_candidate_draft → inspect_staging → preflight_staging_entry → submit`，4 个 model turns、3 个 allowlisted tool actions、0 errors；其 `previousAttemptPresent=true`、`previousAttemptSource=verifier`。这证明拒绝信息不是只留在 loop 变量，而是可恢复地进入下一次 builder 思考。
+- 产物：`/chenzute/dsh-src/eval/run-records/2026-08-17-builder-kernel-real-feedback-proof.json`；全量 journal/snapshots/report 在上述隔离 workspace 下。此前两次协议探索均按预算 `aborted`，无提交/安装；最终证据仅以上述成功 run 与真实 Validator report 为准。
+
+### 2026-08-17 loop-autonomous-final-lifecycle-proof（自主 source → build → verifier → gate → rollback）
+
+- builder：官方 `deepseek-v4-flash`（`thinking.type=disabled`）在同一 BuilderKernel run 内用 `write_candidate_draft → preflight_staging_entry → submit` 选择 `deepseek-ai/deepseek-harness` 的 `agent-loop`，resolved commit `47f943859bef60e4160492346772ded9b24f765a`。
+- build：Git archive 源码没有 `lib/index.js`；importer 因此使用固定 `sandboxed-dsh-workspace` 受限 recipe，在 `bwrap --unshare-all`（无网络）内以只读 DSH dependency tree 构建，artifact hash 为 `97d8449e91df8c88cd625cb5de27579514c62a6d2809b5d822acbc3514824269`。builder 没有 shell 或 build command 权限。
+- verifier：C0/C1-C4/C7/C8 全绿，完整 C6 from-zero L1-L5 `allPass=true`；独立 lifecycle controller 才将 record 推进到 approved。
+- gate：before.exists=false cold install、C0 smoke pass、actor 安装后重跑全绿；对同候选注入 C0 mismatch 后 `rolled_back`、`rollback.succeeded=true`，再按同 hash re-install，最终 actor 重跑仍全绿，registry 状态 `installed`。
+- 边界：全部路径是 `/chenzute/dsh-src/eval/meta-workspace-loop-autonomous-final6-20260817/runtime`，生产/用户 profile 均未写入。候选是 baseline control，不把它夸大为性能改进。
+- 产物：`/chenzute/dsh-src/eval/run-records/2026-08-17-loop-autonomous-final-lifecycle-proof.json`。
+
+### 2026-08-17 final-builder-kernel-and-lifecycle-audit
+
+- 最终静态审计确认：BuilderKernel 仅暴露 `read_input/read_journal/write_world_model/write_plan/write_candidate_draft/inspect_staging/preflight_staging_entry`；journal、快照、状态转换均由核心写入。`submit` 只能冻结已预检 draft，不携带可偷换的 payload。
+- 裁决回注确认：verifier rejection、builder probe failure、gate/install rollback 都被持久化为反馈，并由 `reopenFromRejection()` 创建新的 immutable builder run；下一 run 从 `input/previous-attempt.json` 读取 rejection/first divergence/probe/rollback 信息。
+- 最终全测：`npm run check`、`npm test`（**120/120**）、`npm run build`、`git diff --check` 全部通过。终局 lifecycle record 不变；所有验证仍只在隔离 eval runtime，未触碰生产或用户 profile。
+
+### 2026-08-17 loop-parallel-attribution-comparison（27b / DSH / scheduler 三段对照）
+
+- 成本控制：仅 3 次原始本地 27b 请求（其中两次 256-token 默认思考截断）和原版/已安装候选各 1 次短 actor run；未调用官方 API，未触碰生产或用户 profile。
+- 模型层：`thinking: { type: 'disabled' }` 的 27b 真实返回两条 native tool call（`probe_alpha(A)`、`probe_beta(B)`，162 completion tokens，10.6s）。这否定了“27b 不能在单回复中产生两条调用”的假设。
+- actor 层：原版与已冷安装的 `serial-tool-calls` 都记录同一 turn/step 两条 `bash` tool/call，且 C0/C1-C4/C7/C8 通过；loop 没有折叠模型输出。
+- scheduler 层：两条 `sleep 1; echo` 的 bash 均是 exclusive；原版 call span 2123ms、candidate 2143ms，第二条均在第一条 result 后才开始。故串行来自工具安全 barrier，不是模型，也不是 10→1 cap。
+- 复核：官方 loop 与 candidate loop 的 scheduler tests 共 **42/42** 通过，覆盖 parallel-safe calls 真并发和 `maxParallelToolCalls=1` 真串行。
+- 结论：本轮完成责任归因，**未**证明 serial candidate 带来提升；要证明提升必须用两个延迟、`isConcurrencySafe` 的真实工具重跑同一 actor benchmark。完整 machine record：`/chenzute/dsh-src/eval/run-records/2026-08-17-loop-parallel-attribution-comparison.json`。
+- 工程修正：`scripts/contract-runner.mjs` 的 optional flag positional parser 已修；未传某 optional flag 不再误删 command mode。
+
+### 2026-08-17 loop-parallel-safe-real-behavior-comparison（真实并行吞吐对照）
+
+- 设计：在隔离 eval 路径注册 `delay_probe_a` / `delay_probe_b`；二者各 delay 1000ms、无共享可变状态、显式 `isConcurrencySafe: () => true`。actor=本地 27b，`thinking=disabled`、`maxTokens=2048`，同一 prompt 强制单回复两调用；原版 profile 对比已冷安装 `serial-tool-calls` profile。
+- 原版实测：同一 turn/step 两 call 相隔 **4ms**；两 result 在约 1.02s 后抵达，tool span **1017ms**，真实 overlap=true。
+- candidate 实测：同一 turn/step 两 call，但第二 call 在第一 result 后启动；tool span **2024ms**，overlap=false。candidate 比原版多 **1007ms**，墙钟比 **1.99×**。
+- 两侧：C0/C1-C4/C7/C8 均 pass、exit=0、0 error frame；没有生产、用户 profile 或官方 API 写入/调用。先前 C1 只允许 `call→result`，会误拒合法并发轨迹，已扩展为允许并发组中的连续 `call` / `result`，随后原版与 candidate 契约均重跑通过。
+- 结论：这给出了 cap=1 的真实可观测效果，但它是吞吐退化而非提升；`serial-tool-calls` 只能以安全/顺序策略定位，不能作为 actor 性能成长案例。完整 record：`/chenzute/dsh-src/eval/run-records/2026-08-17-loop-parallel-safe-real-behavior-comparison.json`。

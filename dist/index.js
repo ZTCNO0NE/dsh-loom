@@ -14,6 +14,7 @@ import { Validator } from './validate/index.js';
 import { appendJsonl, atomicWriteJson, ensureWorkspace, metaRoot, paths, PROTOCOL_VERSION, readJson, readJsonl, sha256, } from './protocol/index.js';
 import { runIsolation } from './isolation/runner.js';
 import { officialDeepSeekLlm } from './llm/official.js';
+import { LoopCandidateGateway } from './candidates/gateway.js';
 import { DEFAULT_LOCKED_TARGETS } from './policy.js';
 import { appendLedger, appendReport, readLedger, readPreferences, scenarioOf, } from './growth/index.js';
 export const name = 'dsh-meta-validate';
@@ -36,6 +37,12 @@ export const Config = Schema.object({
     llm: Schema.object({
         provider: Schema.string().default('deepseek-official'),
         model: Schema.string().default('deepseek-v4-flash'),
+    }),
+    builder: Schema.object({
+        maxModelTurns: Schema.number().default(12),
+        maxToolSteps: Schema.number().default(16),
+        maxTokens: Schema.number().default(6000),
+        maxWallTimeMs: Schema.number().default(180000),
     }),
     isolation: Schema.object({
         enabled: Schema.boolean().default(false),
@@ -65,6 +72,13 @@ export const Config = Schema.object({
         progress: Schema.boolean().default(false),
         progressAfterMs: Schema.number().default(120000),
         completion: Schema.boolean().default(true),
+    }),
+    allowLoopCandidates: Schema.object({
+        enabled: Schema.boolean().default(false),
+        allowedGitHosts: Schema.array(Schema.string()).default([]),
+        runtimeRoot: Schema.string().default(''),
+        maxTokens: Schema.number().default(4096),
+        buildDependencyRoot: Schema.string().default(''),
     }),
     lockedTargets: Schema.object({
         ids: Schema.array(Schema.string()).default(DEFAULT_LOCKED_TARGETS.ids),
@@ -201,6 +215,18 @@ export function apply(ctx, config) {
     // Independent meta-layer model: builder + review gate use the official
     // DeepSeek API (V4 Flash by default), while the actor keeps its own route.
     const metaLlm = config.llm.provider === 'deepseek-official' ? officialDeepSeekLlm() : undefined;
+    const loopCandidateGateway = new LoopCandidateGateway({
+        enabled: config.allowLoopCandidates.enabled,
+        root: config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime'),
+        sessionId: config.sessionId,
+        allowedGitHosts: config.allowLoopCandidates.allowedGitHosts,
+        llm: metaLlm,
+        provider: config.llm.provider,
+        model: config.llm.model,
+        maxTokens: config.allowLoopCandidates.maxTokens,
+        buildDependencyRoot: config.allowLoopCandidates.buildDependencyRoot,
+        onUsage: recordUsage('builder-loop-candidate'),
+    });
     const proposer = new Proposer(ctx, {
         systemPrompt: '你是 dsh-meta-validate 的独立迭代者（builder）：基于用户需求、失败信号与配置快照，' +
             '产出单变量、可核验的候选 patch，并给出预期轨迹与自我评估。',
@@ -212,6 +238,7 @@ export function apply(ctx, config) {
         llm: metaLlm,
         onUsage: recordUsage('builder'),
         lockedTargets: config.lockedTargets,
+        builder: config.builder,
     });
     const isolationOptions = config.isolation.enabled
         ? {
@@ -376,6 +403,11 @@ export function apply(ctx, config) {
                 thresholds: config.thresholds,
                 maxIterations: config.maxIterations,
                 pendingPatches: gate.pendingCount(),
+                loopCandidates: Object.values(loopCandidateGateway.status().candidates).map((candidate) => ({
+                    id: candidate.manifest.id,
+                    state: candidate.state,
+                    updatedAt: candidate.updatedAt,
+                })),
                 latestJob: latestJob
                     ? { id: latestJob.id ?? null, status: latestJob.status ?? null, summary: latestJob.summary ?? null, error: latestJob.error ?? null }
                     : null,
@@ -499,6 +531,7 @@ export function apply(ctx, config) {
         parameters: {
             turn: { type: 'number', description: '当前回合号（宿主回合边界传入）' },
             requirements: { type: 'string', description: '用户需求原文（可选）' },
+            discoverLoopCandidate: { type: 'boolean', description: '仅当 allowLoopCandidates 开启时，让独立 builder 发现并暂存一个 Git loop 候选；不会批准或安装。' },
         },
         output: {
             schema: { type: 'json' },
@@ -510,6 +543,17 @@ export function apply(ctx, config) {
             if (requirements) {
                 observer.persistTrigger('user', 'meta_auto');
                 observer.ingest({ kind: 'user-message', turn: 0, text: requirements });
+            }
+            if (args.discoverLoopCandidate === true) {
+                const discovery = await loopCandidateGateway.discover(requirements ?? '', currentConfigOf(ctx, baseline));
+                return cleanToolResult({
+                    mode: 'loop-candidate-discovery',
+                    enabled: config.allowLoopCandidates.enabled,
+                    discovery,
+                    note: discovery.accepted
+                        ? 'candidate staged only; verifier/gate must advance it independently'
+                        : 'no loop candidate was staged',
+                });
             }
             const runAuto = async () => {
                 const cases = await validator.loadRegressionCases();

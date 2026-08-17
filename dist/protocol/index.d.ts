@@ -36,6 +36,8 @@ export declare const paths: {
     readonly smoke: (root: string, sessionId: string, patchId: string) => string;
     readonly runEvents: (root: string, sessionId: string, patchId: string) => string;
     readonly probes: (root: string, sessionId: string, patchId: string) => string;
+    readonly builderRun: (root: string, sessionId: string, patchId: string) => string;
+    readonly builderResume: (root: string, sessionId: string) => string;
     readonly history: (root: string, sessionId: string) => string;
     readonly gateDecisions: (root: string, sessionId: string) => string;
     readonly autopilotState: (root: string, sessionId: string) => string;

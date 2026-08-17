@@ -21,6 +21,21 @@ function stubLlm(json: string) {
   }
 }
 
+function stubBuilderLlm(json: string) {
+  return {
+    async *stream(options: { prompt: string }) {
+      const decision = options.prompt.includes('"passed":true')
+        ? { kind: 'submit' }
+        : options.prompt.includes('"written":"candidate_draft"')
+          ? { kind: 'tool', action: { name: 'preflight_staging_entry', entry: 'candidate.json' } }
+          : { kind: 'tool', action: { name: 'write_candidate_draft', proposal: JSON.parse(json) } }
+      yield { kind: 'block-start', type: 'text' }
+      yield { kind: 'text-delta', text: JSON.stringify(decision) }
+      yield { kind: 'block-end', type: 'text' }
+    },
+  }
+}
+
 const VALID = JSON.stringify({
   patch: { targetId: 'row-a', targetKind: 'config', config: { timeoutMs: 30000 }, dependencies: [], rationale: 'x', expectedOutcome: 'ok', version: 1 },
   expectedTrajectory: { events: [{ type: 'turn/start' }, { type: 'turn/end', reason: 'success' }], coverage: { claimedBehaviors: [] } },
@@ -50,7 +65,7 @@ function setup(gateJson: string, opts: Partial<{ minIntervalTurns: number; maxIt
     model: 'm',
     root,
     sessionId,
-    llm: stubLlm(VALID),
+    llm: stubBuilderLlm(VALID),
   })
   const gateImpl = new Gate(null, { root, sessionId })
   const validator = {

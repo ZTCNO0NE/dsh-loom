@@ -38,7 +38,7 @@ observe（观察/监督员）→ judge（评审门）→ design（builder 改进
 - loop 契约：`loop-contract/golden-current.json`（71 事件）；runner `scripts/contract-runner.mjs record|check|rollback <overlay> <task> <golden.json> [--regression]`。
 - 候选 loop fork：`/chenzute/dsh-src/deepseek-harness/packages/core/dsh-agent-loop-candidate`（并行 10→1；**未收编**，见 CURRENT.md）。
 - 基准/评测：`/chenzute/dsh-src/eval/`（Terminal-Bench 2.1、DeepSWE、verifiers、baseline、overlays、run-records）。
-- 验收命令：`npm run check`、`npm test`（101/101）、`npm run fromzero:verify`、`npm run fromzero:all`、`npm run host-demo`。
+- 验收命令：`npm run check`、`npm test`（120/120）、`npm run fromzero:verify`、`npm run fromzero:all`、`npm run host-demo`。
 
 ## 工作流
 
@@ -81,5 +81,5 @@ observe（观察/监督员）→ judge（评审门）→ design（builder 改进
 
 ## 完成定义
 
-- v1（已完成）：config/tool/skill 进化闭环 + 监督员 + 预约后台 + 通知/台账 + 偏好沉淀；101/101；npm `dsh-loom@1.0.4`。
+- v1（已完成）：config/tool/skill 进化闭环 + 监督员 + 预约后台 + 通知/台账 + 偏好沉淀；120/120；npm `dsh-loom@1.0.4`。
 - loop 层放开（进行中）：contract-runner 报告持久化 → meta.auto 候选 loop 网关 + `allowLoopCandidates` 开关 → 真实完整三件套跑通 → 候选目录 + builder 自主选择 → 端到端案例。

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "serial-tool-calls",
+  "displayName": "Serial tool calls",
+  "targetId": "agent-loop",
+  "packageName": "@deepseek-ai/dsh-agent-loop-candidate",
+  "artifactPath": "vendored/serial-tool-calls",
+  "entry": "lib/index.js",
+  "build": {
+    "method": "prebuilt",
+    "command": "vendored artifact retained after audited upstream build"
+  },
+  "source": {
+    "kind": "vendored",
+    "uri": "vendored/serial-tool-calls",
+    "ref": "47f943859bef60e4160492346772ded9b24f765a+serial-tool-calls",
+    "commit": "47f943859bef60e4160492346772ded9b24f765a",
+    "contentHash": "4cf7d2a5a8b1f2d0b4dd4bb297e88b07c53387f41e079a45a5605a714bea43e0"
+  },
+  "config": {
+    "agents": []
+  },
+  "expectedOutcome": "Use serial tool-call scheduling while preserving all loop contracts.",
+  "capabilities": [
+    "serial-tool-calls",
+    "cold-replaceable"
+  ],
+  "createdAt": "2026-08-17T06:34:00.000+08:00",
+  "createdBy": "seed"
+}

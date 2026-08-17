@@ -50,6 +50,14 @@ export class IterationLoop {
                 if (!allPassed) {
                     gate.markStatus(root, sessionId, patch.id, 'draft', 'loop-probes', iteration, `probe failed: ${results.find((item) => item.exit !== 0)?.task ?? 'unknown'}`);
                     probeResults = results;
+                    proposer.reopenFromFeedback(patch.id, {
+                        source: 'probe',
+                        verdict: 'rejected',
+                        patchId: patch.id,
+                        failureSummary: `probe failed: ${results.find((item) => item.exit !== 0)?.task ?? 'unknown'}`,
+                        probeResults: results,
+                        observedAt: new Date().toISOString(),
+                    });
                     continue;
                 }
             }
@@ -72,10 +80,32 @@ export class IterationLoop {
                 const applied = await gate.applyWithRollback(patch, applyOps);
                 if (applied.applied) {
                     await this.deps.onApplied?.({ patch, report, applied, signals });
+                    return { patch, report, applied, iterations: iteration, escalated: false };
                 }
-                return { patch, report, applied, iterations: iteration, escalated: false };
+                const gateReport = {
+                    ...report,
+                    verdict: 'rejected',
+                    failureSummary: applied.error ?? 'gate/install rejected and rolled back',
+                    evidence: [...report.evidence, `gate rollback: ${applied.error ?? 'unknown'}`],
+                    validatedAt: new Date().toISOString(),
+                };
+                gate.markStatus(root, sessionId, patch.id, 'rejected', 'gate', iteration, gateReport.failureSummary);
+                proposer.reopenFromFeedback(patch.id, {
+                    source: 'gate',
+                    report: gateReport,
+                    apply: applied,
+                    rollback: { applied: !applied.applied, error: applied.error ?? null },
+                });
+                previousReport = gateReport;
+                continue;
             }
             gate.markStatus(root, sessionId, patch.id, 'rejected', 'loop', iteration, report.failureSummary);
+            proposer.reopenFromFeedback(patch.id, {
+                source: 'verifier',
+                report,
+                firstDivergence: report.alignment?.firstDivergence ?? null,
+                regressionResults: report.regressionResults ?? [],
+            });
             previousReport = report;
         }
         return {

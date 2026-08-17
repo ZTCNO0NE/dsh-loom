@@ -23,6 +23,12 @@ export interface MetaValidateConfig {
         provider: string;
         model: string;
     };
+    builder: {
+        maxModelTurns: number;
+        maxToolSteps: number;
+        maxTokens: number;
+        maxWallTimeMs: number;
+    };
     isolation: {
         enabled: boolean;
         dshCommand: string[];
@@ -51,6 +57,13 @@ export interface MetaValidateConfig {
         progress: boolean;
         progressAfterMs: number;
         completion: boolean;
+    };
+    allowLoopCandidates: {
+        enabled: boolean;
+        allowedGitHosts: string[];
+        runtimeRoot: string;
+        maxTokens: number;
+        buildDependencyRoot: string;
     };
     lockedTargets: LockedTargetPolicy;
 }

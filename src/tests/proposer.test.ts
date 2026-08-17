@@ -7,12 +7,19 @@ import { Observer } from '../observer/index.js'
 import { existsSync } from 'node:fs'
 import { paths, readJson } from '../protocol/index.js'
 import type { MetaPatch, PatchStatus, WorldModel } from '../types.js'
+import { BuilderKernel } from '../builder/kernel.js'
 
 function stubLlm(json: string): LlmStreamLike {
   return {
-    async *stream() {
+    async *stream(options) {
+      const prompt = String(options.prompt)
+      const decision = prompt.includes('"passed":true')
+        ? { kind: 'submit' }
+        : prompt.includes('"written":"candidate_draft"')
+          ? { kind: 'tool', action: { name: 'preflight_staging_entry', entry: 'candidate.json' } }
+          : { kind: 'tool', action: { name: 'write_candidate_draft', proposal: JSON.parse(json) } }
       yield { kind: 'block-start', type: 'text' }
-      yield { kind: 'text-delta', text: json }
+      yield { kind: 'text-delta', text: JSON.stringify(decision) }
       yield { kind: 'block-end', type: 'text' }
     },
   }
@@ -88,8 +95,13 @@ describe('proposer A2', () => {
 
   it('rejects disallowed targetKind', async () => {
     const bad = VALID_JSON.replace('"config"', '"loop"')
-    const { proposer } = setup(stubLlm(bad))
+    const { proposer, root, sessionId } = setup(stubLlm(bad))
     await expect(proposer.propose([], {})).rejects.toThrow(/targetKind/)
+    const resume = readJson<{ runId?: string }>(paths.builderResume(root, sessionId))
+    expect(new BuilderKernel(root, sessionId).context(resume!.runId!).input.previousAttempt).toMatchObject({
+      source: 'proposal_normalization',
+      verdict: 'rejected',
+    })
   })
 
   it('rejects loop-layer rows even when targetKind is config', async () => {
@@ -106,7 +118,7 @@ describe('proposer A2', () => {
 
   it('rejects non-JSON model output', async () => {
     const { proposer } = setup(stubLlm('很抱歉，我无法生成 JSON。'))
-    await expect(proposer.propose([], {})).rejects.toThrow(/no JSON object/)
+    await expect(proposer.propose([], {})).rejects.toThrow(/ended aborted/)
   })
 
   it('supports insert patches with module files written to staging', async () => {

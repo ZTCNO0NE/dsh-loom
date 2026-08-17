@@ -1,7 +1,9 @@
 import { atomicWriteJson, ensureWorkspace, paths, PROTOCOL_VERSION, readJson, readJsonl, sha256, } from '../protocol/index.js';
 import { DEFAULT_LOCKED_TARGETS, isLockedTarget } from '../policy.js';
 import { mergePreferences } from '../growth/index.js';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { BuilderKernel } from '../builder/kernel.js';
+import { BuilderDriver } from '../builder/driver.js';
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 export class Proposer {
     ctx;
@@ -17,10 +19,67 @@ export class Proposer {
         if (!llm) {
             throw new Error('proposer: no llm service available');
         }
-        const prompt = this.buildPrompt(signals, currentConfig, userRequirements, previousReport, probeResults);
-        const text = await this.streamText(llm, prompt);
-        const parsed = this.parseJsonObject(text);
-        const patch = this.normalizePatch(parsed, signals);
+        const kernel = new BuilderKernel(this.options.root, this.options.sessionId);
+        const resume = readJson(paths.builderResume(this.options.root, this.options.sessionId));
+        const run = resume?.runId
+            ? kernel.load(resume.runId)
+            : kernel.create({
+                kind: 'patch',
+                actor: {
+                    requirements: userRequirements ?? null,
+                    signals,
+                    telemetry: readJson(paths.actorProfile(this.options.root, this.options.sessionId)),
+                    framesRef: paths.frames(this.options.root, this.options.sessionId),
+                },
+                targetBefore: currentConfig,
+                ...(previousReport ? { previousAttempt: { ...previousReport } } : {}),
+            });
+        if (resume?.runId)
+            unlinkSync(paths.builderResume(this.options.root, this.options.sessionId));
+        let parsed;
+        try {
+            const outcome = await new BuilderDriver({
+                llm,
+                provider: this.options.provider,
+                model: this.options.model,
+                systemPrompt: this.options.systemPrompt,
+                taskContext: this.buildTaskContext(signals, currentConfig, userRequirements, previousReport, probeResults),
+                onUsage: this.options.onUsage,
+                ...this.options.builder,
+            }).run(kernel, run.id);
+            if (outcome.state !== 'submitted' || !outcome.proposal) {
+                throw new Error(`proposer: builder run ${run.id} ended ${outcome.state} without a submission`);
+            }
+            parsed = outcome.proposal;
+        }
+        catch (error) {
+            if (kernel.load(run.id).state !== 'aborted' && kernel.load(run.id).state !== 'submitted') {
+                kernel.append(run.id, 'error', 'propose', undefined, error);
+                kernel.decide(run.id, { kind: 'abort', reason: String(error) });
+            }
+            throw error;
+        }
+        let patch;
+        try {
+            patch = this.normalizePatch(parsed, signals);
+        }
+        catch (error) {
+            const feedback = {
+                source: 'proposal_normalization',
+                verdict: 'rejected',
+                failureSummary: String(error),
+                proposalHash: sha256(parsed),
+                observedAt: new Date().toISOString(),
+            };
+            const next = kernel.reopenFromRejection(run.id, feedback);
+            atomicWriteJson(paths.builderResume(this.options.root, this.options.sessionId), {
+                schemaVersion: 1,
+                runId: next.id,
+                feedbackHash: sha256(feedback),
+                createdAt: new Date().toISOString(),
+            });
+            throw error;
+        }
         if (parsed.worldModel) {
             this.writeWorldModel(parsed.worldModel);
         }
@@ -31,6 +90,12 @@ export class Proposer {
         atomicWriteJson(paths.selfCheck(this.options.root, this.options.sessionId), patch.selfCheck);
         atomicWriteJson(paths.candidate(this.options.root, this.options.sessionId, patch.id), patch);
         atomicWriteJson(paths.expectedTrajectory(this.options.root, this.options.sessionId, patch.id), patch.expectedTrajectory);
+        atomicWriteJson(paths.builderRun(this.options.root, this.options.sessionId, patch.id), {
+            schemaVersion: 1,
+            patchId: patch.id,
+            runId: run.id,
+            submittedAt: new Date().toISOString(),
+        });
         const status = {
             schemaVersion: PROTOCOL_VERSION,
             patchId: patch.id,
@@ -42,7 +107,23 @@ export class Proposer {
         atomicWriteJson(paths.status(this.options.root, this.options.sessionId, patch.id), status);
         return [patch];
     }
-    buildPrompt(signals, currentConfig, userRequirements, previousReport, probeResults) {
+    /** Only verifier/probe/gate callers invoke this: it never approves or installs. */
+    reopenFromFeedback(patchId, feedback) {
+        const ref = readJson(paths.builderRun(this.options.root, this.options.sessionId, patchId));
+        if (!ref?.runId)
+            return null;
+        const kernel = new BuilderKernel(this.options.root, this.options.sessionId);
+        const next = kernel.reopenFromRejection(ref.runId, feedback);
+        atomicWriteJson(paths.builderResume(this.options.root, this.options.sessionId), {
+            schemaVersion: 1,
+            previousPatchId: patchId,
+            runId: next.id,
+            feedbackHash: sha256(feedback),
+            createdAt: new Date().toISOString(),
+        });
+        return next.id;
+    }
+    buildTaskContext(signals, currentConfig, userRequirements, previousReport, probeResults) {
         const signalText = signals
             .map((signal) => `- [${signal.kind}] ${signal.evidence.join(' | ')}`)
             .join('\n');
@@ -160,7 +241,7 @@ export class Proposer {
             '',
             `当前组合配置快照：\n${configText}`,
             '',
-            '只输出一个 JSON 对象，schema：',
+            '候选 proposal 的 JSON schema（driver 会要求你把它写入受限 draft 并预检后再提交）：',
             JSON.stringify({
                 patch: {
                     action: '"update" | "insert"（新增行时用 insert）',

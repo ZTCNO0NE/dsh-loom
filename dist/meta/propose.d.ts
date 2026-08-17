@@ -35,6 +35,12 @@ export interface ProposerOptions {
         completion: number;
     }) => void;
     lockedTargets?: LockedTargetPolicy;
+    builder?: {
+        maxModelTurns?: number;
+        maxToolSteps?: number;
+        maxTokens?: number;
+        maxWallTimeMs?: number;
+    };
 }
 export interface ProbeResult {
     task: string;
@@ -46,7 +52,9 @@ export declare class Proposer {
     private options;
     constructor(ctx: Context | null, options: ProposerOptions);
     propose(signals: EvolutionSignal[], currentConfig: Record<string, unknown>, userRequirements?: string, previousReport?: ValidationReport, probeResults?: ProbeResult[]): Promise<MetaPatch[]>;
-    private buildPrompt;
+    /** Only verifier/probe/gate callers invoke this: it never approves or installs. */
+    reopenFromFeedback(patchId: string, feedback: Record<string, unknown>): string | null;
+    private buildTaskContext;
     private streamText;
     private parseJsonObject;
     private normalizePatch;

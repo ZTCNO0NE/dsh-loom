@@ -34,9 +34,10 @@ export function officialDeepSeekLlm(options: OfficialLlmOptions = {}): LlmStream
           temperature: call.temperature ?? 0,
           max_tokens: call.maxTokens ?? 4000,
           response_format: { type: 'json_object' },
-          // JSON-mode calls must not burn the budget on reasoning_content:
-          // the adapter only consumes `content`, so reasoning must be off.
-          reasoning: { efforts: ['off'], defaultEffort: 'off' },
+          // Gateway/proposer consumers require the final JSON `content` field.
+          // DeepSeek returns thinking separately as `reasoning_content`, so
+          // disable it rather than spending this bounded response budget on it.
+          thinking: { type: 'disabled' },
           messages: [{ role: 'user', content: call.prompt }],
         }),
       })

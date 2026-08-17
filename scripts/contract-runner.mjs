@@ -6,28 +6,81 @@
  * 依赖：overlay 需包含 dsh-loom（observe 即可）且 sessionId=loom-contract；
  *       DSH_META_VALIDATE_ROOT 指向一个可写 meta-workspace。
  */
-import { spawn } from 'node:child_process'
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { readFileSync, existsSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-const [mode, overlay, task, goldenPath] = process.argv.slice(2)
-if (!['record', 'check', 'rollback'].includes(mode) || !overlay || !task || (mode !== 'rollback' && !goldenPath)) {
-  console.log('用法：contract-runner record|check <overlay.yml> <task> <golden.json> | rollback <badOverlay.yml> <task>')
+const cli = process.argv.slice(2)
+const reportFlag = cli.indexOf('--report')
+const reportPath = reportFlag === -1 ? undefined : cli[reportFlag + 1]
+if (reportFlag !== -1 && !reportPath) {
+  console.log('--report requires a JSON output path')
   process.exit(1)
+}
+const regression = cli.includes('--regression')
+const expectedEntryFlag = cli.indexOf('--expected-entry')
+const expectedEntry = expectedEntryFlag === -1 ? undefined : cli[expectedEntryFlag + 1]
+if (expectedEntryFlag !== -1 && !expectedEntry) {
+  console.log('--expected-entry requires the resolved agent-loop entry path')
+  process.exit(1)
+}
+const profileFlag = cli.indexOf('--profile')
+const profile = profileFlag === -1 ? 'headless' : cli[profileFlag + 1]
+if (profileFlag !== -1 && !profile) {
+  console.log('--profile requires a dsh profile name')
+  process.exit(1)
+}
+const profileHomeFlag = cli.indexOf('--profile-home')
+const profileHome = profileHomeFlag === -1 ? undefined : cli[profileHomeFlag + 1]
+if (profileHomeFlag !== -1 && !profileHome) {
+  console.log('--profile-home requires an isolated DSH_HOME path')
+  process.exit(1)
+}
+// A missing optional flag has index -1.  Do not let its synthetic `-1 + 1`
+// position accidentally remove argv[0] (the command mode) from positionals.
+const optionPositions = new Set([
+  reportFlag, reportFlag >= 0 ? reportFlag + 1 : -1,
+  expectedEntryFlag, expectedEntryFlag >= 0 ? expectedEntryFlag + 1 : -1,
+  profileFlag, profileFlag >= 0 ? profileFlag + 1 : -1,
+  profileHomeFlag, profileHomeFlag >= 0 ? profileHomeFlag + 1 : -1,
+])
+const positional = cli.filter((value, index) => value !== '--regression' && !optionPositions.has(index))
+const [mode, overlay, task, goldenPath] = positional
+if (!['record', 'check', 'rollback'].includes(mode) || !overlay || !task || (mode !== 'rollback' && !goldenPath)) {
+  console.log('用法：contract-runner record|check <overlay.yml> <task> <golden.json> [--profile <name>] [--profile-home <DSH_HOME>] [--expected-entry <path>] [--regression] [--report <path>] | rollback <badOverlay.yml> <task> [--report <path>]')
+  process.exit(1)
+}
+
+function persistReport(report) {
+  if (!reportPath) return
+  mkdirSync(dirname(reportPath), { recursive: true })
+  writeFileSync(reportPath, `${JSON.stringify({
+    schemaVersion: 1,
+    runner: 'dsh-loom-contract-runner',
+    mode,
+    profile,
+    profileHome: profileHome ?? null,
+    overlay,
+    task,
+    goldenPath: goldenPath ?? null,
+    generatedAt: new Date().toISOString(),
+    ...report,
+  }, null, 2)}\n`, 'utf8')
 }
 
 const root = process.env.DSH_META_VALIDATE_ROOT
   ?? (process.env.DSH_HOME ? join(process.env.DSH_HOME, 'meta-validate') : join(process.cwd(), '.meta-validate'))
 const session = 'loom-contract'
 const framesPath = join(root, 'workspace', session, 'trajectory', 'frames.jsonl')
+const dshEnv = profileHome ? { ...process.env, DSH_HOME: profileHome } : process.env
 
 function runOnce() {
   return new Promise((resolve) => {
     const dshCmd = process.env.DSH_CMD ? process.env.DSH_CMD.split(' ') : ['dsh']
     const child = spawn(
       dshCmd[0],
-      [...dshCmd.slice(1), '--profile', 'headless', '--patch', overlay, task],
-      { stdio: ['ignore', 'pipe', 'pipe'], detached: true, cwd: process.env.DSH_CWD || process.cwd() },
+      [...dshCmd.slice(1), '--profile', profile, '--patch', overlay, task],
+      { stdio: ['ignore', 'pipe', 'pipe'], detached: true, cwd: process.env.DSH_CWD || process.cwd(), env: dshEnv },
     )
     let out = ''
     const timer = setTimeout(() => {
@@ -43,6 +96,21 @@ function runOnce() {
     child.on('error', (error) => { clearTimeout(timer); resolve({ exitCode: -1, out: String(error) }) })
     child.on('close', (code) => { clearTimeout(timer); resolve({ exitCode: code ?? -1, out }) })
   })
+}
+
+/** `name` in a dsh patch is a matcher, not a mutable entry field. Assert the
+ * composed config before spending model calls, so a no-op replacement cannot
+ * masquerade as a candidate-loop validation. */
+function resolveAgentLoopEntry() {
+  const dshCmd = process.env.DSH_CMD ? process.env.DSH_CMD.split(' ') : ['dsh']
+  const result = spawnSync(
+    dshCmd[0],
+    [...dshCmd.slice(1), '--profile', profile, '--patch', overlay, '--dump-config'],
+    { encoding: 'utf8', cwd: process.env.DSH_CWD || process.cwd(), timeout: 120000, env: dshEnv },
+  )
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+  const match = output.match(/- id: agent-loop\s*\n\s+name:\s*(?:>-\s*\n\s+([^\n]+)|['"]?([^'">\n]+)['"]?)/)
+  return { exitCode: result.status ?? -1, resolved: (match?.[1] ?? match?.[2])?.trim() ?? null, outputTail: output.slice(-500) }
 }
 
 function extract() {
@@ -67,8 +135,10 @@ function checks(data) {
   const allowed = {
     'turn/start': ['step/start', 'assistant/message'],
     'step/start': ['tool/call', 'assistant/message', 'step/end'],
-    'tool/call': ['tool/result'],
-    'tool/result': ['tool/call', 'step/end'],
+    // Parallel-safe siblings may be committed as call, call, result, result
+    // (or an interleaving).  Both shapes are valid within one assistant step.
+    'tool/call': ['tool/call', 'tool/result'],
+    'tool/result': ['tool/call', 'tool/result', 'step/end'],
     'step/end': ['step/start', 'turn/end'],
     'assistant/message': ['tool/call', 'assistant/message', 'step/end'],
     'turn/end': ['turn/start'],
@@ -136,16 +206,41 @@ function checks(data) {
   return report
 }
 
+// One report must describe one probe. Reusing an eval workspace is allowed,
+// but its append-only observer frames must not be compared across separate
+// process lifetimes (their timestamps/turn counters have distinct origins).
+if (mode !== 'rollback') rmSync(framesPath, { force: true })
+let entryResolution
+if (expectedEntry && mode !== 'rollback') {
+  const resolved = resolveAgentLoopEntry()
+  entryResolution = resolved
+  if (resolved.exitCode !== 0 || resolved.resolved !== expectedEntry) {
+    const report = {
+      C0: 'fail',
+      pass: false,
+      detail: [`agent-loop entry mismatch: expected=${expectedEntry} actual=${resolved.resolved ?? '<unresolved>'}`],
+      resolvedEntry: resolved.resolved,
+      resolveExitCode: resolved.exitCode,
+      resolveOutputTail: resolved.outputTail,
+    }
+    persistReport(report)
+    console.log(JSON.stringify(report, null, 2))
+    process.exit(1)
+  }
+}
 const run = await runOnce()
 
 if (mode === 'rollback') {
   const ok = run.exitCode !== 0 && run.exitCode !== 124 && /fail|error/i.test(run.out)
-  console.log(JSON.stringify({
+  const report = {
     contract: 'C5 冷替换/回滚演练',
+    C5: ok ? 'pass' : 'fail',
     pass: ok,
     exitCode: run.exitCode,
     tail: run.out.slice(-200),
-  }, null, 2))
+  }
+  persistReport(report)
+  console.log(JSON.stringify(report, null, 2))
   process.exit(ok ? 0 : 1)
 }
 
@@ -154,18 +249,24 @@ try {
   data = extract()
 } catch (error) {
   if (mode === 'record') throw error
-  console.log(JSON.stringify({
+  const report = {
     C1: 'fail', C2: 'fail', C3: 'fail', C4: 'fail', C7: 'fail', C8: 'fail',
     detail: [String(error)],
     pass: false,
     exitCode: run.exitCode,
-  }, null, 2))
+  }
+  persistReport(report)
+  console.log(JSON.stringify(report, null, 2))
   process.exit(1)
 }
 data.exitCode = run.exitCode
 
 if (mode === 'record') {
   const report = checks(data)
+  if (expectedEntry) {
+    report.C0 = 'pass'
+    report.resolvedEntry = entryResolution?.resolved
+  }
   if (!report.pass) {
     console.log('黄金快照录制失败（当前 loop 未通过契约自检）：', JSON.stringify(report, null, 2))
     process.exit(1)
@@ -181,27 +282,42 @@ if (mode === 'record') {
   }
   mkdirSync(dirname(goldenPath), { recursive: true })
   writeFileSync(goldenPath, JSON.stringify(golden, null, 2), 'utf8')
+  persistReport({ ...report, goldenEvents: data.eventTypes.length, exitCode: run.exitCode })
   console.log(`✅ 黄金快照已录制：${goldenPath}（exit=${run.exitCode}，事件 ${data.eventTypes.length} 条）`)
   process.exit(0)
 }
 
 const golden = JSON.parse(readFileSync(goldenPath, 'utf8'))
 const report = checks(data)
+if (expectedEntry) {
+  report.C0 = 'pass'
+  report.resolvedEntry = entryResolution?.resolved
+}
 report.goldenEvents = golden.eventTypes.length
 report.candidateEvents = data.eventTypes.length
 report.exitCode = run.exitCode
-console.log(JSON.stringify(report, null, 2))
-if (process.argv.includes('--regression')) {
+if (regression) {
   try {
     const { execFileSync } = await import('node:child_process')
-    const out = execFileSync(process.execPath, ['scripts/fromzero-verify.mjs'], { cwd: process.cwd(), stdio: 'pipe', timeout: 900000 })
+    const out = execFileSync(process.execPath, ['scripts/fromzero-verify.mjs'], {
+      cwd: process.cwd(),
+      stdio: 'pipe',
+      timeout: 900000,
+      env: {
+        ...process.env,
+        DSH_LOOP_OVERLAY: overlay,
+        DSH_LOOP_PROFILE: profile,
+        ...(profileHome ? { DSH_LOOP_PROFILE_HOME: profileHome } : {}),
+      },
+    })
     report.C6 = out.toString().includes('allPass') ? 'pass' : 'fail'
     report.C6Output = out.toString().slice(-300)
   } catch (error) {
     report.C6 = 'fail'
     report.C6Output = String(error.stdout ?? error.stderr ?? error.message ?? '').slice(-300)
   }
-  console.log(`C6(regression): ${report.C6}`)
   report.pass = report.pass && report.C6 === 'pass'
 }
+persistReport(report)
+console.log(JSON.stringify(report, null, 2))
 process.exit(report.pass ? 0 : 1)
