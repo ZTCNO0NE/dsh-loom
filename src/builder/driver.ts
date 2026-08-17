@@ -1,4 +1,5 @@
 import type { LlmStreamLike } from '../meta/propose.js'
+import { BUILDER_BASE_TOOLS, BuilderCapabilityRegistry, type BuilderCapabilityPlugin } from './capabilities.js'
 import { BuilderKernel, type BuilderDecision, type BuilderToolAction } from './kernel.js'
 
 export interface BuilderDriverOptions {
@@ -12,6 +13,7 @@ export interface BuilderDriverOptions {
   maxToolSteps?: number
   maxTokens?: number
   maxWallTimeMs?: number
+  capabilities?: readonly BuilderCapabilityPlugin[]
   onUsage?: (usage: { prompt: number; completion: number }) => void
 }
 
@@ -88,11 +90,14 @@ export class BuilderDriver {
 
   private prompt(context: ReturnType<BuilderKernel['context']>): string {
     const journal = context.journal.slice(-24)
+    const capabilities = new BuilderCapabilityRegistry().registerAll(this.options.capabilities ?? [])
     return [
       this.options.systemPrompt,
       '你是持久化 Builder 的一个极简 loop 回合。你可以按需读取输入、全局文件与目录，在自己的 workspace 写多文件，并运行工作区命令获得真实反馈。你自己决定下一步、是否继续探索或何时提交。',
       '你没有 verifier、gate、install 权限；提交只会冻结 proposal，绝不会直接改变 actor、builder 或 loop 的 live target。',
+      `Builder 起始工具：${BUILDER_BASE_TOOLS.join(', ')}`,
       '只输出一个严格 JSON decision，禁止 Markdown、解释和额外字段。允许的形式：',
+      `已注册 capability（仅提供上下文，不限制你的选择）：\n${capabilities.describe()}`,
       JSON.stringify({ kind: 'tool', action: { name: 'read_input', document: 'actor' } }),
       JSON.stringify({ kind: 'tool', action: { name: 'read_journal', limit: 20 } }),
       JSON.stringify({ kind: 'tool', action: { name: 'read_file', path: '/path/to/source.ts' } }),

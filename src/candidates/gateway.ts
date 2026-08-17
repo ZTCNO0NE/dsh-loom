@@ -4,6 +4,7 @@ import type { LlmStreamLike } from '../meta/propose.js'
 import { atomicWriteJson } from '../protocol/index.js'
 import { BuilderDriver } from '../builder/driver.js'
 import { BuilderKernel } from '../builder/kernel.js'
+import { LOOP_EVOLUTION_CAPABILITY } from '../builder/capabilities.js'
 
 export interface LoopCandidateGatewayOptions {
   enabled: boolean
@@ -57,6 +58,7 @@ export class LoopCandidateGateway {
         maxModelTurns: 10,
         maxToolSteps: 12,
         maxTokens: this.options.maxTokens,
+        capabilities: [LOOP_EVOLUTION_CAPABILITY],
         onUsage: this.options.onUsage,
       }).run(kernel, run.id)
       if (outcome.state === 'aborted' || !outcome.proposal) {
