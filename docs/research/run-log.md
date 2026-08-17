@@ -390,3 +390,9 @@
 - 配置新增：`allowLoopCandidates.{baselineRoot,baseBundle,dependencyRoot,additionalDependencyRoots,contractCommand,contractTask,goldenPath}`；未配置时 loop 裁决 fail-closed。
 - 测试：**132/132**（新增 deliberation 6 条；删除 discover 3 条）；`npm run check` / `npm run build` / `git diff --check` 全绿。
 - 结论与下一步：代码路线闭环已接；loop 真实端到端需配置 loop runtime（baselineRoot/baseBundle/dependencyRoot/contractCommand/goldenPath）后跑一次真机案例（用户已允许烧钱）。
+
+### 2026-08-18 builder-rejection-reopen（validator 拒绝回注 Builder）
+
+- 缺口：新 Builder 探索路径在 verifier/gate 拒绝后只记录结果，没有像旧 Proposer 路径那样回注；Builder 看不到拒绝原因，无法再改。
+- 修复：`LoopCandidateGateway.reopenExploration(runId, report)` 基于 `BuilderKernel.reopenFromRejection` 重开不可变 run，把拒绝报告写入 `previous-attempt.json`（Builder 首轮即可 `read_input(previous_attempt)` 看到），actor inbox 消息随附到下一 run；后台 job 最多 `allowLoopCandidates.builderMaxReopenAttempts` 次（默认 3），每次拒绝后自动重开并再跑 Builder → 裁决。
+- 测试：**133/133**（新增 reopen 单测：拒绝报告可读 + inbox 保留）；`npm run check` / `npm run build` / `git diff --check` 全绿。

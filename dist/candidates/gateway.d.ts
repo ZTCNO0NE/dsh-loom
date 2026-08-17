@@ -86,6 +86,12 @@ export declare class LoopCandidateGateway {
         state: BuilderRunState;
         queuedAt: string;
     };
+    /**
+     * Verifier/gate rejection reopens an immutable Builder run with the report
+     * as previous-attempt input; the actor inbox carries over so follow-up
+     * observations remain visible to the next attempt.
+     */
+    reopenExploration(runId: string, report: Record<string, unknown>): string;
     status(): ReturnType<CandidateRegistry['list']>;
     private persist;
 }

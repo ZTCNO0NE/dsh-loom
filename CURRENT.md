@@ -5,14 +5,14 @@
 ## 一句话状态
 
 **`v1.1.0` 已完成双重正式发布**：GitHub source release 为 <https://github.com/ZTCNO0NE/dsh-loom/releases/tag/v1.1.0>，npm registry 已核验 `dsh-loom@1.1.0` 且 `latest=1.1.0`。控制候选已完成 **Builder Kernel → commit-pinned Git acquisition → 无网络 build → C0/C1–C8/C6 → gate cold install → actor 重跑 → rollback/restore**；生产与用户 profile 均未触及。当前工作树新增未提交的 Actor ↔ Builder 异步通信：`meta_auto(exploreLoop=true)` 立即返回 `jobId/runId`，`meta_builder_status` 读取持久状态，`meta_builder_message` 写入下一 Builder 微循环可见 inbox；真实隔离 actor 实测工具返回耗时 84ms，Builder 随后后台运行。当前 `npm run check`、`npm test`（128/128）、`npm run build`、`git diff --check` 全部通过。
-**`v1.1.0` 已双重正式发布**（GitHub release + npm latest）。当前主线按用户定稿做减法：**v1.1 只保留单一路线**——用户主动委托 → 三层 evidence pack → Builder 自由探索 config/tool/skill/loop → verifier/gate 裁决 → 同任务重跑 → 用户看到改了什么/为什么/效果。`discoverLoopCandidate`/Git 获取已砍，被动触发链从激活路径移除；`src/deliberation/` 裁决已接线（patch 全链路真实，loop 经本地 baseline 构建 + contract-runner + profile gate，配置后启用）。当前 `npm run check`、`npm test`（**132/132**）、`npm run build`、`git diff --check` 全部通过。
+**`v1.1.0` 已双重正式发布**（GitHub release + npm latest）。当前主线按用户定稿做减法：**v1.1 只保留单一路线**——用户主动委托 → 三层 evidence pack → Builder 自由探索 config/tool/skill/loop → verifier/gate 裁决 → 同任务重跑 → 用户看到改了什么/为什么/效果。`discoverLoopCandidate`/Git 获取已砍，被动触发链从激活路径移除；`src/deliberation/` 裁决已接线（patch 全链路真实，loop 经本地 baseline 构建 + contract-runner + profile gate，配置后启用），**verifier/gate 拒绝会回注 Builder 重开新 run（最多 3 次）**。当前 `npm run check`、`npm test`（**133/133**）、`npm run build`、`git diff --check` 全部通过。
 
 ### 2026-08-18 v1.1 减法定稿（docs/v1-1-route.md）
 
 - 唯一入口：`meta_auto(exploreLoop=true, requirements, actorAssessment)`；后台 job 先冻结三层 evidence pack（manifest+digest+handoff），Builder 读原始文件自由探索；
 - 裁决：patch → Validator + Gate + 同任务隔离重跑 + 台账；loop → `CandidateImporter`（本地固定 baseline，无网络）→ contract-runner C0/C1-C8/C6 → profile gate 冷安装；
 - loop leg 启用需配置 `allowLoopCandidates.{baselineRoot,baseBundle,dependencyRoot,contractCommand,contractTask,goldenPath}`，未配置 fail-closed；
-- 测试 132/132（新增 deliberation 6 条，删除 discover 3 条）。
+- 测试 133/133（新增 deliberation 6 条 + verifier 拒绝回注 reopen 1 条，删除 discover 3 条）。
 
 ## 当前进行中（loop 层放开，按序）
 
@@ -42,7 +42,7 @@ Actor evidence pack（2026-08-18，未提交）：新增 `src/evidence/index.ts`
 
 - Node v22.20.0 / npm 10.9.3 / pnpm 11.21.0（`/chenzute/dsh-src/tools/bin/pnpm`）；`dsh` 不在 PATH。
 - dsh checkout `/chenzute/dsh-src/deepseek-harness` 存在；插件类型链 devDependencies `file:` 正常。
-- `dist/index.js` 已构建；`npm run check` ✓；`npm test` 132/132 ✓；`npm run build` ✓；`git diff --check` ✓。
+- `dist/index.js` 已构建；`npm run check` ✓；`npm test` 133/133 ✓；`npm run build` ✓；`git diff --check` ✓。
 - 候选 fork 已构建 `lib/index.js`，`DEFAULT_MAX_PARALLEL_TOOL_CALLS = 1` ✓。
 - env 文件在位（600）：`.env-27b`（本地 actor）、`.env-deepseek`（官方 V4 Flash builder/评审门）；禁止打印/提交。
 - 契约跑法模板：
@@ -97,7 +97,7 @@ node scripts/contract-runner.mjs check /chenzute/dsh-src/eval/overlay-contract-c
 | v1.0.0-v1.0.4（监督员/后台/通知/偏好/便携 CLI） | 完成 |
 | loop 契约 runner + golden + C0 entry-resolution | 完成（正式 Loader adapter + 自主候选实装均有 C0） |
 | 完整契约报告三件套 + 候选 loop 网关 | 完成（正式 profile、C0–C8/C6、冷 gate、staging 网关均有隔离实证） |
-| v1.1 减法定稿 + 单一路线接线（deliberation/evidence/同任务重跑） | 完成（代码 132/132；loop 真机端到端待配置 runtime） |
+| v1.1 减法定稿 + 单一路线接线（deliberation/evidence/拒绝回注/同任务重跑） | 完成（代码 133/133；loop 真机端到端待配置 runtime） |
 | builder 自主选择候选 loop + 端到端案例 | 收敛为 v1.1 单一路线：builder-generated + 本地 baseline；外部 Git acquisition 已砍 |
 | Tycho 型 BuilderKernel 微循环 + 拒绝回注 | 完成（官方 V4 Flash patch/loop-candidate run + verifier feedback 证据） |
 | 自主 loop 最后一公里 | 完成（staging → C0–C8/C6 → installed → actor 重跑 → rollback/restore） |

@@ -92,6 +92,7 @@ export const Config = Schema.object({
         contractCommand: Schema.array(Schema.string()).default([]),
         contractTask: Schema.string().default('reply with ok'),
         goldenPath: Schema.string().default(''),
+        builderMaxReopenAttempts: Schema.number().default(3),
         builderMaxModelTurns: Schema.number().default(24),
         builderMaxToolSteps: Schema.number().default(48),
         builderMaxWallTimeMs: Schema.number().default(600000),
@@ -689,85 +690,114 @@ export function apply(ctx, config) {
                     runId: started.runId,
                     requirements: requirements ?? '',
                 }, async () => {
-                    const exploration = await loopCandidateGateway.runExploration(started.runId);
-                    let summary = `run=${started.runId} state=${exploration.state} turns=${exploration.modelTurns} tools=${exploration.toolSteps}${exploration.reason ? ` reason=${exploration.reason}` : ''}`;
-                    if (exploration.state !== 'submitted' || !exploration.proposal) {
-                        return { summary: `${summary}；未提交 proposal，不进入裁决` };
-                    }
-                    let proposal;
-                    try {
-                        proposal = normalizeBuilderProposal(exploration.proposal);
-                    }
-                    catch (error) {
-                        return { summary: `${summary}；invalid proposal: ${String(error)}` };
-                    }
-                    if (proposal.capability === 'patch-evolution') {
-                        const cases = await validator.loadRegressionCases();
-                        const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline);
-                        const pack = readActorEvidencePack(evidencePack.manifestPath) ?? evidencePack;
-                        const result = await adjudicatePatch(proposal, {
-                            root,
-                            sessionId: config.sessionId,
-                            validator: loopValidator,
-                            gate,
-                            collectFrames: (patch, base) => collectFramesForPatch(patch, base, {
-                                enabled: config.isolation.enabled,
-                                dshCommand: config.isolation.dshCommand,
-                                cwd: config.isolation.cwd,
-                                profile: config.isolation.profile,
-                                baseOverlays: config.isolation.baseOverlays,
-                                probe: config.isolation.probe,
-                                probeTimeoutMs: config.isolation.probeTimeoutMs,
-                                stagingRootFor: (patchId) => paths.staging(root, config.sessionId, patchId),
-                                skillProbe: (patch) => loopValidator.probeSkillForFrames(patch),
-                            }),
-                            applyOps: ops,
-                            evidenceEvents: evidenceEventsOf(pack),
-                            onApplied: async ({ patch, report, applied }) => {
-                                appendLedger(root, config.sessionId, {
-                                    id: patch.id,
-                                    triggeredBy: 'S9-explicit-request',
-                                    problem: report.failureSummary ?? requirements ?? 'user-initiated builder delegation',
-                                    changes: [{ target: patch.targetId, kind: patch.targetKind, before: {}, after: patch.config }],
-                                    verdict: report.verdict,
-                                    applied: applied.applied,
-                                    metricsBefore: {},
-                                    metricsAfter: {},
-                                    rolledBack: false,
-                                    appliedAt: new Date().toISOString(),
-                                });
-                                appendReport(root, config.sessionId, `用户主动委托：${patch.targetKind} ${patch.targetId} → ${report.verdict}（applied=${applied.applied}）`);
-                                if (config.isolation.enabled) {
-                                    const rerun = runIsolation(patch, {
-                                        dshCommand: config.isolation.dshCommand,
-                                        cwd: config.isolation.cwd,
-                                        profile: config.isolation.profile,
-                                        baseOverlays: config.isolation.baseOverlays,
-                                        stagingRoot: paths.staging(root, config.sessionId, patch.id),
-                                        probe: requirements || config.isolation.probe,
-                                        probeTimeoutMs: config.isolation.probeTimeoutMs,
+                    const maxAttempts = Math.max(1, config.allowLoopCandidates.builderMaxReopenAttempts ?? 3);
+                    let currentRunId = started.runId;
+                    const rejections = [];
+                    let summary = '';
+                    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                        const exploration = await loopCandidateGateway.runExploration(currentRunId);
+                        summary = `run=${currentRunId} attempt=${attempt}/${maxAttempts} state=${exploration.state} turns=${exploration.modelTurns} tools=${exploration.toolSteps}${exploration.reason ? ` reason=${exploration.reason}` : ''}`;
+                        if (exploration.state !== 'submitted' || !exploration.proposal) {
+                            summary += '；未提交 proposal，不进入裁决';
+                            break;
+                        }
+                        let proposal;
+                        try {
+                            proposal = normalizeBuilderProposal(exploration.proposal);
+                        }
+                        catch (error) {
+                            summary += `；invalid proposal: ${String(error)}`;
+                            break;
+                        }
+                        let verdict = 'rejected';
+                        let reason;
+                        if (proposal.capability === 'patch-evolution') {
+                            const cases = await validator.loadRegressionCases();
+                            const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline);
+                            const pack = readActorEvidencePack(evidencePack.manifestPath) ?? evidencePack;
+                            const result = await adjudicatePatch(proposal, {
+                                root,
+                                sessionId: config.sessionId,
+                                validator: loopValidator,
+                                gate,
+                                collectFrames: (patch, base) => collectFramesForPatch(patch, base, {
+                                    enabled: config.isolation.enabled,
+                                    dshCommand: config.isolation.dshCommand,
+                                    cwd: config.isolation.cwd,
+                                    profile: config.isolation.profile,
+                                    baseOverlays: config.isolation.baseOverlays,
+                                    probe: config.isolation.probe,
+                                    probeTimeoutMs: config.isolation.probeTimeoutMs,
+                                    stagingRootFor: (patchId) => paths.staging(root, config.sessionId, patchId),
+                                    skillProbe: (patch) => loopValidator.probeSkillForFrames(patch),
+                                }),
+                                applyOps: ops,
+                                evidenceEvents: evidenceEventsOf(pack),
+                                onApplied: async ({ patch, report, applied }) => {
+                                    appendLedger(root, config.sessionId, {
+                                        id: patch.id,
+                                        triggeredBy: 'S9-explicit-request',
+                                        problem: report.failureSummary ?? requirements ?? 'user-initiated builder delegation',
+                                        changes: [{ target: patch.targetId, kind: patch.targetKind, before: {}, after: patch.config }],
+                                        verdict: report.verdict,
+                                        applied: applied.applied,
+                                        metricsBefore: {},
+                                        metricsAfter: {},
+                                        rolledBack: false,
+                                        appliedAt: new Date().toISOString(),
                                     });
-                                    appendReport(root, config.sessionId, `同任务重跑：exit=${rerun.probe?.exitCode ?? 'n/a'} ${rerun.probe?.outputTail?.slice(0, 200) ?? ''}`);
-                                }
-                            },
-                        });
-                        summary += `；patch verdict=${result.verdict} target=${result.patch.targetId} applied=${result.applied?.applied ?? false}`;
-                    }
-                    else {
-                        const loopRoot = config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime');
-                        const importer = new CandidateImporter({
-                            root: loopRoot,
-                            baselineRoot: config.allowLoopCandidates.baselineRoot,
-                            buildDependencyRoot: config.allowLoopCandidates.buildDependencyRoot,
-                        });
-                        const result = await adjudicateLoop(proposal, {
-                            root: loopRoot,
-                            importer,
-                            verifyContract: (manifest) => verifyLoopContract(manifest, ctx, baseline, root, config.sessionId, config),
-                            install: (candidateId) => installLoopCandidate(candidateId, config, root),
-                        });
-                        summary += `；loop verdict=${result.verdict} candidate=${result.candidateId}${result.reason ? ` reason=${result.reason}` : ''}`;
-                        appendReport(root, config.sessionId, `loop 演进：${result.candidateId} → ${result.verdict}${result.install ? ` state=${result.install.state}` : ''}`);
+                                    appendReport(root, config.sessionId, `用户主动委托：${patch.targetKind} ${patch.targetId} → ${report.verdict}（applied=${applied.applied}）`);
+                                    if (config.isolation.enabled) {
+                                        const rerun = runIsolation(patch, {
+                                            dshCommand: config.isolation.dshCommand,
+                                            cwd: config.isolation.cwd,
+                                            profile: config.isolation.profile,
+                                            baseOverlays: config.isolation.baseOverlays,
+                                            stagingRoot: paths.staging(root, config.sessionId, patch.id),
+                                            probe: requirements || config.isolation.probe,
+                                            probeTimeoutMs: config.isolation.probeTimeoutMs,
+                                        });
+                                        appendReport(root, config.sessionId, `同任务重跑：exit=${rerun.probe?.exitCode ?? 'n/a'} ${rerun.probe?.outputTail?.slice(0, 200) ?? ''}`);
+                                    }
+                                },
+                            });
+                            verdict = result.verdict;
+                            reason = result.reason;
+                            summary += `；patch verdict=${result.verdict} target=${result.patch.targetId} applied=${result.applied?.applied ?? false}`;
+                        }
+                        else {
+                            const loopRoot = config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime');
+                            const importer = new CandidateImporter({
+                                root: loopRoot,
+                                baselineRoot: config.allowLoopCandidates.baselineRoot,
+                                buildDependencyRoot: config.allowLoopCandidates.buildDependencyRoot,
+                            });
+                            const result = await adjudicateLoop(proposal, {
+                                root: loopRoot,
+                                importer,
+                                verifyContract: (manifest) => verifyLoopContract(manifest, ctx, baseline, root, config.sessionId, config),
+                                install: (candidateId) => installLoopCandidate(candidateId, config, root),
+                            });
+                            verdict = result.verdict;
+                            reason = result.reason;
+                            summary += `；loop verdict=${result.verdict} candidate=${result.candidateId}${result.reason ? ` reason=${result.reason}` : ''}`;
+                            appendReport(root, config.sessionId, `loop 演进：${result.candidateId} → ${result.verdict}${result.install ? ` state=${result.install.state}` : ''}`);
+                        }
+                        if (verdict === 'approved')
+                            break;
+                        rejections.push(reason ?? 'rejected');
+                        if (attempt < maxAttempts) {
+                            currentRunId = loopCandidateGateway.reopenExploration(currentRunId, {
+                                source: 'deliberation',
+                                verdict: 'rejected',
+                                failureSummary: reason ?? 'verifier rejected',
+                                observedAt: new Date().toISOString(),
+                            });
+                            summary += `；rejected → reopened=${currentRunId}`;
+                        }
+                        else {
+                            summary += `；maxAttempts=${maxAttempts} rejected=${rejections.join(' | ')}`;
+                        }
                     }
                     return { summary };
                 });

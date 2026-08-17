@@ -70,6 +70,7 @@ export interface MetaValidateConfig {
         contractCommand: string[];
         contractTask: string;
         goldenPath: string;
+        builderMaxReopenAttempts: number;
         builderMaxModelTurns: number;
         builderMaxToolSteps: number;
         builderMaxWallTimeMs: number;

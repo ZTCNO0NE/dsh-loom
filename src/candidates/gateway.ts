@@ -168,6 +168,22 @@ export class LoopCandidateGateway {
     return { accepted: true, runId, state: kernel.load(runId).state, queuedAt: message.at }
   }
 
+  /**
+   * Verifier/gate rejection reopens an immutable Builder run with the report
+   * as previous-attempt input; the actor inbox carries over so follow-up
+   * observations remain visible to the next attempt.
+   */
+  reopenExploration(runId: string, report: Record<string, unknown>): string {
+    const kernel = new BuilderKernel(this.options.root, `${this.options.sessionId}:loop-exploration`)
+    if (kernel.load(runId).state !== 'submitted') {
+      throw new Error(`only submitted builder runs may be reopened: ${kernel.load(runId).state}`)
+    }
+    const messages = kernel.context(runId).messages
+    const next = kernel.reopenFromRejection(runId, report)
+    for (const message of messages) kernel.receiveActorMessage(next.id, message.text)
+    return next.id
+  }
+
   status(): ReturnType<CandidateRegistry['list']> {
     return new CandidateRegistry(this.options.root).list()
   }

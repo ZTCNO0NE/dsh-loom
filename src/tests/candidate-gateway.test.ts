@@ -3,6 +3,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { LoopCandidateGateway } from '../candidates/gateway.js'
+import { BuilderKernel } from '../builder/kernel.js'
+
+function submittingLlm() {
+  let calls = 0
+  return {
+    async *stream() {
+      calls += 1
+      const decision = calls === 1
+        ? { kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'patch-evolution', patch: { id: 'p1', targetId: 'llm-deepseek', targetKind: 'config', config: {}, dependencies: [], rationale: 'x', expectedOutcome: 'y', version: 1, createdAt: new Date().toISOString() } } } }
+        : { kind: 'submit' }
+      yield { kind: 'block-start', type: 'text' }
+      yield { kind: 'text-delta', text: JSON.stringify(decision) }
+      yield { kind: 'block-end' }
+    },
+  }
+}
 
 describe('loop candidate gateway', () => {
   it('does not invoke a builder or write a registry while disabled', async () => {
@@ -67,5 +83,33 @@ describe('loop candidate gateway', () => {
 
     await expect(gateway.runExploration(started.runId)).resolves.toMatchObject({ state: 'aborted', runId: started.runId })
     expect(prompt).toContain('优先检查并行安全工具的行为。')
+  })
+
+  it('reopens a rejected submitted run with the verifier report and carries the actor inbox', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-gateway-reopen-'))
+    const gateway = new LoopCandidateGateway({
+      enabled: true,
+      root,
+      sessionId: 's',
+      provider: 'test',
+      model: 'test',
+      maxTokens: 128,
+      llm: submittingLlm(),
+    })
+    const started = gateway.startExploration('改 model 配置')
+    if (!started.accepted) throw new Error('test requires enabled exploration')
+    gateway.messageExploration(started.runId, '注意不要动其他配置')
+    const submitted = await gateway.runExploration(started.runId)
+    expect(submitted).toMatchObject({ state: 'submitted' })
+    const nextRunId = gateway.reopenExploration(started.runId, {
+      source: 'deliberation',
+      verdict: 'rejected',
+      failureSummary: 'expected trajectory diverged at tool/call 0',
+    })
+    expect(nextRunId).not.toBe(started.runId)
+    const kernel = new BuilderKernel(root, 's:loop-exploration')
+    const next = kernel.context(nextRunId)
+    expect(next.input.previousAttempt).toMatchObject({ verdict: 'rejected', failureSummary: 'expected trajectory diverged at tool/call 0' })
+    expect(next.messages.map((message) => message.text)).toContain('注意不要动其他配置')
   })
 })

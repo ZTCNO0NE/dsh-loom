@@ -76,7 +76,7 @@ evidence/<id>/
 
 ## 9. 实现状态（2026-08-18）
 
-- 已实现：`src/deliberation/index.ts`（patch/loop 裁决，fail-closed）；`meta_auto(exploreLoop=true)` 后台 job 在 Builder submit 后自动裁决；patch 应用后同任务隔离重跑 + 台账/报告/通知；`CandidateImporter` 只保留 builder-generated + 本地固定 baseline（无网络）；Builder 基础工具移除旧 draft/staging 三件。
+- 已实现：`src/deliberation/index.ts`（patch/loop 裁决，fail-closed）；`meta_auto(exploreLoop=true)` 后台 job 在 Builder submit 后自动裁决，**verifier/gate 拒绝会以 previous-attempt 报告重开新的 immutable Builder run（最多 `builderMaxReopenAttempts` 次，默认 3，actor inbox 随附）**；patch 应用后同任务隔离重跑 + 台账/报告/通知；`CandidateImporter` 只保留 builder-generated + 本地固定 baseline（无网络）；Builder 基础工具移除旧 draft/staging 三件。
 - 已砍：`discoverLoopCandidate` / Git 获取入口；被动触发链从激活路径移除（代码暂留归档）。
 - 配置（loop leg 启用条件）：`allowLoopCandidates.{baselineRoot,baseBundle,dependencyRoot,contractCommand,contractTask,goldenPath}`；未配置时 loop 裁决 fail-closed（`loop runtime not configured`）。
-- 测试：132/132（新增 deliberation 6 条）；`npm run check` / `npm run build` / `git diff --check` 全绿。
+- 测试：133/133（新增 deliberation 6 条 + reopen 1 条）；`npm run check` / `npm run build` / `git diff --check` 全绿。
