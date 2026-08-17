@@ -139,7 +139,8 @@ export interface CandidateAcquisitionRequest {
 export interface CandidateImporterOptions {
     /** Runtime-owned meta workspace, never the repository's vendored source tree. */
     root: string;
-    allowedGitHosts: string[];
+    /** Local DSH checkout that owns the pinned audited baseline (no network). */
+    baselineRoot: string;
     /** Read-only dependency root for the audited sandbox build recipe. Empty disables source builds. */
     buildDependencyRoot?: string;
 }
@@ -155,8 +156,9 @@ export declare function applyBuilderGeneratedEdits(repositoryRoot: string, sourc
     afterHash: string;
 }>;
 /**
- * The only networked candidate path. It deliberately writes a content-addressed
- * staging directory and a `staging` record, never `approved` or project `vendored/`.
+ * The only self-authored candidate path (no network): a local pinned DSH
+ * checkout is copied to content-addressed staging, builder edits are applied,
+ * the audited sandbox recipe builds it, and a `staging` record is written.
  */
 export declare class CandidateImporter {
     private readonly options;

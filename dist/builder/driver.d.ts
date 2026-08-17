@@ -1,4 +1,5 @@
 import type { LlmStreamLike } from '../meta/propose.js';
+import { type BuilderCapabilityPlugin } from './capabilities.js';
 import { BuilderKernel } from './kernel.js';
 export interface BuilderDriverOptions {
     llm: LlmStreamLike;
@@ -11,6 +12,7 @@ export interface BuilderDriverOptions {
     maxToolSteps?: number;
     maxTokens?: number;
     maxWallTimeMs?: number;
+    capabilities?: readonly BuilderCapabilityPlugin[];
     onUsage?: (usage: {
         prompt: number;
         completion: number;

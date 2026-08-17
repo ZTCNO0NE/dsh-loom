@@ -53,6 +53,21 @@ JSON 是工具协议、状态和交付格式；它不是唯一表达方式，也
 
 ## 4. 工具与 capability
 
+### Actor evidence pack
+
+用户主动委托时，核心在 Builder run 创建前冻结一份三层 evidence pack：
+
+```text
+evidence/<id>/
+  manifest.json          # watermark、hash、原始文件引用
+  config-snapshot.json   # 已脱敏的 actor 配置快照
+  actor-handoff.md       # actor/用户的自然语言观察与未知项
+```
+
+`manifest.json` 引用 `trajectory/frames.jsonl`、`events.jsonl`、requirements、signals、triggers、actor profile 和其他存在的状态文件，并记录行数、字节数与 SHA-256。`deterministicDigest` 只抽取已知指标（错误、延迟、停滞、工具统计和确定性信号）；`actor-handoff.md` 可以自由描述怀疑、上下文和目标，但不是 verifier 结论。Builder 以 manifest 为入口，仍可读取 watermark 对应的原始文件，不把摘要当成信息边界。
+
+首个真实 evidence pack 使用隔离 actor 会话生成：`/chenzute/dsh-src/eval/meta-workspace-actor-loop-async-20260818/workspace/actor-loop-async-20260818/evidence/`。它包含 826 个原始帧、8 个归一化事件、27b actor 的运行 digest，以及对“loop 基座过弱”请求的自然语言 handoff。该会话证明了主动委托和后台调度，但尚未证明候选改动的效果。
+
 Builder 运行标准 DSH 工具调用微循环。基础工具面应允许：全局读取/搜索、文件工作区操作、源码/候选发现、Git/网络获取、构建、测试、契约 runner、性能 probe 与 artifact 查询。每个调用都必须返回可记录的实际反馈，而非只返回“已执行”。
 
 Capability 以 skill/tool 形式注册，并声明：输入、工作区约定、可调用工具、产物 schema、verifier、目标类型及安装策略。首个 capability：

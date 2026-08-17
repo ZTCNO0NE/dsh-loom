@@ -118,6 +118,13 @@ export class Observer {
     }
     /** Raw frame recorder for telemetry (turn/tool latency + errors). */
     recordFrame(type, data, time, sessionId = 'default') {
+        this.processFrame(type, data, time, sessionId, true);
+    }
+    /** Rebuild in-memory telemetry from a persisted frame without appending it. */
+    replayFrame(type, data, time, sessionId = 'default') {
+        this.processFrame(type, data, time, sessionId, false);
+    }
+    processFrame(type, data, time, sessionId, persist) {
         this.lastFrameAt = time;
         if (type === 'turn/start') {
             this.currentTurnStartAt = time;
@@ -147,7 +154,8 @@ export class Observer {
                 text: data.text !== undefined ? preview(data.text) : data.content !== undefined ? preview(data.content) : undefined,
             },
         };
-        appendJsonl(paths.frames(this.options.root, this.options.sessionId), frame);
+        if (persist)
+            appendJsonl(paths.frames(this.options.root, this.options.sessionId), frame);
         if (type === 'assistant/message' && typeof frame.data.text === 'string') {
             if (frame.data.text === this.lastText)
                 this.repeatedText += 1;

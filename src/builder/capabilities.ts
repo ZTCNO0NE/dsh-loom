@@ -15,9 +15,6 @@ export const BUILDER_BASE_TOOLS = [
   'read_workspace_file',
   'run_workspace_command',
   'write_submission',
-  'write_candidate_draft',
-  'inspect_staging',
-  'preflight_staging_entry',
 ] as const satisfies readonly BuilderToolName[]
 
 /** Declarative capability metadata supplied to a Builder run. */

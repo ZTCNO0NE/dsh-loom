@@ -17,6 +17,13 @@ export interface BuilderJournalEntry {
     result?: Record<string, unknown>;
     error?: string;
 }
+/** An inbound observation from the actor, delivered between Builder turns. */
+export interface BuilderMessage {
+    schemaVersion: 1;
+    at: string;
+    from: 'actor';
+    text: string;
+}
 export interface BuilderRunRecord {
     schemaVersion: 1;
     id: string;
@@ -53,6 +60,35 @@ export type BuilderToolAction = {
     name: 'write_plan';
     value: Record<string, unknown>;
 }
+/** Read-only host exploration. Deployment decides the readable scope. */
+ | {
+    name: 'read_file';
+    path: string;
+} | {
+    name: 'list_directory';
+    path: string;
+}
+/** Builder-owned, persistent multi-file scratch space. */
+ | {
+    name: 'write_workspace_file';
+    path: string;
+    content: string;
+} | {
+    name: 'read_workspace_file';
+    path: string;
+}
+/** Trusted-development command tool; stdout/stderr are durable feedback. */
+ | {
+    name: 'run_workspace_command';
+    command: string;
+    args: string[];
+    timeoutMs?: number;
+}
+/** Generic frozen proposal for a capability; it never applies a target change. */
+ | {
+    name: 'write_submission';
+    proposal: Record<string, unknown>;
+}
 /** Typed draft write; this is deliberately not a general filesystem tool. */
  | {
     name: 'write_candidate_draft';
@@ -68,15 +104,18 @@ export declare function builderRunPaths(root: string, sessionId: string, id: str
     base: string;
     record: string;
     actor: string;
+    messages: string;
     targetBefore: string;
     previousAttempt: string;
     worldModel: string;
     plan: string;
     journal: string;
     snapshots: string;
+    workspace: string;
     staging: string;
     preflight: string;
     proposal: string;
+    submissionDraft: string;
 };
 /** Durable, builder-owned run state. The kernel—not an LLM—records every transition. */
 export declare class BuilderKernel {
@@ -92,8 +131,14 @@ export declare class BuilderKernel {
     context(id: string): {
         run: BuilderRunRecord;
         input: BuilderRunInput;
+        messages: BuilderMessage[];
         journal: BuilderJournalEntry[];
     };
+    /**
+     * Accept a new actor observation without changing the immutable initial
+     * snapshot. The next driver turn reads this durable inbox in its prompt.
+     */
+    receiveActorMessage(id: string, text: string): BuilderMessage;
     proposal(id: string): Record<string, unknown> | null;
     /** Execute exactly one allowlisted builder action and durably return its feedback. */
     decide(id: string, decision: BuilderDecision): Record<string, unknown>;
@@ -101,4 +146,6 @@ export declare class BuilderKernel {
     reopenFromRejection(id: string, report: Record<string, unknown>): BuilderRunRecord;
     private executeTool;
     private snapshot;
+    private submissionDraft;
+    private workspacePath;
 }

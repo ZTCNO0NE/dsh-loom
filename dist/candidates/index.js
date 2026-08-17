@@ -121,45 +121,6 @@ export class CandidateRegistry {
         atomicWriteJson(candidatePaths(this.root).registry, registry);
     }
 }
-function githubRepository(uri) {
-    const parsed = new URL(uri);
-    if (parsed.hostname !== 'github.com')
-        return null;
-    const segments = parsed.pathname.replace(/^\//, '').replace(/\.git$/, '').split('/');
-    if (segments.length !== 2 || !segments.every((segment) => /^[A-Za-z0-9_.-]+$/.test(segment)))
-        return null;
-    return { owner: segments[0], repository: segments[1] };
-}
-function githubArchive(target, source) {
-    const repository = githubRepository(source.uri);
-    if (!repository)
-        throw new Error(`not a supported GitHub source: ${source.uri}`);
-    const revision = JSON.parse(execFileSync('curl', [
-        '--fail', '--silent', '--show-error', '--location', '--max-time', '20',
-        `https://api.github.com/repos/${repository.owner}/${repository.repository}/commits/${encodeURIComponent(source.ref)}`,
-    ], { encoding: 'utf8', timeout: 25_000 }));
-    if (typeof revision.sha !== 'string' || !/^[0-9a-f]{40}$/i.test(revision.sha)) {
-        throw new Error('GitHub did not return a resolved commit');
-    }
-    if (/^[0-9a-f]{40}$/i.test(source.ref) && revision.sha.toLowerCase() !== source.ref.toLowerCase()) {
-        throw new Error('GitHub resolved a different commit than the requested pin');
-    }
-    const archive = `${target}.tar.gz`;
-    mkdirSync(target, { recursive: true });
-    try {
-        execFileSync('curl', [
-            '--fail', '--silent', '--show-error', '--location', '--max-time', '120', '--output', archive,
-            `https://codeload.github.com/${repository.owner}/${repository.repository}/tar.gz/${revision.sha}`,
-        ], { stdio: 'pipe', timeout: 125_000 });
-        execFileSync('tar', ['-xzf', archive, '--strip-components=1', '--no-same-owner', '--no-same-permissions', '-C', target], {
-            stdio: 'pipe', timeout: 120_000,
-        });
-    }
-    finally {
-        rmSync(archive, { force: true });
-    }
-    return revision.sha;
-}
 const GENERATED_BASELINE_URI = 'https://github.com/deepseek-ai/deepseek-harness.git';
 const GENERATED_PACKAGE_PATH = 'packages/core/agent-loop';
 const GENERATED_PACKAGE_NAME = '@deepseek-ai/dsh-agent-loop';
@@ -217,8 +178,9 @@ export function applyBuilderGeneratedEdits(repositoryRoot, source) {
     return summary;
 }
 /**
- * The only networked candidate path. It deliberately writes a content-addressed
- * staging directory and a `staging` record, never `approved` or project `vendored/`.
+ * The only self-authored candidate path (no network): a local pinned DSH
+ * checkout is copied to content-addressed staging, builder edits are applied,
+ * the audited sandbox recipe builds it, and a `staging` record is written.
  */
 export class CandidateImporter {
     options;
@@ -229,61 +191,36 @@ export class CandidateImporter {
         if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(request.id))
             throw new Error('invalid candidate id');
         const generatedSource = isBuilderGeneratedSource(request.source) ? request.source : undefined;
-        const generated = generatedSource !== undefined;
-        const networkSource = generatedSource
-            ? generatedSource.baseline
-            : request.source;
-        const parsed = new URL(networkSource.uri);
-        if (parsed.protocol !== 'https:' || !this.options.allowedGitHosts.includes(parsed.hostname)) {
-            throw new Error(`candidate source is not allowed: ${networkSource.uri}`);
+        if (!generatedSource) {
+            throw new Error('v1.1 only accepts builder-generated loop candidates; Git acquisition is removed');
         }
-        if (!/^[A-Za-z0-9._/@-]{1,160}$/.test(networkSource.ref))
-            throw new Error('invalid candidate ref');
-        if (generated) {
-            if (networkSource.uri !== GENERATED_BASELINE_URI || !/^[0-9a-f]{40}$/i.test(networkSource.ref)) {
-                throw new Error('builder-generated source must use the pinned audited DSH baseline commit');
-            }
-            if (request.packagePath !== GENERATED_PACKAGE_PATH || request.packageName !== GENERATED_PACKAGE_NAME) {
-                throw new Error('builder-generated candidate must target the audited DSH agent-loop package');
-            }
-            if (request.build?.method !== 'sandboxed-dsh-workspace') {
-                throw new Error('builder-generated candidate must use the audited networkless build recipe');
-            }
+        const baseline = generatedSource.baseline;
+        if (baseline.uri !== GENERATED_BASELINE_URI || !/^[0-9a-f]{40}$/i.test(baseline.ref)) {
+            throw new Error('builder-generated source must use the pinned audited DSH baseline commit');
         }
-        if (request.build?.method !== 'prebuilt' && request.build?.method !== 'sandboxed-dsh-workspace') {
-            throw new Error('candidate build method is not allowed');
+        if (request.packagePath !== GENERATED_PACKAGE_PATH || request.packageName !== GENERATED_PACKAGE_NAME) {
+            throw new Error('builder-generated candidate must target the audited DSH agent-loop package');
         }
-        if (request.packagePath !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$/.test(request.packagePath)
-            || request.packagePath.split('/').includes('..'))) {
-            throw new Error('invalid candidate packagePath');
+        if (request.build?.method !== 'sandboxed-dsh-workspace') {
+            throw new Error('builder-generated candidate must use the audited networkless build recipe');
         }
         const target = join(candidatePaths(this.options.root).base, 'staging', request.id);
         if (existsSync(target))
             throw new Error(`staging directory already exists: ${request.id}`);
         mkdirSync(join(candidatePaths(this.options.root).base, 'staging'), { recursive: true });
         try {
-            const github = githubRepository(networkSource.uri);
-            let commit;
-            if (github) {
-                commit = githubArchive(target, networkSource);
+            const baselineRoot = resolve(this.options.baselineRoot);
+            const baselineCommit = execFileSync('git', ['-C', baselineRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10_000 }).trim();
+            if (baselineCommit.toLowerCase() !== baseline.ref.toLowerCase()) {
+                throw new Error(`local DSH baseline commit mismatch: expected ${baseline.ref}, got ${baselineCommit}`);
             }
-            else {
-                execFileSync('git', ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', '--branch', networkSource.ref, networkSource.uri, target], {
-                    stdio: 'pipe', timeout: 120_000,
-                });
-                if (request.packagePath) {
-                    execFileSync('git', ['-C', target, 'sparse-checkout', 'set', '--no-cone', request.packagePath], {
-                        stdio: 'pipe', timeout: 10_000,
-                    });
-                }
-                execFileSync('git', ['-C', target, 'checkout', '--detach'], { stdio: 'pipe', timeout: 120_000 });
-                commit = execFileSync('git', ['-C', target, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10_000 }).trim();
+            const baselinePackage = resolve(baselineRoot, GENERATED_PACKAGE_PATH);
+            if (!existsSync(join(baselinePackage, 'package.json'))) {
+                throw new Error(`pinned DSH baseline package is unavailable: ${baselinePackage}`);
             }
-            const generatedEdits = generatedSource ? applyBuilderGeneratedEdits(target, generatedSource) : undefined;
-            const artifactPath = resolve(target, request.packagePath ?? '.');
-            if (!artifactPath.startsWith(`${resolve(target)}${sep}`) && artifactPath !== resolve(target)) {
-                throw new Error('candidate packagePath escapes cloned repository');
-            }
+            cpSync(baselinePackage, target, { recursive: true, dereference: false });
+            const generatedEdits = applyBuilderGeneratedEdits(target, generatedSource);
+            const artifactPath = resolve(target);
             if (!existsSync(join(artifactPath, 'package.json')))
                 throw new Error('candidate packagePath has no package.json');
             const build = this.buildArtifact(target, artifactPath, request);
@@ -299,15 +236,17 @@ export class CandidateImporter {
                 entry: request.entry,
                 build,
                 source: {
-                    kind: generated ? 'builder-generated' : 'git', uri: networkSource.uri, ref: networkSource.ref, commit, contentHash: hashDirectory(artifactPath),
-                    ...(generated && generatedEdits ? {
-                        generated: {
-                            baselineUri: networkSource.uri,
-                            baselineRef: networkSource.ref,
-                            editPlanHash: textHash(JSON.stringify(generatedSource.edits)),
-                            edits: generatedEdits,
-                        },
-                    } : {}),
+                    kind: 'builder-generated',
+                    uri: baseline.uri,
+                    ref: baseline.ref,
+                    commit: baselineCommit,
+                    contentHash: hashDirectory(artifactPath),
+                    generated: {
+                        baselineUri: baseline.uri,
+                        baselineRef: baseline.ref,
+                        editPlanHash: textHash(JSON.stringify(generatedSource.edits)),
+                        edits: generatedEdits,
+                    },
                 },
                 config: request.config,
                 expectedOutcome: request.expectedOutcome,
@@ -329,9 +268,7 @@ export class CandidateImporter {
      * than the read-only dependency store is visible to candidate build code.
      */
     buildArtifact(repositoryRoot, artifactPath, request) {
-        if (request.build.method === 'prebuilt')
-            return { method: 'prebuilt', command: 'entry pre-exists; no build executed' };
-        const sourceUri = isBuilderGeneratedSource(request.source) ? request.source.baseline.uri : request.source.uri;
+        const sourceUri = request.source.kind === 'builder-generated' ? request.source.baseline.uri : '';
         if (sourceUri !== GENERATED_BASELINE_URI
             || request.packagePath !== GENERATED_PACKAGE_PATH
             || request.packageName !== GENERATED_PACKAGE_NAME) {

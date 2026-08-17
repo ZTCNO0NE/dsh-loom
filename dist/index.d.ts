@@ -60,10 +60,19 @@ export interface MetaValidateConfig {
     };
     allowLoopCandidates: {
         enabled: boolean;
-        allowedGitHosts: string[];
         runtimeRoot: string;
         maxTokens: number;
         buildDependencyRoot: string;
+        baselineRoot: string;
+        baseBundle: string;
+        dependencyRoot: string;
+        additionalDependencyRoots: string[];
+        contractCommand: string[];
+        contractTask: string;
+        goldenPath: string;
+        builderMaxModelTurns: number;
+        builderMaxToolSteps: number;
+        builderMaxWallTimeMs: number;
     };
     lockedTargets: LockedTargetPolicy;
 }

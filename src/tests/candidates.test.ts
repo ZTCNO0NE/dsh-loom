@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  CandidateImporter,
   CandidateRegistry,
   applyBuilderGeneratedEdits,
   coldInstallCandidate,
@@ -102,16 +101,6 @@ describe('loop candidate registry', () => {
     const registry = new CandidateRegistry(root)
     registry.stage({ ...manifest(), id: 'builder-loop', createdBy: 'builder' })
     expect(() => registry.transition('builder-loop', 'approved')).toThrow(/invalid candidate transition/)
-  })
-
-  it('rejects an unallowlisted remote before builder can write staging or registry', () => {
-    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-candidate-'))
-    const importer = new CandidateImporter({ root, allowedGitHosts: ['github.com'] })
-    expect(() => importer.acquire({
-      id: 'remote-loop', displayName: 'Remote', source: { uri: 'https://example.invalid/loop.git', ref: 'main' },
-      packageName: 'remote-loop', entry: 'lib/index.js', build: { method: 'prebuilt' }, config: {}, expectedOutcome: 'x', capabilities: [],
-    })).toThrow(/not allowed/)
-    expect(new CandidateRegistry(root).get('remote-loop')).toBeNull()
   })
 
   it('applies only exact, bounded builder-generated source edits', () => {

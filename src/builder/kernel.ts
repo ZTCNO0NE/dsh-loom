@@ -26,6 +26,14 @@ export interface BuilderJournalEntry {
   error?: string
 }
 
+/** An inbound observation from the actor, delivered between Builder turns. */
+export interface BuilderMessage {
+  schemaVersion: 1
+  at: string
+  from: 'actor'
+  text: string
+}
+
 export interface BuilderRunRecord {
   schemaVersion: 1
   id: string
@@ -69,6 +77,7 @@ export function builderRunPaths(root: string, sessionId: string, id: string) {
     base,
     record: join(base, 'run.json'),
     actor: join(base, 'input', 'actor-snapshot.json'),
+    messages: join(base, 'input', 'actor-messages.jsonl'),
     targetBefore: join(base, 'input', 'target-before.json'),
     previousAttempt: join(base, 'input', 'previous-attempt.json'),
     worldModel: join(base, 'state', 'world-model.json'),
@@ -94,6 +103,9 @@ export class BuilderKernel {
     const record: BuilderRunRecord = { schemaVersion: 1, id, kind: input.kind ?? 'patch', state: 'created', createdAt: now, updatedAt: now, inputHash }
     const paths = builderRunPaths(this.root, this.sessionId, id)
     atomicWriteJson(paths.actor, input.actor)
+    // The file is intentionally created up front.  It is a durable inbox, not
+    // a mutable replacement for the actor snapshot captured at run creation.
+    writeFileSync(paths.messages, '', 'utf8')
     atomicWriteJson(paths.targetBefore, input.targetBefore)
     atomicWriteJson(paths.previousAttempt, input.previousAttempt ?? null)
     atomicWriteJson(paths.worldModel, { schemaVersion: 1, version: 0, facts: [], unknowns: [], hash: sha256({}) })
@@ -140,12 +152,30 @@ export class BuilderKernel {
     this.append(id, 'model', 'decision', result)
   }
 
-  context(id: string): { run: BuilderRunRecord; input: BuilderRunInput; journal: BuilderJournalEntry[] } {
+  context(id: string): { run: BuilderRunRecord; input: BuilderRunInput; messages: BuilderMessage[]; journal: BuilderJournalEntry[] } {
     const paths = builderRunPaths(this.root, this.sessionId, id)
     const actor = readJson<Record<string, unknown>>(paths.actor) ?? {}
     const targetBefore = readJson<Record<string, unknown>>(paths.targetBefore) ?? {}
     const previousAttempt = readJson<Record<string, unknown> | null>(paths.previousAttempt) ?? null
-    return { run: this.load(id), input: { actor, targetBefore, ...(previousAttempt ? { previousAttempt } : {}) }, journal: readJsonl(paths.journal) }
+    return {
+      run: this.load(id),
+      input: { actor, targetBefore, ...(previousAttempt ? { previousAttempt } : {}) },
+      messages: readJsonl<BuilderMessage>(paths.messages),
+      journal: readJsonl(paths.journal),
+    }
+  }
+
+  /**
+   * Accept a new actor observation without changing the immutable initial
+   * snapshot. The next driver turn reads this durable inbox in its prompt.
+   */
+  receiveActorMessage(id: string, text: string): BuilderMessage {
+    const run = this.load(id)
+    if (run.state === 'submitted' || run.state === 'aborted') throw new Error(`builder run is terminal: ${run.state}`)
+    const message: BuilderMessage = { schemaVersion: 1, at: new Date().toISOString(), from: 'actor', text }
+    appendJsonl(builderRunPaths(this.root, this.sessionId, id).messages, message)
+    this.append(id, 'state', 'actor_message', { bytes: Buffer.byteLength(text, 'utf8'), messageHash: sha256(text) })
+    return message
   }
 
   proposal(id: string): Record<string, unknown> | null {

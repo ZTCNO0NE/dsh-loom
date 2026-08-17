@@ -79,6 +79,9 @@ export declare class Observer {
     subscribe(): void;
     /** Raw frame recorder for telemetry (turn/tool latency + errors). */
     recordFrame(type: string, data: Record<string, unknown>, time: number, sessionId?: string): void;
+    /** Rebuild in-memory telemetry from a persisted frame without appending it. */
+    replayFrame(type: string, data: Record<string, unknown>, time: number, sessionId?: string): void;
+    private processFrame;
     /** Aggregated actor telemetry (08 §12 I13 extension): latency, errors, calls. */
     collectTelemetry(model?: string): TelemetrySummary;
     lastFrameTime(): number | null;

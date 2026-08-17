@@ -84,4 +84,5 @@ observe（观察/监督员）→ judge（评审门）→ design（builder 改进
 ## 完成定义
 
 - v1（已完成）：config/tool/skill 进化闭环 + 监督员 + 预约后台 + 通知/台账 + 偏好沉淀；120/120；npm `dsh-loom@1.0.4`。
+- v1.1（进行中，减法定稿见 `docs/v1-1-route.md`）：唯一入口 `meta_auto(exploreLoop=true)`；三层 evidence pack → Builder 自由探索 → deliberation（verifier/gate）→ 同任务重跑 → 用户报告；132/132；loop leg 需配置 loop runtime。
 - loop 层放开（进行中）：contract-runner 报告持久化 → meta.auto 候选 loop 网关 + `allowLoopCandidates` 开关 → 真实完整三件套跑通 → 候选目录 + builder 自主选择 → 端到端案例。

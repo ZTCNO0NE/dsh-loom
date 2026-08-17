@@ -360,3 +360,33 @@
 - 结果：beforeHash 校验、afterHash、artifact hash 和固定 `bwrap --unshare-all` networkless build 全部通过，入口产物为 `packages/core/agent-loop/lib/index.js`。
 - 该记录明确是 `claimLevel=mechanism-only`；没有外部 acquisition、C0/C1–C8/C6、gate、actor 或 rollback，不得作为候选安装或性能提升证据。机器记录：`/chenzute/dsh-src/eval/run-records/2026-08-17-loop-generated-edit-build-local.json`。
 - P1 12-way probe harness 已准备：`parallel-probe-plugin.mjs` 保留 A/B 兼容并新增 `delay_probe_01`–`delay_probe_12`；plugin SHA-256 为 `4e21f7d99db2382791a97b413917d25228cf4c0e8fabb1bdda3a1ab978255e62`。
+
+### 2026-08-17 builder-autonomy-fallback-hardening
+
+- 发现并修正自主性缺口：429 以前只以错误字符串回注，且 builder 没有 pinned baseline 的可读视图，无法可靠从 Git 拉取切换到 generated edit。
+- 现在 importer feedback 结构化为 `failureClass`/`retryable`/`allowedStrategies`；重开 run 的首个 prompt 强制读取 `previous_attempt`，在 `switch_git_source`、`builder_generated`、`abort` 中选择，最多 3 个 immutable attempts。
+- `read_input(loop_baseline)` 新增 core-authored、固定 commit 的只读 catalog；内容来自 Git object（不是 dirty working tree），包含允许源文件的 hash/内容。builder 仍无 shell、网络、verifier、gate、install 权限。
+- 检查：`npm run check`、`npm test` **125/125**、`npm run build`、`git diff --check` 全绿；这改善了决策闭环，但不替代 generated candidate 的真实 acquisition/C0–C8/C6/gate 证据。
+
+### 2026-08-18 actor-builder-async-communication
+
+- 实现：`meta_auto(exploreLoop=true)` 先创建 immutable Builder run，再提交到既有 single-flight 后台 job queue，并立即返回 `jobId` 与 `runId`。`meta_builder_status(jobId|runId)` 读取 durable run 的 state、model/tool 计数、inbox 数、journal tail 和 proposal 摘要；`meta_builder_message(jobId|runId,message)` 只追加 actor inbox，下一 Builder 微循环自动取得消息。job JSON 在 scheduled/running/finished/failed 全程保留 request/runId，故 actor 可一直以 jobId 定位同一 run。
+- 真机：隔离 overlay `eval/overlay-actor-loop-async-20260818.yml`，actor=本地 27b，Builder=官方 V4 Flash，Builder 限制为 2 model turns/2 tool steps/512 tokens；任务保持“更换更强 loop 基座，不要只改业务参数”。actor 实际调用 `meta_auto(exploreLoop=true)`；trajectory 显示 tool call `17:46:32.422Z`、tool result `17:46:32.506Z`，返回 **84ms**。Builder 在 `17:46:33.955Z` 才进入 exploring，说明 actor 获得 job/run 标识时未等待 Builder 完成。
+- 结果：actor 如实向用户报告 `scheduled`、jobId、runId、仅观察、未安装；后台 Builder 因刻意的小预算在 1 turn/0 tool 后 abort。job、journal、run 和 cost log 均已持久化；run record 为 `eval/run-records/2026-08-18-actor-builder-async-communication.json`。没有 verifier、gate、候选导入或安装。
+- 覆盖：新增 gateway 单测覆盖 create → status → message → next Builder prompt sees inbox；本项目 `npm test` **128/128**、`npm run check`、`npm run build`、`git diff --check` 通过。该次证明非阻塞委托与持久状态可见；跨用户后续回合的真实 `status → message → Builder next turn` 将在常驻 actor 会话中补测，headless CLI 单次进程不是其完整替代。
+
+### 2026-08-18 actor-evidence-pack-real-session
+
+- 实现：新增 `src/evidence/index.ts` 与 `createActorEvidencePack()`。每次主动 Builder 委托前冻结三层材料：原始 `frames/events/requirements/signals/triggers/profile` 的路径、行数、字节数和 SHA-256；脱敏 config snapshot；确定性 `RuntimeDigest`；以及可自由书写的 `actor-handoff.md`（用户目标、Actor 观察、已知信号、未知项）。原始日志不复制，manifest 只建立带 watermark 的引用，Builder 可继续读取原文件。
+- 数据：使用真实隔离 actor 会话 `/chenzute/dsh-src/eval/meta-workspace-actor-loop-async-20260818` 生成 pack，实际统计 **826 frames、8 normalized events、1 turn、1 tool call、0 tool errors**；27b actor 的要求和“Builder 后台 abort、未安装”的自然语言观察写入 handoff。pack 目录：`workspace/actor-loop-async-20260818/evidence/`，manifest 为 `evidence-1786990115790-fc933eeab5/manifest.json`。
+- 结论：三层叠加已经能把真实会话事实、已知统计问题和自由语义假设同时交给 Builder；system-reminder 等噪声只保留在 raw refs，handoff 做了截断/省略。此 pack 证明的是素材可恢复性与非阻塞委托，不是 loop 演进效果；下一实验必须让 Builder 读取该 manifest，自主选择候选，经 verifier/gate 后同任务 before/after 重跑。
+- 验证：新增 `src/tests/evidence.test.ts`；`npm run check`、focused evidence test、`npm run build`、`git diff --check` 通过。完整套件将在本轮代码收束后重跑。
+
+### 2026-08-18 v1-1-route-cut-and-adjudication（减法定稿 + 单一路线接线）
+
+- 内容：按用户定义把 v1.1 收敛为单一路线——用户主动委托 → 三层 evidence pack → Builder 自由探索 → verifier/gate 裁决 → actor 同任务重跑 → 用户看到改了什么/为什么/效果。
+- 砍除：`discoverLoopCandidate` / Git 获取从插件入口与 gateway 移除；`CandidateImporter` 只保留 builder-generated + 本地固定 baseline（无网络）；Builder 基础工具面移除旧 `write_candidate_draft` / `inspect_staging` / `preflight_staging_entry`；被动触发链从激活路径移除（代码暂留归档）。
+- 新增：`src/deliberation/index.ts`（`adjudicatePatch` / `adjudicateLoop` / 裁决分发，fail-closed）；`meta_auto(exploreLoop=true)` 后台 job 在 Builder submit 后自动裁决：patch → Validator + Gate + 同任务隔离重跑 + 台账/报告；loop → 本地 baseline 构建 → contract-runner C0/C1-C8/C6（配置后启用）→ profile gate 冷安装。
+- 配置新增：`allowLoopCandidates.{baselineRoot,baseBundle,dependencyRoot,additionalDependencyRoots,contractCommand,contractTask,goldenPath}`；未配置时 loop 裁决 fail-closed。
+- 测试：**132/132**（新增 deliberation 6 条；删除 discover 3 条）；`npm run check` / `npm run build` / `git diff --check` 全绿。
+- 结论与下一步：代码路线闭环已接；loop 真实端到端需配置 loop runtime（baselineRoot/baseBundle/dependencyRoot/contractCommand/goldenPath）后跑一次真机案例（用户已允许烧钱）。
