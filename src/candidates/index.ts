@@ -252,6 +252,9 @@ function githubArchive(target: string, source: { uri: string; ref: string }): st
   if (typeof revision.sha !== 'string' || !/^[0-9a-f]{40}$/i.test(revision.sha)) {
     throw new Error('GitHub did not return a resolved commit')
   }
+  if (/^[0-9a-f]{40}$/i.test(source.ref) && revision.sha.toLowerCase() !== source.ref.toLowerCase()) {
+    throw new Error('GitHub resolved a different commit than the requested pin')
+  }
   const archive = `${target}.tar.gz`
   mkdirSync(target, { recursive: true })
   try {
