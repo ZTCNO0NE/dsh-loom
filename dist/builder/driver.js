@@ -93,7 +93,7 @@ export class BuilderDriver {
             '工具报错是下一轮可见反馈；可纠正时继续，不可纠正时 abort。预检不是 verifier 通过。',
             `当前工作流硬提示：${nextAction}`,
             this.options.draftKind === 'loop_candidate'
-                ? '本 run 的 draft 是 { candidate: CandidateAcquisitionRequest, rationale: string }；提交后核心 importer 才会执行受限 HTTPS 拉取并只写 staging。你可以 abort 表示没有可审计候选。'
+                ? '本 run 的 draft 是 { candidate: CandidateAcquisitionRequest, rationale: string }；candidate.source 可以是受限 HTTPS Git source，也可以是固定 DSH baseline 上的 builder-generated edits。提交后核心 importer 才会执行校验、构建并只写 staging。你可以 abort 表示没有可审计候选。'
                 : '本 run 的 draft 是 { patch: MetaPatch, expectedTrajectory, selfCheck, worldModel? }。',
             `任务上下文：\n${this.options.taskContext.slice(0, 28_000)}`,
             `内核上下文（不可修改输入）：\n${JSON.stringify({ run: context.run, input: context.input, journal })}`.slice(0, 28_000),

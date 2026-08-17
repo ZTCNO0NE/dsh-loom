@@ -39,6 +39,12 @@ workspace/<session>/builder-runs/<run-id>/
 
 Builder 可以读 actor snapshot、旧报告、candidate registry 和自身目录；可写自身 run 目录及 importer 创建的 staging。它不能改 actor、生产 profile、vendored、verifier、回归集、gate，也不能把 candidate 推进到 `pending` 之后。只有 `submit` 把不可变 staging 草稿交给 verifier；verifier 成功后才允许既有状态机继续推进。loop candidate discovery 复用同一个 Kernel，只是 draft schema 为 `{ candidate: CandidateAcquisitionRequest, rationale }`；提交后 core importer 才能做 allowlisted HTTPS acquisition。若 source 缺 entry，唯一可用的源码构建是固定的 `sandboxed-dsh-workspace` recipe：bubblewrap 无网络、candidate workspace 可写、依赖树只读，builder 不能提供 shell 文本。
 
+### builder-generated 候选
+
+Builder 也可以在没有合适外部候选时提出自有 loop 修改，但这不是泛用文件写入权限。draft 必须声明固定的 DeepSeek Harness baseline（完整 40 位 commit），并提供 `source.edits[]`：每项只有仓库相对 `packages/core/agent-loop/src/**/*.ts` 路径、完整 `beforeHash` 和完整 `after` 文件内容。核心在 baseline archive 上逐项检查路径、无 symlink、before hash、最多 4 个文件、单文件最多 48 KiB、总替换最多 96 KiB 后才应用；重复路径、路径逃逸、shell 文本、hash 不匹配或超限都会拒绝并经 `previous-attempt.json` 回注。
+
+Generated candidate 强制使用固定的 networkless `sandboxed-dsh-workspace` build recipe，并在 manifest 中记录 baseline URI/ref、edit-plan hash 以及每个文件的 before/after hash。生成修改只会创建 `staging` 记录；它不能直接写正式 `vendored`，也不能批准、安装或跳过完整 C0/C1–C8/C6、冷替换和 rollback 验收。
+
 ## 执行状态机
 
 ```

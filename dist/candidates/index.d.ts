@@ -7,7 +7,39 @@ export interface CandidateSource {
     ref: string;
     commit?: string;
     contentHash: string;
+    /** Present only for a generated candidate; records the deterministic edit plan without source text. */
+    generated?: {
+        baselineUri: string;
+        baselineRef: string;
+        editPlanHash: string;
+        edits: Array<{
+            path: string;
+            beforeHash: string;
+            afterHash: string;
+        }>;
+    };
 }
+export interface BuilderGeneratedEdit {
+    /** Repository-relative path. Core accepts only agent-loop source files. */
+    path: string;
+    /** Exact SHA-256 of the baseline file before this edit. */
+    beforeHash: string;
+    /** Complete replacement file content; never interpreted as shell text. */
+    after: string;
+}
+export interface BuilderGeneratedSourceRequest {
+    kind: 'builder-generated';
+    baseline: {
+        uri: string;
+        ref: string;
+    };
+    edits: BuilderGeneratedEdit[];
+}
+export type CandidateSourceRequest = {
+    uri: string;
+    ref: string;
+    kind?: 'git';
+} | BuilderGeneratedSourceRequest;
 /** Build recipe selected from a small core-controlled allowlist, never shell text from the builder. */
 export interface CandidateBuildRecord {
     method: 'prebuilt' | 'sandboxed-dsh-workspace';
@@ -92,10 +124,7 @@ export interface CandidateAcquisitionRequest {
     id: string;
     displayName: string;
     /** A builder's requested Git revision. It is an input to the importer, never a trusted manifest. */
-    source: {
-        uri: string;
-        ref: string;
-    };
+    source: CandidateSourceRequest;
     packageName: string;
     /** Package root within a Git repository; defaults to the repository root. */
     packagePath?: string;
@@ -114,6 +143,17 @@ export interface CandidateImporterOptions {
     /** Read-only dependency root for the audited sandbox build recipe. Empty disables source builds. */
     buildDependencyRoot?: string;
 }
+/**
+ * Apply the only self-authored loop change allowed by the importer. The
+ * builder supplies an exact before hash and a complete replacement file; the
+ * core validates path, size, count, and baseline bytes before writing. This is
+ * intentionally exported for deterministic unit tests and verifier tooling.
+ */
+export declare function applyBuilderGeneratedEdits(repositoryRoot: string, source: BuilderGeneratedSourceRequest): Array<{
+    path: string;
+    beforeHash: string;
+    afterHash: string;
+}>;
 /**
  * The only networked candidate path. It deliberately writes a content-addressed
  * staging directory and a `staging` record, never `approved` or project `vendored/`.

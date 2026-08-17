@@ -346,3 +346,10 @@
 - candidate 实测：同一 turn/step 两 call，但第二 call 在第一 result 后启动；tool span **2024ms**，overlap=false。candidate 比原版多 **1007ms**，墙钟比 **1.99×**。
 - 两侧：C0/C1-C4/C7/C8 均 pass、exit=0、0 error frame；没有生产、用户 profile 或官方 API 写入/调用。先前 C1 只允许 `call→result`，会误拒合法并发轨迹，已扩展为允许并发组中的连续 `call` / `result`，随后原版与 candidate 契约均重跑通过。
 - 结论：这给出了 cap=1 的真实可观测效果，但它是吞吐退化而非提升；`serial-tool-calls` 只能以安全/顺序策略定位，不能作为 actor 性能成长案例。完整 record：`/chenzute/dsh-src/eval/run-records/2026-08-17-loop-parallel-safe-real-behavior-comparison.json`。
+
+### 2026-08-17 builder-generated-loop-ingress（受限自有修改通道，尚待真实 acquisition）
+
+- 实现：`CandidateImporter` 新增 `builder-generated` source；固定 40 位 DSH baseline commit，核心只接受 `packages/core/agent-loop/src/**/*.ts` 的 exact `beforeHash` + 完整 `after` 替换。
+- 限制：最多 4 个文件、单文件 48 KiB、总替换 96 KiB；拒绝路径逃逸、重复路径、symlink、空/超限内容和 hash 不匹配；强制 `sandboxed-dsh-workspace` 无网络 build。manifest 记录 baseline、edit-plan hash 及每文件 before/after hash；候选仍只进入 staging。
+- 验证：新增精确替换、hash mismatch、路径 allowlist 单元测试；当前 `npm run check` 与 `npm test` **122/122** 通过，尚未宣称真实 loop 性能提升，也尚未用网络 acquisition/build/verifier/gate 证明 generated candidate。
+- 真实尝试：隔离 runtime `meta-workspace-builder-generated-acquisition-20260817` 使用 baseline `47f943859bef60e4160492346772ded9b24f765a` 和 `constants.ts` 10→20 edit；GitHub API 解析成功后，codeload 返回 HTTP **429**，importer 清理了临时 staging，registry 无残留记录。该次只记为外部限流阻断，不计入候选通过或失败。
