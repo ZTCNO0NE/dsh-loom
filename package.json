@@ -31,7 +31,7 @@
     "bin"
   ],
   "bin": {
-    "dsh-loom": "./bin/dsh-loom.mjs"
+    "dsh-loom": "bin/dsh-loom.mjs"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -59,8 +59,8 @@
     "supervisor-swap-demo": "node scripts/supervisor-swap-demo.mjs",
     "runtime-request-demo": "node scripts/runtime-request-demo.mjs",
     "scheduled-notify-demo": "node scripts/scheduled-notify-demo.mjs",
-    "actor-progress-qa-demo": "node scripts/actor-progress-qa-demo.mjs"
-    ,"preferences-demo": "node scripts/preferences-demo.mjs",
+    "actor-progress-qa-demo": "node scripts/actor-progress-qa-demo.mjs",
+    "preferences-demo": "node scripts/preferences-demo.mjs",
     "try": "node scripts/try.mjs",
     "timeline": "node scripts/timeline.mjs"
   },

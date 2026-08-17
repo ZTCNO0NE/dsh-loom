@@ -31,7 +31,7 @@ export class LoopCandidateGateway {
                 llm,
                 provider: this.options.provider,
                 model: this.options.model,
-                systemPrompt: '你是 dsh-loom 的独立 loop builder。你只可发现可审计的公开 Git agent-loop 候选；不能批准、安装或修改当前 loop。',
+                systemPrompt: '你是 dsh-loom 的独立 loop builder。你可选择公开 Git 候选，或在固定 DSH baseline 上提交受限、可审计的 source edit；不能批准、安装或修改当前 loop。',
                 taskContext: this.prompt(requirements, context),
                 draftKind: 'loop_candidate',
                 maxModelTurns: 10,
@@ -81,10 +81,10 @@ export class LoopCandidateGateway {
     prompt(requirements, context) {
         return [
             '你是 dsh-loom 的独立 builder。任务仅限于发现一个可审计的 agent-loop 候选；不能批准、安装或修改当前 loop。',
-            '只在确有公开、可复现的 Git 候选时给 candidate；否则 builder 应 abort。',
+            '你可提交公开、可复现的 Git 候选，或提交 builder-generated source edit。后者只能针对固定 DSH baseline 的 agent-loop/src/*.ts 文件，核心会检查 beforeHash、路径、大小、构建和契约；不能提交 shell 文本。没有可靠证据时应 abort。',
             `允许的 Git host：${this.options.allowedGitHosts.join(', ') || '(none)'}`,
-            'source.uri 必须是 https Git URL；source.ref 必须是固定 branch/tag/ref，不能使用 floating 的“latest”。',
-            '候选必须是可构建的 agent-loop package；packagePath 是仓库内包根（省略仅表示仓库根），entry 相对该包根目录，目标固定 agent-loop。',
+            'Git 候选的 source.uri 必须是 https Git URL；Git source.ref 必须是固定 branch/tag/ref，不能使用 floating 的“latest”。Generated 候选必须使用固定 40 位 DSH baseline commit，并提交 source.edits。',
+            '候选必须是可构建的 agent-loop package；packagePath 是仓库内包根（省略仅表示仓库根），entry 相对该包根目录，目标固定 agent-loop。Generated 候选固定为 packages/core/agent-loop + @deepseek-ai/dsh-agent-loop + sandboxed-dsh-workspace。',
             `需求：${requirements.slice(0, 6000)}`,
             `已知运行时上下文：${JSON.stringify(context).slice(0, 6000)}`,
             '写入 candidate draft 的对象 schema：',
@@ -92,11 +92,27 @@ export class LoopCandidateGateway {
                 candidate: {
                     id: 'lowercase-kebab-id',
                     displayName: 'string',
-                    source: { uri: 'https://github.com/org/repo.git', ref: 'fixed-ref' },
+                    source: { kind: 'git', uri: 'https://github.com/org/repo.git', ref: 'fixed-ref' },
                     packageName: '@scope/package',
                     packagePath: 'packages/core/agent-loop',
                     entry: 'lib/index.js',
                     build: { method: 'prebuilt | sandboxed-dsh-workspace' },
+                    config: { agents: [] },
+                    expectedOutcome: 'string',
+                    capabilities: ['string'],
+                },
+                generatedCandidate: {
+                    id: 'bounded-loop-edit',
+                    displayName: 'string',
+                    source: {
+                        kind: 'builder-generated',
+                        baseline: { uri: 'https://github.com/deepseek-ai/deepseek-harness.git', ref: '40-char-commit-sha' },
+                        edits: [{ path: 'packages/core/agent-loop/src/constants.ts', beforeHash: 'sha256-of-baseline-file', after: 'complete replacement file' }],
+                    },
+                    packageName: '@deepseek-ai/dsh-agent-loop',
+                    packagePath: 'packages/core/agent-loop',
+                    entry: 'lib/index.js',
+                    build: { method: 'sandboxed-dsh-workspace' },
                     config: { agents: [] },
                     expectedOutcome: 'string',
                     capabilities: ['string'],
@@ -114,8 +130,22 @@ export class LoopCandidateGateway {
         if (!value || typeof value !== 'object')
             throw new Error('loop candidate gateway: candidate must be an object');
         const source = value.source;
-        if (!source || typeof source.uri !== 'string' || typeof source.ref !== 'string')
+        if (!source || typeof source !== 'object' || Array.isArray(source))
+            throw new Error('loop candidate gateway: candidate source is required');
+        const sourceRecord = source;
+        const isGenerated = sourceRecord.kind === 'builder-generated';
+        if (isGenerated) {
+            const baseline = sourceRecord.baseline;
+            if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)
+                || typeof baseline.uri !== 'string' || typeof baseline.ref !== 'string') {
+                throw new Error('loop candidate gateway: generated source baseline uri/ref required');
+            }
+            if (!Array.isArray(sourceRecord.edits))
+                throw new Error('loop candidate gateway: generated source edits must be an array');
+        }
+        else if (typeof sourceRecord.uri !== 'string' || typeof sourceRecord.ref !== 'string') {
             throw new Error('loop candidate gateway: candidate source.uri/ref required');
+        }
         if (typeof value.id !== 'string' || typeof value.displayName !== 'string' || typeof value.packageName !== 'string'
             || typeof value.entry !== 'string' || typeof value.expectedOutcome !== 'string') {
             throw new Error('loop candidate gateway: candidate identity fields are required');
@@ -132,10 +162,26 @@ export class LoopCandidateGateway {
         const packagePath = typeof value.packagePath === 'string'
             ? value.packagePath.replace(/^\.\/+/, '')
             : undefined;
+        if (isGenerated) {
+            const baseline = sourceRecord.baseline;
+            const edits = sourceRecord.edits;
+            return {
+                id: value.id,
+                displayName: value.displayName,
+                source: { kind: 'builder-generated', baseline, edits },
+                packageName: value.packageName,
+                ...(packagePath ? { packagePath } : {}),
+                entry: value.entry,
+                build: { method: build.method },
+                config: value.config,
+                expectedOutcome: value.expectedOutcome,
+                capabilities: value.capabilities.map(String),
+            };
+        }
         return {
             id: value.id,
             displayName: value.displayName,
-            source: { uri: source.uri, ref: source.ref },
+            source: { kind: 'git', uri: sourceRecord.uri, ref: sourceRecord.ref },
             packageName: value.packageName,
             ...(packagePath ? { packagePath } : {}),
             entry: value.entry,

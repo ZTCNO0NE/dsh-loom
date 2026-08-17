@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { atomicWriteJson, readJson } from '../protocol/index.js'
@@ -14,7 +14,33 @@ export interface CandidateSource {
   ref: string
   commit?: string
   contentHash: string
+  /** Present only for a generated candidate; records the deterministic edit plan without source text. */
+  generated?: {
+    baselineUri: string
+    baselineRef: string
+    editPlanHash: string
+    edits: Array<{ path: string; beforeHash: string; afterHash: string }>
+  }
 }
+
+export interface BuilderGeneratedEdit {
+  /** Repository-relative path. Core accepts only agent-loop source files. */
+  path: string
+  /** Exact SHA-256 of the baseline file before this edit. */
+  beforeHash: string
+  /** Complete replacement file content; never interpreted as shell text. */
+  after: string
+}
+
+export interface BuilderGeneratedSourceRequest {
+  kind: 'builder-generated'
+  baseline: { uri: string; ref: string }
+  edits: BuilderGeneratedEdit[]
+}
+
+export type CandidateSourceRequest =
+  | { uri: string; ref: string; kind?: 'git' }
+  | BuilderGeneratedSourceRequest
 
 /** Build recipe selected from a small core-controlled allowlist, never shell text from the builder. */
 export interface CandidateBuildRecord {
@@ -189,7 +215,7 @@ export interface CandidateAcquisitionRequest {
   id: string
   displayName: string
   /** A builder's requested Git revision. It is an input to the importer, never a trusted manifest. */
-  source: { uri: string; ref: string }
+  source: CandidateSourceRequest
   packageName: string
   /** Package root within a Git repository; defaults to the repository root. */
   packagePath?: string
@@ -242,6 +268,61 @@ function githubArchive(target: string, source: { uri: string; ref: string }): st
   return revision.sha
 }
 
+const GENERATED_BASELINE_URI = 'https://github.com/deepseek-ai/deepseek-harness.git'
+const GENERATED_PACKAGE_PATH = 'packages/core/agent-loop'
+const GENERATED_PACKAGE_NAME = '@deepseek-ai/dsh-agent-loop'
+const GENERATED_PATH_PREFIX = `${GENERATED_PACKAGE_PATH}/src/`
+const GENERATED_MAX_EDITS = 4
+const GENERATED_MAX_FILE_BYTES = 48_000
+const GENERATED_MAX_TOTAL_BYTES = 96_000
+
+function textHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function isBuilderGeneratedSource(source: CandidateSourceRequest): source is BuilderGeneratedSourceRequest {
+  return 'kind' in source && source.kind === 'builder-generated'
+}
+
+/**
+ * Apply the only self-authored loop change allowed by the importer. The
+ * builder supplies an exact before hash and a complete replacement file; the
+ * core validates path, size, count, and baseline bytes before writing. This is
+ * intentionally exported for deterministic unit tests and verifier tooling.
+ */
+export function applyBuilderGeneratedEdits(repositoryRoot: string, source: BuilderGeneratedSourceRequest): Array<{ path: string; beforeHash: string; afterHash: string }> {
+  if (!Array.isArray(source.edits) || source.edits.length < 1 || source.edits.length > GENERATED_MAX_EDITS) {
+    throw new Error(`builder-generated edit count must be 1-${GENERATED_MAX_EDITS}`)
+  }
+  const seen = new Set<string>()
+  let totalBytes = 0
+  const summary: Array<{ path: string; beforeHash: string; afterHash: string }> = []
+  for (const edit of source.edits) {
+    if (!edit || typeof edit.path !== 'string' || typeof edit.beforeHash !== 'string' || typeof edit.after !== 'string') {
+      throw new Error('builder-generated edit requires path, beforeHash, and after')
+    }
+    if (!edit.path.startsWith(GENERATED_PATH_PREFIX) || edit.path.includes('..') || !/^[A-Za-z0-9._/-]+\.tsx?$/.test(edit.path)) {
+      throw new Error(`builder-generated edit path is outside the agent-loop source allowlist: ${edit.path}`)
+    }
+    if (seen.has(edit.path)) throw new Error(`builder-generated edit path is duplicated: ${edit.path}`)
+    seen.add(edit.path)
+    if (!/^[0-9a-f]{64}$/i.test(edit.beforeHash)) throw new Error(`invalid beforeHash for generated edit: ${edit.path}`)
+    const file = resolve(repositoryRoot, edit.path)
+    if (!file.startsWith(`${resolve(repositoryRoot)}${sep}`) || !existsSync(file) || !lstatSync(file).isFile()) {
+      throw new Error(`builder-generated edit target is unavailable: ${edit.path}`)
+    }
+    const before = readFileSync(file, 'utf8')
+    if (textHash(before) !== edit.beforeHash.toLowerCase()) throw new Error(`builder-generated beforeHash mismatch: ${edit.path}`)
+    const bytes = Buffer.byteLength(edit.after, 'utf8')
+    if (bytes === 0 || bytes > GENERATED_MAX_FILE_BYTES) throw new Error(`builder-generated replacement is too large or empty: ${edit.path}`)
+    totalBytes += bytes
+    if (totalBytes > GENERATED_MAX_TOTAL_BYTES) throw new Error('builder-generated replacement budget exceeded')
+    writeFileSync(file, edit.after, { encoding: 'utf8', mode: 0o644 })
+    summary.push({ path: edit.path, beforeHash: edit.beforeHash.toLowerCase(), afterHash: textHash(edit.after) })
+  }
+  return summary
+}
+
 /**
  * The only networked candidate path. It deliberately writes a content-addressed
  * staging directory and a `staging` record, never `approved` or project `vendored/`.
@@ -251,11 +332,27 @@ export class CandidateImporter {
 
   acquire(request: CandidateAcquisitionRequest): CandidateManifest {
     if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(request.id)) throw new Error('invalid candidate id')
-    const parsed = new URL(request.source.uri)
+    const generatedSource = isBuilderGeneratedSource(request.source) ? request.source : undefined
+    const generated = generatedSource !== undefined
+    const networkSource: { uri: string; ref: string } = generatedSource
+      ? generatedSource.baseline
+      : request.source as { uri: string; ref: string }
+    const parsed = new URL(networkSource.uri)
     if (parsed.protocol !== 'https:' || !this.options.allowedGitHosts.includes(parsed.hostname)) {
-      throw new Error(`candidate source is not allowed: ${request.source.uri}`)
+      throw new Error(`candidate source is not allowed: ${networkSource.uri}`)
     }
-    if (!/^[A-Za-z0-9._/@-]{1,160}$/.test(request.source.ref)) throw new Error('invalid candidate ref')
+    if (!/^[A-Za-z0-9._/@-]{1,160}$/.test(networkSource.ref)) throw new Error('invalid candidate ref')
+    if (generated) {
+      if (networkSource.uri !== GENERATED_BASELINE_URI || !/^[0-9a-f]{40}$/i.test(networkSource.ref)) {
+        throw new Error('builder-generated source must use the pinned audited DSH baseline commit')
+      }
+      if (request.packagePath !== GENERATED_PACKAGE_PATH || request.packageName !== GENERATED_PACKAGE_NAME) {
+        throw new Error('builder-generated candidate must target the audited DSH agent-loop package')
+      }
+      if (request.build?.method !== 'sandboxed-dsh-workspace') {
+        throw new Error('builder-generated candidate must use the audited networkless build recipe')
+      }
+    }
     if (request.build?.method !== 'prebuilt' && request.build?.method !== 'sandboxed-dsh-workspace') {
       throw new Error('candidate build method is not allowed')
     }
@@ -267,12 +364,12 @@ export class CandidateImporter {
     if (existsSync(target)) throw new Error(`staging directory already exists: ${request.id}`)
     mkdirSync(join(candidatePaths(this.options.root).base, 'staging'), { recursive: true })
     try {
-      const github = githubRepository(request.source.uri)
+      const github = githubRepository(networkSource.uri)
       let commit: string
       if (github) {
-        commit = githubArchive(target, request.source)
+        commit = githubArchive(target, networkSource)
       } else {
-        execFileSync('git', ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', '--branch', request.source.ref, request.source.uri, target], {
+        execFileSync('git', ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', '--branch', networkSource.ref, networkSource.uri, target], {
           stdio: 'pipe', timeout: 120_000,
         })
         if (request.packagePath) {
@@ -283,6 +380,7 @@ export class CandidateImporter {
         execFileSync('git', ['-C', target, 'checkout', '--detach'], { stdio: 'pipe', timeout: 120_000 })
         commit = execFileSync('git', ['-C', target, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10_000 }).trim()
       }
+      const generatedEdits = generatedSource ? applyBuilderGeneratedEdits(target, generatedSource) : undefined
       const artifactPath = resolve(target, request.packagePath ?? '.')
       if (!artifactPath.startsWith(`${resolve(target)}${sep}`) && artifactPath !== resolve(target)) {
         throw new Error('candidate packagePath escapes cloned repository')
@@ -300,7 +398,15 @@ export class CandidateImporter {
         entry: request.entry,
         build,
         source: {
-          kind: 'git', uri: request.source.uri, ref: request.source.ref, commit, contentHash: hashDirectory(artifactPath),
+          kind: generated ? 'builder-generated' : 'git', uri: networkSource.uri, ref: networkSource.ref, commit, contentHash: hashDirectory(artifactPath),
+          ...(generated && generatedEdits ? {
+            generated: {
+              baselineUri: networkSource.uri,
+              baselineRef: networkSource.ref,
+              editPlanHash: textHash(JSON.stringify(generatedSource.edits)),
+              edits: generatedEdits,
+            },
+          } : {}),
         },
         config: request.config,
         expectedOutcome: request.expectedOutcome,
@@ -323,9 +429,10 @@ export class CandidateImporter {
    */
   private buildArtifact(repositoryRoot: string, artifactPath: string, request: CandidateAcquisitionRequest): CandidateBuildRecord {
     if (request.build.method === 'prebuilt') return { method: 'prebuilt', command: 'entry pre-exists; no build executed' }
-    if (request.source.uri !== 'https://github.com/deepseek-ai/deepseek-harness.git'
-      || request.packagePath !== 'packages/core/agent-loop'
-      || request.packageName !== '@deepseek-ai/dsh-agent-loop') {
+    const sourceUri = isBuilderGeneratedSource(request.source) ? request.source.baseline.uri : request.source.uri
+    if (sourceUri !== GENERATED_BASELINE_URI
+      || request.packagePath !== GENERATED_PACKAGE_PATH
+      || request.packageName !== GENERATED_PACKAGE_NAME) {
       throw new Error('sandboxed-dsh-workspace build is restricted to the audited DSH agent-loop package')
     }
     const packageJson = JSON.parse(readFileSync(join(artifactPath, 'package.json'), 'utf8')) as { name?: unknown }
