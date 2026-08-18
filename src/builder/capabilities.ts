@@ -14,6 +14,9 @@ export const BUILDER_BASE_TOOLS = [
   'write_workspace_file',
   'read_workspace_file',
   'run_workspace_command',
+  'acknowledge_message',
+  'publish_progress',
+  'request_input',
   'write_submission',
 ] as const satisfies readonly BuilderToolName[]
 

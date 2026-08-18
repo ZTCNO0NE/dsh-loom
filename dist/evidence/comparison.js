@@ -45,12 +45,12 @@ export function writeActorComparison(options) {
     const admissible = options.contractPass
         && options.regressionPass
         && options.gatePass
-        && (options.rollbackPass ?? true)
+        && (!options.rollbackRequired || options.rollbackPass === true)
         && options.baseline.taskSuccess
         && options.installed.taskSuccess;
     const ratio = options.baseline.durationMs > 0 ? options.installed.durationMs / options.baseline.durationMs : null;
     const report = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: options.id,
         task: options.task,
         baseline: options.baseline,
@@ -61,6 +61,7 @@ export function writeActorComparison(options) {
         contractPass: options.contractPass,
         regressionPass: options.regressionPass,
         gatePass: options.gatePass,
+        rollbackRequired: options.rollbackRequired ?? false,
         ...(options.rollbackPass === undefined ? {} : { rollbackPass: options.rollbackPass }),
         ...(options.beforeSnapshot === undefined ? {} : { beforeSnapshot: options.beforeSnapshot }),
         ...(options.afterSnapshot === undefined ? {} : { afterSnapshot: options.afterSnapshot }),

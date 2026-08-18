@@ -2,7 +2,7 @@ import type { BuilderToolAction } from './kernel.js';
 /** Tool names exposed by the minimal Builder base loop. */
 export type BuilderToolName = BuilderToolAction['name'];
 /** The complete starting tool set; capabilities add meaning, not hidden limits. */
-export declare const BUILDER_BASE_TOOLS: readonly ["read_input", "read_journal", "read_file", "list_directory", "write_world_model", "write_plan", "write_workspace_file", "read_workspace_file", "run_workspace_command", "write_submission"];
+export declare const BUILDER_BASE_TOOLS: readonly ["read_input", "read_journal", "read_file", "list_directory", "write_world_model", "write_plan", "write_workspace_file", "read_workspace_file", "run_workspace_command", "acknowledge_message", "publish_progress", "request_input", "write_submission"];
 /** Declarative capability metadata supplied to a Builder run. */
 export interface BuilderCapabilityPlugin {
     id: string;

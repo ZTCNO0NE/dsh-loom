@@ -22,13 +22,15 @@ export interface ComparisonOptions {
     contractPass: boolean;
     regressionPass: boolean;
     gatePass: boolean;
+    /** Set when this comparison is only admissible after an explicit rollback proof. */
+    rollbackRequired?: boolean;
     rollbackPass?: boolean;
     beforeSnapshot?: unknown;
     afterSnapshot?: unknown;
     extra?: Record<string, unknown>;
 }
 export interface ActorComparison {
-    schemaVersion: 1;
+    schemaVersion: 2;
     id: string;
     task: string;
     baseline: ReplaySample;
@@ -42,6 +44,7 @@ export interface ActorComparison {
     contractPass: boolean;
     regressionPass: boolean;
     gatePass: boolean;
+    rollbackRequired: boolean;
     rollbackPass?: boolean;
     beforeSnapshot?: unknown;
     afterSnapshot?: unknown;

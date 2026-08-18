@@ -19,7 +19,7 @@ export interface BuilderDriverOptions {
     }) => void;
 }
 export interface BuilderDriverOutcome {
-    state: 'submitted' | 'aborted';
+    state: 'submitted' | 'aborted' | 'paused' | 'cancelled' | 'waiting_for_input';
     runId: string;
     proposal?: Record<string, unknown>;
     modelTurns: number;

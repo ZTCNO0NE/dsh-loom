@@ -1,11 +1,28 @@
 # CURRENT.md — 当前状态与交接
 
-更新：2026-08-18 02:35（Asia/Shanghai）
+更新：2026-08-18 15:30（Asia/Shanghai）
 
 ## 一句话状态
 
-**`v1.1.0` 已完成双重正式发布**：GitHub source release 为 <https://github.com/ZTCNO0NE/dsh-loom/releases/tag/v1.1.0>，npm registry 已核验 `dsh-loom@1.1.0` 且 `latest=1.1.0`。控制候选已完成 **Builder Kernel → commit-pinned Git acquisition → 无网络 build → C0/C1–C8/C6 → gate cold install → actor 重跑 → rollback/restore**；生产与用户 profile 均未触及。当前工作树新增未提交的 Actor ↔ Builder 异步通信：`meta_auto(exploreLoop=true)` 立即返回 `jobId/runId`，`meta_builder_status` 读取持久状态，`meta_builder_message` 写入下一 Builder 微循环可见 inbox；真实隔离 actor 实测工具返回耗时 84ms，Builder 随后后台运行。当前 `npm run check`、`npm test`（128/128）、`npm run build`、`git diff --check` 全部通过。
-**`v1.1.0` 已双重正式发布**（GitHub release + npm latest）。当前主线按用户定稿做减法：**v1.1 只保留单一路线**——用户主动委托 → 三层 evidence pack → Builder 自由探索 config/tool/skill/loop → verifier/gate 裁决 → 同任务重跑 → 用户看到改了什么/为什么/效果。`discoverLoopCandidate`/Git 获取已砍，被动触发链从激活路径移除；`src/deliberation/` 裁决已接线（patch 全链路真实，loop 经本地 baseline 构建 + contract-runner + profile gate，配置后启用），**verifier/gate 拒绝会回注 Builder 重开新 run（最多 3 次）**。当前 `npm run check`、`npm test`（**133/133**）、`npm run build`、`git diff --check` 全部通过。
+**`v1.1.0` 已完成双重正式发布**（GitHub release + npm latest）。`35abb31` 已完成 Builder 开放探索、unknown capability `needs_verifier` 草案、rejection reopen、evidence snapshot 与真实 proposal→verifier→gate→replay 闭环；本轮 Actor ↔ Builder 持久会话又补齐幂等消息、跨 run composite cursor、冻结 submission manifest、Kernel pause/cancel、typed `needs_input` 与安全 resume。`npm run check`、`npm test`（**148/148**）、`npm run build`、`git diff --check` 已通过；生产与用户 profile 均未触及。
+
+### 2026-08-18 13:40 本轮收口（针对 1/5/6/7）
+
+- 裁决、import、install/gate 异常统一转为带 proposal/error 的 `rejected`，进入 immutable reopen，不再静默落为 job `failed`。
+- 宿主重载会把遗留 `scheduled/running` job 安全标记为 `interrupted`，保留 run/journal/evidence，避免持久状态谎称仍在执行；actor 可重新委托。
+- comparison 增加 `rollbackRequired`，要求 rollback 证据时缺失即 `admissible=false`；普通同任务 replay 明确标记 rollback 不在本次比较范围。
+- Builder 重复工具调用只在连续反馈完全不变达到阈值时终止；工作区内容变化时允许继续探索。
+- 当前仍有未跟踪临时文件 `.tmp-e2e-overlay.yml`，提交前需清理或转成正式实验资产。
+
+### 2026-08-18 15:30 Actor ↔ Builder 持久会话（协议已收口）
+
+- `meta_auto` 现在返回 `builderSessionId`（当前等同 jobId）；`meta_builder_message` 可分别保存 `rawUserText`、`actorMemo`、`evidenceRefs`，旧 `message` 字段兼容保留。
+- 新增 `meta_builder_events(afterSeq, limit)`：Actor 读取生命周期、工具完成/失败、Builder `message_ack`、`builder_update`、proposal draft 等可审计摘要，再向用户解释；不输出隐藏思维链。
+- Builder 新增 `acknowledge_message` 与 `publish_progress` 工具。用户/Actor 的语义保持开放；固定的只有传输、审计、取消与 verifier/gate/install 权限边界。
+- rejection 与 host-restart resume 的新 immutable run 带 `previousRun`：旧 workspace/journal/world model/plan/events/submission 的路径与 hash 清单，供 Builder 自主只读复用。`meta_auto(exploreLoop=true, resumeJobId=...)` 会建立这种安全续接，而不重放中断时的副作用。
+- 消息使用 Actor 稳定 `idempotencyKey` 去重；同 key 不同内容 fail-closed。`meta_builder_events` 返回 `${lineageId}:${runId}:${seq}` composite cursor，run 切换自动 `reset=true`，不会因 seq 重用漏事件。
+- `submission/manifest.json` 绑定 proposal、input、target-before、evidence/artifact hash；提交前若任一冻结内容变化即拒绝。
+- Kernel/Driver/Gateway 已覆盖 pause/cancel/resume 与 `request_input → needs_input`；resume 会保留旧 run 只读资产并重新走同一后台 executor。下一步只需做一次隔离 Actor 真机多轮演示，不再扩张协议边界。
 
 ### 2026-08-18 v1.1 减法定稿（docs/v1-1-route.md）
 
@@ -32,9 +49,9 @@
 
 Builder 洁净重绘（2026-08-18）：`src/builder/capabilities.ts` 提供最小起始工具集与 capability registry，`loop-evolution` 作为首个声明式插件注册；capability 只提供上下文，不替 Builder 规定路线。隔离实测 `eval/run-records/2026-08-18-builder-free-loop-observation.json`：故意错误 actor loop 基线 0/3，官方 V4 Flash 单次 Builder run（8 turns/7 tools）读取源码与需求、根据第一次 oracle 路径错误反馈修正、重写 loop，最终外部 oracle 3/3；未安装、未调用 verifier/gate。
 
-Actor ↔ Builder 通信基础（2026-08-18，未提交）：actor 的主动委托不再同步等待 Builder。`meta_auto(exploreLoop=true)` 先持久化 immutable Builder run，再进入已有 single-flight 后台 job queue 并立刻返回 `jobId/runId`；`meta_builder_status(jobId|runId)` 返回 run 状态、model/tool 计数、inbox 数、journal tail 与 proposal 摘要；`meta_builder_message(jobId|runId,message)` 只写 durable inbox，下一 Builder turn 自动可见。job 的 request/runId 在 scheduled/running/finished/failed 状态均保留。真机隔离运行记录 `eval/run-records/2026-08-18-actor-builder-async-communication.json`：27b actor 自主调用 `meta_auto`，tool call 17:46:32.422Z → result 17:46:32.506Z（84ms）；后台 Builder 17:46:33.955Z 才开始并受 2-turn 小预算 abort。无 verifier/gate/install。**下一步**：配置 loop runtime 后跑一次真机端到端案例（含跨回合 `status → message → Builder 下一 turn`）。
+Actor ↔ Builder 通信基础（2026-08-18）：actor 的主动委托不再同步等待 Builder。`meta_auto(exploreLoop=true)` 先持久化 immutable Builder run，再进入 single-flight 后台 job queue 并立刻返回 `jobId/runId`；`meta_builder_status`、`meta_builder_message`、`meta_builder_events` 和新增 `meta_builder_control` 分别提供状态、原话 inbox、composite cursor 事件流和 pause/cancel/resume。job 的 request/runId 在 scheduled/running/paused/waiting_for_input/cancelled/finished 中保留。真机隔离运行记录 `eval/run-records/2026-08-18-actor-builder-async-communication.json` 仍只证明非阻塞委托；本轮新增的是零成本确定性协议闭环，尚无新的真机性能声明。
 
-Actor evidence pack（2026-08-18，未提交）：新增 `src/evidence/index.ts`，主动委托前冻结三层证据：原始 frames/events 等文件引用及 hash、确定性 runtime digest、可自由书写的 `actor-handoff.md`（含未知项）。Builder 收到 manifest 入口后可继续读取原始文件，摘要不是信息边界。已用真实隔离 actor 会话生成一份 pack：826 frames、8 events、27b runtime digest，目录为 `/chenzute/dsh-src/eval/meta-workspace-actor-loop-async-20260818/workspace/actor-loop-async-20260818/evidence/`；该证据确认了“主动委托非阻塞”，但没有虚构 loop 演进效果。代码接线已补：Builder submit 后自动进入 deliberation（verifier/gate），应用后同任务重跑；真机端到端待 loop runtime 配置后执行。
+Actor evidence pack（2026-08-18）：新增 `src/evidence/index.ts`，主动委托前冻结三层证据：原始 frames/events 等文件引用及 hash、确定性 runtime digest、可自由书写的 `actor-handoff.md`（含未知项）。Builder 收到 manifest 入口后可继续读取原始文件，摘要不是信息边界。真实隔离 actor 会话 pack 仍在 `/chenzute/dsh-src/eval/meta-workspace-actor-loop-async-20260818/workspace/actor-loop-async-20260818/evidence/`；它证明素材可恢复和主动委托非阻塞，不虚构 loop 演进效果。代码接线已补：Builder submit 后自动进入 deliberation（verifier/gate），应用后同任务重跑。
 
 1. **A 收编（已完成）**：可运行构建产物已进入 `vendored/serial-tool-calls/`；`loop-candidates/serial-tool-calls.manifest.json` 固定上游 commit、候选 delta（并行 10→1）、目录 SHA-256 与入口。
 2. **候选状态/边界（已完成代码，122/122）**：`src/candidates/` 实现 `staging → pending → verified → approved → installed`（及 rejected）、契约证据要求、before/after 安装记录、失败 rollback；builder Git acquisition 只能写 staging，需 HTTPS allowlist、固定 ref/commit/hash，不能直接写正式 vendored。builder-generated 另受固定 baseline、精确 hash 替换、路径/大小/无 symlink 限制。
@@ -48,7 +65,7 @@ Actor evidence pack（2026-08-18，未提交）：新增 `src/evidence/index.ts`
 
 - Node v22.20.0 / npm 10.9.3 / pnpm 11.21.0（`/chenzute/dsh-src/tools/bin/pnpm`）；`dsh` 不在 PATH。
 - dsh checkout `/chenzute/dsh-src/deepseek-harness` 存在；插件类型链 devDependencies `file:` 正常。
-- `dist/index.js` 已构建；`npm run check` ✓；`npm test` 133/133 ✓；`npm run build` ✓；`git diff --check` ✓。
+- `dist/index.js` 已构建；`npm run check` ✓；`npm test` 148/148 ✓；`npm run build` ✓；`git diff --check` ✓。
 - 候选 fork 已构建 `lib/index.js`，`DEFAULT_MAX_PARALLEL_TOOL_CALLS = 1` ✓。
 - env 文件在位（600）：`.env-27b`（本地 actor）、`.env-deepseek`（官方 V4 Flash builder/评审门）；禁止打印/提交。
 - 契约跑法模板：
@@ -103,7 +120,7 @@ node scripts/contract-runner.mjs check /chenzute/dsh-src/eval/overlay-contract-c
 | v1.0.0-v1.0.4（监督员/后台/通知/偏好/便携 CLI） | 完成 |
 | loop 契约 runner + golden + C0 entry-resolution | 完成（正式 Loader adapter + 自主候选实装均有 C0） |
 | 完整契约报告三件套 + 候选 loop 网关 | 完成（正式 profile、C0–C8/C6、冷 gate、staging 网关均有隔离实证） |
-| v1.1 减法定稿 + 单一路线接线（deliberation/evidence/拒绝回注/同任务重跑） | 完成（代码 133/133；loop 真机端到端待配置 runtime） |
+| v1.1 减法定稿 + 单一路线接线（deliberation/evidence/拒绝回注/同任务重跑） | 完成（代码 148/148；loop 真机端到端待配置 runtime） |
 | builder 自主选择候选 loop + 端到端案例 | 收敛为 v1.1 单一路线：builder-generated + 本地 baseline；外部 Git acquisition 已砍 |
 | Tycho 型 BuilderKernel 微循环 + 拒绝回注 | 完成（官方 V4 Flash patch/loop-candidate run + verifier feedback 证据） |
 | 自主 loop 最后一公里 | 完成（staging → C0–C8/C6 → installed → actor 重跑 → rollback/restore） |

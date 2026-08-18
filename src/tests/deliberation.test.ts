@@ -218,8 +218,9 @@ describe('deliberation', () => {
   })
 
   it('classifies unknown-but-well-formed capabilities as needs_verifier drafts', () => {
-    const known = classifyBuilderProposal({ capability: 'patch-evolution', payload: { id: 'p1' }, rationale: 'r' })
+    const known = classifyBuilderProposal({ capability: 'patch-evolution', payload: { id: 'p1', targetId: 'agent', targetKind: 'config' }, rationale: 'r' })
     expect(known).toMatchObject({ kind: 'known' })
+    expect(classifyBuilderProposal({ capability: 'patch-evolution', payload: { id: 'p1' } })).toMatchObject({ kind: 'malformed' })
     const unknown = classifyBuilderProposal({ capability: 'self-hosting-verifier', payload: { draft: true }, artifacts: ['a.json'] })
     expect(unknown).toMatchObject({ kind: 'needs_verifier', capability: 'self-hosting-verifier', artifacts: ['a.json'] })
     expect(classifyBuilderProposal({})).toMatchObject({ kind: 'malformed', reason: 'proposal missing capability' })

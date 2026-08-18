@@ -82,6 +82,25 @@ loop-evolution
 
 429、构建失败、测试失败和性能不达标均是普通工具反馈。Builder 自己决定重试、换来源、手工修复、改用现有基线、继续探索或 abort；系统不得用提示词把选择收缩为固定三选一。
 
+### 4.1 Actor ↔ Builder 持久会话
+
+用户不直接连接 Builder；Actor 是唯一的语义协调者，但不是会截断原意的指令分类器。每条 Actor → Builder 消息必须持久化三层：`rawUserText`（原话）、`actorMemo`（Actor 的非权威解释/歧义）和可选 `evidenceRefs`。Builder 同时看到三层，可以接受、修正或追问 Actor 的解释。
+
+Builder → Actor 通过独立的 append-only event log 返回可审计摘要：生命周期、工具完成/失败、`message_ack`（对某条用户消息的理解、下一步或问题）、`builder_update`（阶段进度/追问）和 proposal 草案。事件不记录或展示隐藏思维链；Actor 负责将技术事件翻译为用户可理解的进度，并把用户答复以新的 inbox 消息送回 Builder。
+
+生命周期控制也由 Kernel 持有：`pause` 在下一安全回合前阻断模型，`cancel` 将 run 置为不可提交的终态；Builder 可用 `request_input` 写入 typed `needs_input` 事件，Actor 再向用户追问。`resume` 不重放可能已经产生外部副作用的模型/工具回合，而是创建带 `previousRun` hash 清单的新 immutable attempt，并重新进入原来的 Builder → verifier → gate 流程。job 状态会如实记录 `paused`、`waiting_for_input`、`cancelled` 或 `finished`，宿主重载后没有进程内 runner 时要求 Actor 重新委托，避免伪造续跑。
+
+```text
+用户原话 → Actor（原文 + memo） → Builder inbox
+用户答复 ← Actor（解释/协调） ← Builder event log
+```
+
+协议硬边界只有 identity、顺序、落盘、幂等、取消和权限。目标、限制、优先级、假设、可探索能力和 Builder 路线保持开放自然语言；用户或 Actor 的消息永远不能授予 verifier/gate/install 权限。
+
+每个 rejection 或 host-restart resume 都创建新的 immutable run。新 run 获得前一 run 的 `previousAttempt`，以及带 hash 的 `previousRun` 只读资产清单（workspace、journal、world model、plan、events、submission）；Builder 可自行复用或放弃，不能将旧资产视为已批准。这样既避免修改历史，又不丢失多步探索。
+
+提交由 `submission/manifest.json` 冻结绑定：manifest 同时记录 run/lineage、proposal/input/target-before hash，以及 evidence/artifact refs 的存在性和 hash。`submit` 只接受仍与 manifest 一致的 proposal、证据和产物；旧 staging draft 在 preflight 时也会生成同一 manifest，防止兼容路径绕过冻结。
+
 ## 5. 变更与裁决边界
 
 Builder 可以自由产生和验证候选，但不能让候选直接改变被治理目标：

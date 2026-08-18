@@ -28,6 +28,8 @@ export interface ComparisonOptions {
   contractPass: boolean
   regressionPass: boolean
   gatePass: boolean
+  /** Set when this comparison is only admissible after an explicit rollback proof. */
+  rollbackRequired?: boolean
   rollbackPass?: boolean
   beforeSnapshot?: unknown
   afterSnapshot?: unknown
@@ -35,7 +37,7 @@ export interface ComparisonOptions {
 }
 
 export interface ActorComparison {
-  schemaVersion: 1
+  schemaVersion: 2
   id: string
   task: string
   baseline: ReplaySample
@@ -49,6 +51,7 @@ export interface ActorComparison {
   contractPass: boolean
   regressionPass: boolean
   gatePass: boolean
+  rollbackRequired: boolean
   rollbackPass?: boolean
   beforeSnapshot?: unknown
   afterSnapshot?: unknown
@@ -107,12 +110,12 @@ export function writeActorComparison(options: ComparisonOptions): ActorCompariso
   const admissible = options.contractPass
     && options.regressionPass
     && options.gatePass
-    && (options.rollbackPass ?? true)
+    && (!options.rollbackRequired || options.rollbackPass === true)
     && options.baseline.taskSuccess
     && options.installed.taskSuccess
   const ratio = options.baseline.durationMs > 0 ? options.installed.durationMs / options.baseline.durationMs : null
   const report: ActorComparison = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: options.id,
     task: options.task,
     baseline: options.baseline,
@@ -123,6 +126,7 @@ export function writeActorComparison(options: ComparisonOptions): ActorCompariso
     contractPass: options.contractPass,
     regressionPass: options.regressionPass,
     gatePass: options.gatePass,
+    rollbackRequired: options.rollbackRequired ?? false,
     ...(options.rollbackPass === undefined ? {} : { rollbackPass: options.rollbackPass }),
     ...(options.beforeSnapshot === undefined ? {} : { beforeSnapshot: options.beforeSnapshot }),
     ...(options.afterSnapshot === undefined ? {} : { afterSnapshot: options.afterSnapshot }),

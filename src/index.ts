@@ -239,7 +239,8 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
   // immediately; the loop runs single-flight; completion is injected back
   // into the actor session as a plugin notice ("reload 后生效").
   const refineState = { running: false }
-  const jobQueue: Array<{ id: string; request: Record<string, unknown>; run: () => Promise<{ summary: string }> }> = []
+  type JobOutcome = { summary: string; status?: 'finished' | 'paused' | 'cancelled' | 'waiting_for_input' }
+  const jobQueue: Array<{ id: string; request: Record<string, unknown>; run: () => Promise<JobOutcome> }> = []
   let jobRunning = false
   type PersistedJob = {
     schemaVersion?: number
@@ -260,6 +261,26 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     atomicWriteJson(path, next)
     return next
   }
+  /**
+   * The queue itself is process-local. On reload, never leave a persisted job
+   * claiming to be scheduled/running when no worker owns it; mark it as an
+   * explicit interruption so the actor can safely issue a fresh delegation.
+   */
+  const recoverInterruptedJobs = (): void => {
+    const jobsDir = dirname(jobPathFor('placeholder'))
+    if (!existsSync(jobsDir)) return
+    for (const file of readdirSync(jobsDir)) {
+      if (!file.endsWith('.json')) continue
+      const jobId = file.slice(0, -'.json'.length)
+      const job = readJson<PersistedJob>(join(jobsDir, file))
+      if (!job || (job.status !== 'scheduled' && job.status !== 'running')) continue
+      updateJob(jobId, {
+        status: 'interrupted',
+        error: 'Builder job interrupted by host reload before its worker completed',
+      })
+    }
+  }
+  recoverInterruptedJobs()
   const withRefineRunning = async <T>(fn: () => Promise<T>): Promise<T> => {
     refineState.running = true
     try {
@@ -313,8 +334,9 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       updateJob(job.id, { status: 'running', request: job.request })
       try {
         const outcome = await withRefineRunning(job.run)
-        updateJob(job.id, { status: 'finished', request: job.request, summary: outcome.summary })
-        if (config.notify.completion) {
+        const persistedStatus = outcome.status ?? 'finished'
+        updateJob(job.id, { status: persistedStatus, request: job.request, summary: outcome.summary })
+        if (config.notify.completion && persistedStatus === 'finished') {
           const isLoopExploration = job.request.kind === 'loop-exploration'
           injectNotice(
             isLoopExploration
@@ -333,7 +355,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       }
     })()
   }
-  const scheduleRefine = (request: Record<string, unknown>, run: () => Promise<{ summary: string }>): string => {
+  const scheduleRefine = (request: Record<string, unknown>, run: () => Promise<JobOutcome>): string => {
     const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const initialRunId = typeof request.runId === 'string' ? request.runId : undefined
     atomicWriteJson(jobPathFor(id), {
@@ -345,7 +367,10 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       at: new Date().toISOString(),
     })
     jobQueue.push({ id, request, run })
-    startNextJob()
+    // Defer dispatch one microtask so callers receive the job id before a
+    // runner closure can observe it (important for resume callbacks that
+    // capture their freshly allocated job id).
+    queueMicrotask(startNextJob)
     return id
   }
 
@@ -384,6 +409,8 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     builderMaxWallTimeMs: config.allowLoopCandidates.builderMaxWallTimeMs,
     onUsage: recordUsage('builder-loop-candidate'),
   })
+  const loopJobRunners = new Map<string, (jobId: string) => Promise<{ summary: string; status?: 'finished' | 'paused' | 'cancelled' | 'waiting_for_input' }>>()
+  const loopRunHolders = new Map<string, { runId: string; runner: (jobId: string) => Promise<{ summary: string; status?: 'finished' | 'paused' | 'cancelled' | 'waiting_for_input' }>; request: Record<string, unknown>; holder?: { runId: string } }>()
   const builderRunFor = (jobId: string | undefined, explicitRunId: string | undefined): { jobId?: string; runId?: string; error?: string } => {
     if (explicitRunId) return { ...(jobId ? { jobId } : {}), runId: explicitRunId }
     if (!jobId) return { error: 'jobId or runId is required' }
@@ -580,7 +607,9 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
           ...(target.jobId ? { jobId: target.jobId } : {}),
           exploration: loopCandidateGateway.explorationStatus(target.runId),
           ...(job ? { job: { status: job.status ?? null, summary: job.summary ?? null, error: job.error ?? null } } : {}),
-          note: '状态来自持久 Builder run；proposal 的 verifier/gate 裁决结果见 job.summary 与 meta_growth。',
+          note: job?.status === 'interrupted'
+            ? '该 job 在宿主重载时被安全标记为 interrupted；Builder run 和证据仍保留。Actor 可调用 meta_auto(exploreLoop=true, resumeJobId=...) 创建继承旧资产的新 immutable run。'
+            : '状态来自持久 Builder run；proposal 的 verifier/gate 裁决结果见 job.summary 与 meta_growth。',
         }) as unknown as JsonValue
       } catch (error) {
         return { accepted: false, runId: target.runId, error: String(error) } as unknown as JsonValue
@@ -590,9 +619,13 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
 
   ctx.tools.register(defineTool({
     name: 'meta_builder_message',
-    description: '向仍在运行的 Builder loop 探索投递 actor 的新观察/用户补充；消息写入 durable inbox，供下一 Builder 微循环回合读取。不会直接改变目标。',
+    description: '向仍在运行的 Builder 持久会话投递用户原话与 Actor 的解释。rawUserText 保留用户原意，actorMemo 只是非权威解释；Builder 会在下一微循环回合看到并可回执/追问。不会直接改变目标。',
     parameters: {
-      message: { type: 'string', description: '要交给该 Builder 的新观察、纠正或用户补充' },
+      message: { type: 'string', description: '兼容字段：若 rawUserText 未提供，将作为用户原话投递' },
+      rawUserText: { type: 'string', description: '用户原始措辞；Actor 应尽量逐字保留，不用摘要取代' },
+      actorMemo: { type: 'string', description: 'Actor 对目标、约束、歧义或上下文的解释；Builder 可采纳、质疑或追问' },
+      evidenceRefs: { type: 'array', items: { type: 'string' }, description: '与本次指导有关的不可变证据或文件引用（可选）' },
+      idempotencyKey: { type: 'string', description: 'Actor 为本次用户消息生成的稳定重试键；同一 key 的同内容投递只会生效一次' },
       jobId: { type: 'string', description: 'meta_auto 返回的 Builder jobId（与 runId 二选一）' },
       runId: { type: 'string', description: 'Builder runId（与 jobId 二选一）' },
     },
@@ -603,15 +636,108 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     async execute(args) {
       const jobId = typeof args.jobId === 'string' ? args.jobId : undefined
       const runId = typeof args.runId === 'string' ? args.runId : undefined
-      const message = typeof args.message === 'string' ? args.message : ''
+      const rawUserText = typeof args.rawUserText === 'string'
+        ? args.rawUserText
+        : typeof args.message === 'string' ? args.message : ''
+      const actorMemo = typeof args.actorMemo === 'string' ? args.actorMemo : undefined
+      const evidenceRefs = Array.isArray(args.evidenceRefs) && args.evidenceRefs.every((ref) => typeof ref === 'string')
+        ? args.evidenceRefs as string[]
+        : undefined
+      const idempotencyKey = typeof args.idempotencyKey === 'string' ? args.idempotencyKey : undefined
       const target = builderRunFor(jobId, runId)
       if (!target.runId) return { accepted: false, error: target.error } as unknown as JsonValue
       try {
         return cleanToolResult({
-          ...loopCandidateGateway.messageExploration(target.runId, message),
+          ...loopCandidateGateway.messageExploration(target.runId, {
+            rawUserText,
+            ...(actorMemo ? { actorMemo } : {}),
+            ...(evidenceRefs ? { evidenceRefs } : {}),
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+          }),
           ...(target.jobId ? { jobId: target.jobId } : {}),
-          note: '已写入 Builder durable inbox；将在下一微循环回合进入其上下文。',
+          note: '已保留用户原话并写入 Builder durable inbox；下一微循环会看到。Builder 的理解/追问请通过 meta_builder_events 读取，再由 Actor 向用户解释。',
         }) as unknown as JsonValue
+      } catch (error) {
+        return { accepted: false, runId: target.runId, error: String(error) } as unknown as JsonValue
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'meta_builder_events',
+    description: '读取 Builder 持久会话的 Actor-facing 事件流（阶段、工具完成、消息回执、追问、proposal 草案），用于 Actor 向用户解释进度；不暴露模型隐藏推理，也不会唤起或批准 Builder。',
+    parameters: {
+      jobId: { type: 'string', description: 'meta_auto 返回的 Builder jobId（与 runId 二选一）' },
+      runId: { type: 'string', description: 'Builder runId（与 jobId 二选一）' },
+      cursor: { type: 'string', description: '上一响应返回的 composite cursor（lineageId:runId:seq）；run 切换时自动 reset，避免跨 run 漏事件' },
+      afterSeq: { type: 'number', description: '兼容字段：仅当前 run 的 seq。优先使用 cursor；首次可传 0' },
+      limit: { type: 'number', description: '最多返回事件数，默认 50，最大 200' },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+    },
+    async execute(args) {
+      const jobId = typeof args.jobId === 'string' ? args.jobId : undefined
+      const runId = typeof args.runId === 'string' ? args.runId : undefined
+      const afterSeq = typeof args.afterSeq === 'number' && Number.isFinite(args.afterSeq) ? Math.max(0, Math.floor(args.afterSeq)) : 0
+      const cursor = parseBuilderEventCursor(typeof args.cursor === 'string' ? args.cursor : undefined, afterSeq)
+      const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? Math.max(1, Math.min(200, Math.floor(args.limit))) : 50
+      const target = builderRunFor(jobId, runId)
+      if (!target.runId) return { accepted: false, error: target.error } as unknown as JsonValue
+      try {
+        return cleanToolResult({
+          accepted: true,
+          ...(target.jobId ? { jobId: target.jobId } : {}),
+          builderSessionId: target.jobId ?? target.runId,
+          ...loopCandidateGateway.events(target.runId, cursor, limit),
+          note: '事件是 Builder 向 Actor 的可审计摘要。Actor 应保留用户原意、翻译技术进度，并在 question 出现时向用户追问。',
+        }) as unknown as JsonValue
+      } catch (error) {
+        return { accepted: false, runId: target.runId, error: String(error) } as unknown as JsonValue
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'meta_builder_control',
+    description: '控制持久 Builder 会话：pause/cancel 在 Kernel 立即落盘；resume 永远创建带 previousRun 引用的新 immutable attempt，不重放中断中的工具副作用。',
+    parameters: {
+      action: { type: 'string', description: 'pause、cancel 或 resume' },
+      jobId: { type: 'string', description: 'meta_auto 返回的 jobId（与 runId 二选一）' },
+      runId: { type: 'string', description: 'Builder runId（与 jobId 二选一）' },
+    },
+    output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+    async execute(args) {
+      const action = args.action === 'pause' || args.action === 'cancel' || args.action === 'resume' ? args.action : undefined
+      if (!action) return { accepted: false, error: 'action must be pause, cancel, or resume' } as unknown as JsonValue
+      const jobId = typeof args.jobId === 'string' ? args.jobId : undefined
+      const explicitRunId = typeof args.runId === 'string' ? args.runId : undefined
+      const target = builderRunFor(jobId, explicitRunId)
+      if (!target.runId) return { accepted: false, error: target.error } as unknown as JsonValue
+      try {
+        if (action === 'pause' || action === 'cancel') {
+          const controlled = loopCandidateGateway.controlExploration(target.runId, action)
+          if (target.jobId) {
+            const queuedIndex = jobQueue.findIndex((item) => item.id === target.jobId)
+            if (queuedIndex >= 0) jobQueue.splice(queuedIndex, 1)
+            updateJob(target.jobId, { status: action === 'cancel' ? 'cancelled' : 'paused', activeRunId: target.runId })
+          }
+          return cleanToolResult({ accepted: true, action, ...(target.jobId ? { jobId: target.jobId } : {}), ...controlled, note: action === 'pause' ? '已暂停；不会再进入下一模型回合。resume 会创建新 attempt。' : '已取消；该 run 不可再次提交。' }) as unknown as JsonValue
+        }
+        const priorJob = target.jobId ? readJson<PersistedJob>(jobPathFor(target.jobId)) : null
+        const holder = loopRunHolders.get(target.runId)
+        if (!holder) {
+          return { accepted: false, runId: target.runId, error: 'resume requires an in-process loop runner; after host reload re-delegate with meta_auto(resumeRunId=...)' } as unknown as JsonValue
+        }
+        const started = loopCandidateGateway.resumeExploration(target.runId)
+        if (!started.accepted) return { accepted: false, exploration: started } as unknown as JsonValue
+        if (holder.holder) holder.holder.runId = started.runId
+        const request = { ...(priorJob?.request ?? holder.request), runId: started.runId, resumedFromRunId: target.runId }
+        const nextJobId = scheduleRefine(request, () => holder.runner(nextJobId))
+        loopJobRunners.set(nextJobId, holder.runner)
+        loopRunHolders.set(started.runId, { ...holder, runId: started.runId })
+        return cleanToolResult({ accepted: true, action, jobId: nextJobId, runId: started.runId, builderSessionId: nextJobId, resumedFromRunId: target.runId, state: 'scheduled', note: '已创建新的 immutable Builder attempt；旧 workspace/journal/artifacts 仅按 hash 只读继承。' }) as unknown as JsonValue
       } catch (error) {
         return { accepted: false, runId: target.runId, error: String(error) } as unknown as JsonValue
       }
@@ -774,6 +900,8 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       requirements: { type: 'string', description: '用户需求原文（可选）' },
       actorAssessment: { type: 'string', description: 'actor 对当前会话问题的自然语言观察、怀疑和上下文；不是结构化 JSON 约束（可选）' },
       exploreLoop: { type: 'boolean', description: '仅当 allowLoopCandidates 开启时，让独立 builder 阅读三层证据包并自由探索/演进 config/tool/skill/loop；proposal 经 verifier/gate 裁决后才应用。' },
+      resumeJobId: { type: 'string', description: '可选：恢复一个被宿主重载中断的 Builder job。会创建新 immutable run，并只读继承旧 run 的 journal/workspace/artifacts。' },
+      resumeRunId: { type: 'string', description: '可选：直接指定要恢复的 Builder run（与 resumeJobId 二选一）。' },
     },
     output: {
       schema: { type: 'json' },
@@ -781,7 +909,20 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     },
     async execute(args) {
       const turn = typeof args.turn === 'number' ? args.turn : 0
-      const requirements = args.requirements ? String(args.requirements) : undefined
+      const resumeJobId = typeof args.resumeJobId === 'string' ? args.resumeJobId : undefined
+      const resumeRunId = typeof args.resumeRunId === 'string' ? args.resumeRunId : undefined
+      const resumeTarget = resumeRunId
+        ? { runId: resumeRunId }
+        : resumeJobId ? builderRunFor(resumeJobId, undefined) : undefined
+      if ((resumeJobId || resumeRunId) && !resumeTarget?.runId) {
+        return { accepted: false, error: resumeTarget?.error ?? 'resumeJobId or resumeRunId is invalid' } as unknown as JsonValue
+      }
+      const priorRequirements = resumeJobId
+        ? readJson<PersistedJob>(jobPathFor(resumeJobId))?.request?.requirements
+        : undefined
+      const requirements = args.requirements
+        ? String(args.requirements)
+        : typeof priorRequirements === 'string' ? priorRequirements : undefined
       const actorAssessment = typeof args.actorAssessment === 'string' ? args.actorAssessment : undefined
       if (requirements) {
         observer.persistTrigger('user', 'meta_auto')
@@ -811,6 +952,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
           runtimeCwd: process.cwd(),
           activeActorRequest: requirements ?? '',
           ...(actorAssessment ? { actorAssessment } : {}),
+          ...(resumeTarget?.runId ? { resumeFromRunId: resumeTarget.runId } : {}),
           evidencePack,
         })
         if (!started.accepted) {
@@ -821,14 +963,12 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
             note: 'Builder exploration was not started.',
           }) as unknown as JsonValue
         }
-        const jobId = scheduleRefine({
-          tool: 'meta_auto',
-          kind: 'loop-exploration',
-          runId: started.runId,
-          requirements: requirements ?? '',
-        }, async () => {
+        const loopHolder = { runId: started.runId }
+        let loopRunner: (jobId: string) => Promise<{ summary: string; status?: 'finished' | 'paused' | 'cancelled' | 'waiting_for_input' }>
+        loopRunner = async (runnerJobId: string) => {
+          const jobId = runnerJobId
           const maxAttempts = Math.max(1, config.allowLoopCandidates.builderMaxReopenAttempts ?? 3)
-          let currentRunId = started.runId
+          let currentRunId = loopHolder.runId
           const rejections: string[] = []
           let summary = ''
           for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -852,7 +992,8 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
               rejections.push(String(rejection.failureSummary))
               if (attempt < maxAttempts) {
                 currentRunId = loopCandidateGateway.reopenExploration(currentRunId, rejection)
-                updateJob(jobId, { activeRunId: currentRunId, runLineage: [...(readJson<PersistedJob>(jobPathFor(jobId))?.runLineage ?? [started.runId]), currentRunId] })
+                loopRunHolders.set(currentRunId, { runId: currentRunId, runner: loopRunner, holder: loopHolder, request: { tool: 'meta_auto', kind: 'loop-exploration', runId: currentRunId, requirements: requirements ?? '' } })
+                updateJob(runnerJobId, { activeRunId: currentRunId, runLineage: [...(readJson<PersistedJob>(jobPathFor(runnerJobId))?.runLineage ?? [loopHolder.runId]), currentRunId] })
                 summary += `；rejected → reopened=${currentRunId}`
               }
               continue
@@ -867,128 +1008,104 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
             let verdict: 'approved' | 'rejected' = 'rejected'
             let reason: string | undefined
             let rejectionReport: Record<string, unknown> = {
-              source: 'deliberation',
-              capability: proposal.capability,
-              verdict: 'rejected',
-              observedAt: new Date().toISOString(),
+              source: 'deliberation', capability: proposal.capability, verdict: 'rejected', observedAt: new Date().toISOString(),
             }
-            if (proposal.capability === 'patch-evolution') {
-              const cases = await validator.loadRegressionCases()
-              const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline)
-              const pack = readActorEvidencePack(evidencePack.manifestPath) ?? evidencePack
-              const result = await adjudicatePatch(proposal, {
-                root,
-                sessionId: config.sessionId,
-                validator: loopValidator,
-                gate,
-                collectFrames: (patch, base) => collectFramesForPatch(patch, base, {
-                  enabled: config.isolation.enabled,
-                  dshCommand: config.isolation.dshCommand,
-                  cwd: config.isolation.cwd,
-                  profile: config.isolation.profile,
-                  baseOverlays: config.isolation.baseOverlays,
-                  probe: config.isolation.probe,
-                  probeTimeoutMs: config.isolation.probeTimeoutMs,
-                  stagingRootFor: (patchId) => paths.staging(root, config.sessionId, patchId),
-                  skillProbe: (patch) => loopValidator.probeSkillForFrames(patch),
-                }),
-                applyOps: ops,
-                evidenceEvents: evidenceEventsOf(pack),
-                onApplied: async ({ patch, report, applied }) => {
-                  appendLedger(root, config.sessionId, {
-                    id: patch.id,
-                    triggeredBy: 'S9-explicit-request',
-                    problem: report.failureSummary ?? requirements ?? 'user-initiated builder delegation',
-                    changes: [{ target: patch.targetId, kind: patch.targetKind, before: {}, after: patch.config }],
-                    verdict: report.verdict,
-                    applied: applied.applied,
-                    metricsBefore: {},
-                    metricsAfter: {},
-                    rolledBack: false,
-                    appliedAt: new Date().toISOString(),
-                  })
-                  appendReport(root, config.sessionId, `用户主动委托：${patch.targetKind} ${patch.targetId} → ${report.verdict}（applied=${applied.applied}）`)
-                  if (config.isolation.enabled) {
-                    const rerun = runIsolation(patch, {
-                      dshCommand: config.isolation.dshCommand,
-                      cwd: config.isolation.cwd,
-                      profile: config.isolation.profile,
-                      baseOverlays: config.isolation.baseOverlays,
-                      stagingRoot: paths.staging(root, config.sessionId, patch.id),
-                      probe: requirements || config.isolation.probe,
-                      probeTimeoutMs: config.isolation.probeTimeoutMs,
+            try {
+              if (proposal.capability === 'patch-evolution') {
+                const cases = await validator.loadRegressionCases()
+                const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline)
+                const pack = readActorEvidencePack(evidencePack.manifestPath) ?? evidencePack
+                const result = await adjudicatePatch(proposal, {
+                  root, sessionId: config.sessionId, validator: loopValidator, gate,
+                  collectFrames: (patch, base) => collectFramesForPatch(patch, base, {
+                    enabled: config.isolation.enabled, dshCommand: config.isolation.dshCommand, cwd: config.isolation.cwd,
+                    profile: config.isolation.profile, baseOverlays: config.isolation.baseOverlays, probe: config.isolation.probe,
+                    probeTimeoutMs: config.isolation.probeTimeoutMs,
+                    stagingRootFor: (patchId) => paths.staging(root, config.sessionId, patchId),
+                    skillProbe: (patch) => loopValidator.probeSkillForFrames(patch),
+                  }),
+                  applyOps: ops, evidenceEvents: evidenceEventsOf(pack),
+                  onApplied: async ({ patch, report, applied }) => {
+                    appendLedger(root, config.sessionId, {
+                      id: patch.id, triggeredBy: 'S9-explicit-request',
+                      problem: report.failureSummary ?? requirements ?? 'user-initiated builder delegation',
+                      changes: [{ target: patch.targetId, kind: patch.targetKind, before: {}, after: patch.config }],
+                      verdict: report.verdict, applied: applied.applied, metricsBefore: {}, metricsAfter: {}, rolledBack: false,
+                      appliedAt: new Date().toISOString(),
                     })
-                    appendReport(root, config.sessionId, `同任务重跑：exit=${rerun.probe?.exitCode ?? 'n/a'} ${rerun.probe?.outputTail?.slice(0, 200) ?? ''}`)
-                  }
-                },
-              })
-              verdict = result.verdict
-              reason = result.reason
-              rejectionReport = {
-                ...rejectionReport,
-                verdict: result.verdict,
-                failureSummary: result.reason ?? result.report.failureSummary,
-                report: result.report,
-                applied: result.applied,
-                patch: result.patch,
-              }
-              summary += `；patch verdict=${result.verdict} target=${result.patch.targetId} applied=${result.applied?.applied ?? false}`
-            } else {
-              const loopRoot = config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime')
-              const importer = new CandidateImporter({
-                root: loopRoot,
-                baselineRoot: config.allowLoopCandidates.baselineRoot,
-                buildDependencyRoot: config.allowLoopCandidates.buildDependencyRoot,
-              })
-              const result = await adjudicateLoop(proposal, {
-                root: loopRoot,
-                importer,
-                verifyContract: (manifest) => verifyLoopContract(manifest, ctx, baseline, root, config.sessionId, config),
-                install: (candidateId) => installLoopCandidate(candidateId, config, root),
-              })
-              verdict = result.verdict
-              reason = result.reason
-              rejectionReport = {
-                ...rejectionReport,
-                verdict: result.verdict,
-                failureSummary: result.reason,
-                candidateId: result.candidateId,
-                evidence: result.evidence,
-                install: result.install,
-              }
-              summary += `；loop verdict=${result.verdict} candidate=${result.candidateId}${result.reason ? ` reason=${result.reason}` : ''}`
-              appendReport(root, config.sessionId, `loop 演进：${result.candidateId} → ${result.verdict}${result.install ? ` state=${result.install.state}` : ''}`)
-              if (result.install?.state === 'installed') {
-                const comparison = replayInstalledLoopTask(result.candidateId, requirements || config.allowLoopCandidates.contractTask, config, root, config.sessionId, result)
-                if (comparison) {
-                  appendReport(root, config.sessionId, `同任务 before/after：${comparison.id} baseline=${comparison.baseline.durationMs}ms installed=${comparison.installed.durationMs}ms claim=${comparison.claimLevel}`)
+                    appendReport(root, config.sessionId, `用户主动委托：${patch.targetKind} ${patch.targetId} → ${report.verdict}（applied=${applied.applied}）`)
+                    if (config.isolation.enabled) {
+                      const rerun = runIsolation(patch, {
+                        dshCommand: config.isolation.dshCommand, cwd: config.isolation.cwd, profile: config.isolation.profile,
+                        baseOverlays: config.isolation.baseOverlays, stagingRoot: paths.staging(root, config.sessionId, patch.id),
+                        probe: requirements || config.isolation.probe, probeTimeoutMs: config.isolation.probeTimeoutMs,
+                      })
+                      appendReport(root, config.sessionId, `同任务重跑：exit=${rerun.probe?.exitCode ?? 'n/a'} ${rerun.probe?.outputTail?.slice(0, 200) ?? ''}`)
+                    }
+                  },
+                })
+                verdict = result.verdict; reason = result.reason
+                rejectionReport = { ...rejectionReport, verdict: result.verdict, failureSummary: result.reason ?? result.report.failureSummary, report: result.report, applied: result.applied, patch: result.patch }
+                summary += `；patch verdict=${result.verdict} target=${result.patch.targetId} applied=${result.applied?.applied ?? false}`
+              } else {
+                const loopRoot = config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime')
+                const importer = new CandidateImporter({ root: loopRoot, baselineRoot: config.allowLoopCandidates.baselineRoot, buildDependencyRoot: config.allowLoopCandidates.buildDependencyRoot })
+                const result = await adjudicateLoop(proposal, {
+                  root: loopRoot, importer,
+                  verifyContract: (manifest) => verifyLoopContract(manifest, ctx, baseline, root, config.sessionId, config),
+                  install: (candidateId) => installLoopCandidate(candidateId, config, root),
+                })
+                verdict = result.verdict; reason = result.reason
+                rejectionReport = { ...rejectionReport, verdict: result.verdict, failureSummary: result.reason, candidateId: result.candidateId, evidence: result.evidence, install: result.install }
+                summary += `；loop verdict=${result.verdict} candidate=${result.candidateId}${result.reason ? ` reason=${result.reason}` : ''}`
+                appendReport(root, config.sessionId, `loop 演进：${result.candidateId} → ${result.verdict}${result.install ? ` state=${result.install.state}` : ''}`)
+                if (result.install?.state === 'installed') {
+                  const comparison = replayInstalledLoopTask(result.candidateId, requirements || config.allowLoopCandidates.contractTask, config, root, config.sessionId, result)
+                  if (comparison) appendReport(root, config.sessionId, `同任务 before/after：${comparison.id} baseline=${comparison.baseline.durationMs}ms installed=${comparison.installed.durationMs}ms claim=${comparison.claimLevel}`)
                 }
               }
+            } catch (error) {
+              verdict = 'rejected'; reason = `adjudication exception: ${String(error)}`
+              rejectionReport = { ...rejectionReport, verdict: 'rejected', failureSummary: reason, error: String(error), proposal }
+              summary += `；裁决异常已转为 rejected：${String(error).slice(0, 300)}`
             }
             if (verdict === 'approved') break
             rejections.push(reason ?? 'rejected')
             if (attempt < maxAttempts) {
-              const priorLineage = readJson<PersistedJob>(jobPathFor(jobId))?.runLineage ?? [started.runId]
-              currentRunId = loopCandidateGateway.reopenExploration(currentRunId, {
-                ...rejectionReport,
-                failureSummary: reason ?? rejectionReport.failureSummary ?? 'verifier rejected',
-              })
-              updateJob(jobId, { activeRunId: currentRunId, runLineage: [...priorLineage, currentRunId] })
+              const priorLineage = readJson<PersistedJob>(jobPathFor(runnerJobId))?.runLineage ?? [loopHolder.runId]
+              currentRunId = loopCandidateGateway.reopenExploration(currentRunId, { ...rejectionReport, failureSummary: reason ?? rejectionReport.failureSummary ?? 'verifier rejected' })
+              loopRunHolders.set(currentRunId, { runId: currentRunId, runner: loopRunner, holder: loopHolder, request: { tool: 'meta_auto', kind: 'loop-exploration', runId: currentRunId, requirements: requirements ?? '' } })
+              updateJob(runnerJobId, { activeRunId: currentRunId, runLineage: [...priorLineage, currentRunId] })
               summary += `；rejected → reopened=${currentRunId}`
-            } else {
-              summary += `；maxAttempts=${maxAttempts} rejected=${rejections.join(' | ')}`
-            }
+            } else summary += `；maxAttempts=${maxAttempts} rejected=${rejections.join(' | ')}`
           }
-          return { summary }
-        })
+          const finalState = loopCandidateGateway.explorationStatus(currentRunId).state
+          if (finalState === 'paused' || finalState === 'waiting_for_input' || finalState === 'cancelled') {
+            return { summary, status: finalState === 'cancelled' ? 'cancelled' : finalState }
+          }
+          return { summary, status: 'finished' }
+        }
+        const jobId = scheduleRefine({
+          tool: 'meta_auto',
+          kind: 'loop-exploration',
+          runId: started.runId,
+          requirements: requirements ?? '',
+          ...(resumeTarget?.runId ? { resumedFromRunId: resumeTarget.runId } : {}),
+        }, () => loopRunner(jobId))
+        loopJobRunners.set(jobId, loopRunner)
+        loopRunHolders.set(started.runId, { runId: started.runId, runner: loopRunner, holder: loopHolder, request: {
+          tool: 'meta_auto', kind: 'loop-exploration', runId: started.runId, requirements: requirements ?? '', ...(resumeTarget?.runId ? { resumedFromRunId: resumeTarget.runId } : {}),
+        } })
         return cleanToolResult({
           mode: 'loop-exploration',
           enabled: config.allowLoopCandidates.enabled,
           accepted: true,
           jobId,
           runId: started.runId,
+          builderSessionId: jobId,
+          ...(resumeTarget?.runId ? { resumedFromRunId: resumeTarget.runId } : {}),
           state: 'scheduled',
-          note: 'Builder exploration is running in the background. Use meta_builder_status or meta_builder_message; a submitted proposal will go through verifier/gate.',
+          note: 'Builder 会话已在后台运行。使用 meta_builder_status、meta_builder_events 或 meta_builder_message 读取进度、接收追问和投递用户原话；submitted proposal 才会进入 verifier/gate。',
         }) as unknown as JsonValue
       }
       const runAuto = async (): Promise<{ outcome: Awaited<ReturnType<AutoPilot['step']>> }> => {
@@ -1075,6 +1192,13 @@ function cleanToolResult<T extends Record<string, unknown>>(value: T): T {
     if (item !== undefined) (cleaned as Record<string, unknown>)[key] = item
   }
   return cleaned
+}
+
+function parseBuilderEventCursor(value: string | undefined, fallbackSeq: number): { lineageId?: string; runId?: string; seq: number } {
+  if (!value) return { seq: fallbackSeq }
+  const parts = value.split(':')
+  if (parts.length !== 3 || !parts[0] || !parts[1] || !/^\d+$/.test(parts[2]!)) return { seq: fallbackSeq }
+  return { lineageId: parts[0], runId: parts[1], seq: Number(parts[2]) }
 }
 
 function loopRuntimeConfigured(cfg: MetaValidateConfig['allowLoopCandidates']): boolean {
@@ -1304,6 +1428,9 @@ function replayInstalledLoopTask(
     contractPass: Boolean(adjudication.evidence?.contractReport),
     regressionPass: Boolean(adjudication.evidence?.regressionReport),
     gatePass: adjudication.install?.state === 'installed',
+    // Rollback is a separate fault-injection proof; this successful replay
+    // does not silently claim that rollback was exercised.
+    rollbackRequired: false,
     beforeSnapshot: adjudication.install?.before,
     afterSnapshot: adjudication.install?.after,
     extra: { candidateId, evidence: adjudication.evidence ?? null },

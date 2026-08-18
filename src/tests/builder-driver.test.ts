@@ -113,4 +113,43 @@ describe('BuilderDriver', () => {
       expect.objectContaining({ kind: 'tool', action: 'write_world_model' }),
     ]))
   })
+
+  it('lets Builder acknowledge an Actor-mediated user message without exposing hidden reasoning', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-message-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    const message = kernel.receiveActorMessage(run.id, {
+      rawUserText: '请优先检查安全边界。',
+      actorMemo: '用户要求优先级调整。',
+    })
+    const prompts: string[] = []
+    const outcome = await new BuilderDriver({
+      llm: decisionsLlm([
+        { kind: 'tool', action: { name: 'acknowledge_message', messageId: message.id, status: 'accepted', understanding: '先检查安全边界。', nextAction: '读取相关源码。' } },
+        { kind: 'abort', reason: 'test complete' },
+      ], prompts),
+      provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task',
+    }).run(kernel, run.id)
+    expect(outcome.state).toBe('aborted')
+    expect(kernel.events(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'message_ack', payload: expect.objectContaining({ messageId: message.id, understanding: '先检查安全边界。' }) }),
+    ]))
+    expect(prompts[0]).toContain('请优先检查安全边界。')
+    expect(prompts[0]).toContain('用户要求优先级调整。')
+    expect(prompts[0]).toContain(message.id)
+  })
+
+  it('returns a typed waiting_for_input outcome and persists the question', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-input-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    const outcome = await new BuilderDriver({
+      llm: decisionsLlm([{ kind: 'tool', action: { name: 'request_input', question: '请确认目标优先级。' } }]),
+      provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task',
+    }).run(kernel, run.id)
+    expect(outcome).toMatchObject({ state: 'waiting_for_input', runId: run.id })
+    expect(kernel.events(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'needs_input', payload: expect.objectContaining({ question: '请确认目标优先级。' }) }),
+    ]))
+  })
 })

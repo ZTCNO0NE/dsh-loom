@@ -17,6 +17,9 @@ export function classifyBuilderProposal(value) {
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
             return { kind: 'malformed', reason: `${capability} proposal missing payload` };
         }
+        if (typeof payload.targetId !== 'string' || typeof payload.targetKind !== 'string') {
+            return { kind: 'malformed', reason: `${capability} payload missing targetId/targetKind` };
+        }
         return {
             kind: 'known',
             proposal: {
@@ -31,6 +34,9 @@ export function classifyBuilderProposal(value) {
         const payload = value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) ? value.payload : value.loop;
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
             return { kind: 'malformed', reason: `${capability} proposal missing payload` };
+        }
+        if (typeof payload.id !== 'string' || typeof payload.entry !== 'string') {
+            return { kind: 'malformed', reason: `${capability} payload missing id/entry` };
         }
         return {
             kind: 'known',

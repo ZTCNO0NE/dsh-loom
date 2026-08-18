@@ -403,3 +403,27 @@
 - 修复的真实 bug：① `adjudicateLoop` 在 importer 已 stage 后二次 stage（candidate already exists）；② importer 只拷包目录 → 沙箱构建缺 workspace 引用，改为 git archive 整树；③ candidate profile 依赖锚点缺 `dsh-invariants` → dependencyRoot 用仓库级 node_modules；④ 契约 overlay 的 `maxTokens` 被脱敏成 `***` → 重建 llm 行恢复 8192；⑤ 契约 overlay 继承主会话 workspaceRoot 导致 frames 落错处 → 删除，由 `DSH_META_VALIDATE_ROOT` 接管；⑥ `--regression` 的 fromzero-verify 相对路径以 dsh checkout 为 cwd → 固定为插件仓库根。
 - 产物：e2e16 workspace（builder runs/proposal/registry/install report/comparison）；确定性复现脚本 `eval/gate-e2e-verify.mjs`；快照 `run-records/2026-08-18-loop-e2e-proposal-adjudication-gate.json`。
 - 结论与剩余：proposal→裁决→gate→重跑链路真实闭环；Builder 自由探索的收敛性仍不稳（e2e17 attempt 1 卡重复 read_file 未提交），属模型行为问题，后续可引导"完成最小必要探索后尽早 submit"。
+
+### 2026-08-18 builder-boundary-hardening（异常回注、重载状态、比较证据、重复反馈）
+
+- 裁决阶段的 patch/loop/import/install 异常现在统一包装为 `rejected` report，交给现有 immutable reopen；不会再因异常直接把 job 终止为 `failed` 而丢失 Builder 反馈。
+- 宿主重载扫描持久 jobs，将无人执行的 `scheduled/running` 标记为 `interrupted`，保留 run/journal/evidence，避免假装后台任务仍在运行。当前策略是安全中断后由 actor 重新委托，不伪造自动续跑。
+- comparison schema 升为 v2 并增加 `rollbackRequired`。要求 rollback 证明但没有显式 `rollbackPass=true` 时，`admissible=false`；普通同任务 replay 明确声明 rollback 不在该 comparison 范围。
+- 重复工具动作改为按“动作相同且反馈 hash 连续不变”计数；文件或命令反馈发生变化时不会因重复动作提前 abort。
+- 本轮确定性验证：`npm run check`、`npm test` **139/139**、`npm run build`、`git diff --check` 全部通过。
+
+### 2026-08-18 actor-builder-durable-conversation（协议与继承）
+
+- Builder inbox 由单一 `text` 扩展为保留 `rawUserText`、`actorMemo`、`evidenceRefs` 的持久消息；旧 text 消息兼容读取。Actor memo 是非权威解释，Builder prompt 明确同时呈现原话、解释和待确认 message id。
+- 新增 Builder event log：run/state、actor message receipt、tool complete/fail、`message_ack`、`builder_update`、proposal draft。它只记录可审计摘要，不记录隐藏思维链；Gateway 与 `meta_builder_events(afterSeq, limit)` 为 Actor 提供 cursor 读取。
+- Builder 可调用 `acknowledge_message` 回传理解/下一步/追问，或 `publish_progress` 回传阶段摘要。Actor 保持用户接口和解释职责，用户的丰富控制仍通过开放自然语言 inbox 进入 Builder。
+- `previousRun` 资产清单绑定旧 run 的 workspace 与关键文件 hash；rejection 和 `meta_auto(... resumeJobId=...)` 创建新 immutable run 时都带入。host restart 不盲目重放中断命令，而是由 Actor 明确恢复到带资产的新 run。
+- 确定性覆盖：Kernel 原文/memo/event/继承、Driver 回执 prompt、Gateway event cursor/resume；`npm run check`、`npm test` **142/142**、`npm run build`、`git diff --check` 通过。真机多轮 Actor 会话验证待后续单独运行。
+
+### 2026-08-18 actor-builder-session-protocol-hardening（幂等、冻结提交与生命周期）
+
+- 消息协议：`idempotencyKey` 同内容重试只保留一条 inbox/event；同 key 不同原文、memo 或 evidence refs 直接拒绝。Builder 提交前必须对本 run 全部 Actor 消息产生 `message_ack`，否则不能冻结提交。
+- 事件协议：Gateway 返回 `lineageId:runId:seq` composite cursor；reopen 后旧 cursor 明确 `reset=true` 并从新 immutable run 的 `run_created` 开始，避免不同 run 的 seq 碰撞漏读。
+- 提交证据：`submission/manifest.json` 绑定 proposal/input/target-before hash 和 evidence/artifact refs。legacy staging draft 在 preflight 时补写同一 manifest；提交时发现声明产物或证据被修改/删除即 fail-closed。
+- 生命周期：新增 Kernel `pause` / `cancel`，Builder `request_input` 产生 typed `needs_input` event 并进入 `waiting_for_input`；Actor-facing `meta_builder_control` 的 `resume` 创建 `previousRun` 资产继承的新 attempt，并重新使用完整 Builder→裁决→gate executor，不重放中断副作用。job 如实落盘 paused/waiting_for_input/cancelled。
+- 确定性验证：`npm run check`、`npm test` **148/148**、`npm run build`、`git diff --check` 全绿；所有测试均使用临时隔离目录，未调用官方 API、未触碰生产/profile。仍需单独留档一次真实 Actor 多轮 pause→message→resume 演示。

@@ -102,6 +102,9 @@ export function classifyBuilderProposal(value: Record<string, unknown>): Proposa
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return { kind: 'malformed', reason: `${capability} proposal missing payload` }
     }
+    if (typeof (payload as Record<string, unknown>).targetId !== 'string' || typeof (payload as Record<string, unknown>).targetKind !== 'string') {
+      return { kind: 'malformed', reason: `${capability} payload missing targetId/targetKind` }
+    }
     return {
       kind: 'known',
       proposal: {
@@ -116,6 +119,9 @@ export function classifyBuilderProposal(value: Record<string, unknown>): Proposa
     const payload = value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) ? value.payload : value.loop
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return { kind: 'malformed', reason: `${capability} proposal missing payload` }
+    }
+    if (typeof (payload as Record<string, unknown>).id !== 'string' || typeof (payload as Record<string, unknown>).entry !== 'string') {
+      return { kind: 'malformed', reason: `${capability} payload missing id/entry` }
     }
     return {
       kind: 'known',

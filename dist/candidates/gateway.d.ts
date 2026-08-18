@@ -1,6 +1,6 @@
 import { CandidateRegistry } from './index.js';
 import type { LlmStreamLike } from '../meta/propose.js';
-import { type BuilderRunState } from '../builder/kernel.js';
+import { type BuilderMessageInput, type BuilderRunState } from '../builder/kernel.js';
 export interface LoopCandidateGatewayOptions {
     enabled: boolean;
     root: string;
@@ -22,7 +22,7 @@ export interface LoopExplorationResult {
     accepted: boolean;
     mode: 'exploration';
     runId: string;
-    state: 'submitted' | 'aborted';
+    state: 'submitted' | 'aborted' | 'paused' | 'cancelled' | 'waiting_for_input';
     proposal?: Record<string, unknown>;
     modelTurns: number;
     toolSteps: number;
@@ -43,10 +43,12 @@ export type LoopExplorationStart = {
 /** A bounded projection of durable Builder state suitable for actor tools. */
 export interface LoopExplorationStatus {
     runId: string;
+    lineageId: string;
     state: BuilderRunState;
     modelTurns: number;
     toolSteps: number;
     inboxMessages: number;
+    pendingMessageIds: string[];
     proposal: {
         available: boolean;
         hash?: string;
@@ -59,6 +61,12 @@ export interface LoopExplorationStatus {
         action: string;
         result?: Record<string, unknown>;
         error?: string;
+    }>;
+    eventTail: Array<{
+        seq: number;
+        at: string;
+        kind: string;
+        payload: Record<string, unknown>;
     }>;
 }
 /**
@@ -80,12 +88,43 @@ export declare class LoopCandidateGateway {
     /** Compatibility helper for callers that intentionally want to wait. */
     explore(requirements: string, context?: Record<string, unknown>): Promise<LoopExplorationResult>;
     explorationStatus(runId: string): LoopExplorationStatus;
-    messageExploration(runId: string, text: string): {
+    events(runId: string, cursor?: {
+        lineageId?: string;
+        runId?: string;
+        seq?: number;
+    }, limit?: number): {
+        runId: string;
+        lineageId: string;
+        events: Array<{
+            seq: number;
+            at: string;
+            kind: string;
+            lineageId: string;
+            runId: string;
+            payload: Record<string, unknown>;
+        }>;
+        cursor: string;
+        reset: boolean;
+    };
+    messageExploration(runId: string, input: string | BuilderMessageInput): {
         accepted: true;
         runId: string;
+        messageId: string;
+        deduplicated: boolean;
         state: BuilderRunState;
         queuedAt: string;
     };
+    /** Pause/cancel are deterministic kernel transitions; resume is a new run. */
+    controlExploration(runId: string, action: 'pause' | 'cancel'): {
+        runId: string;
+        lineageId: string;
+        state: BuilderRunState;
+    };
+    /**
+     * Never replays a possibly in-flight command. The new attempt inherits the
+     * old assets by hash and copies prior actor messages for independent review.
+     */
+    resumeExploration(runId: string): LoopExplorationStart;
     /**
      * Verifier/gate rejection reopens an immutable Builder run with the report
      * as previous-attempt input; the actor inbox carries over so follow-up

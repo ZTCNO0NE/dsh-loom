@@ -4,6 +4,16 @@ import { atomicWriteJson, sha256 } from '../protocol/index.js';
 import { BuilderDriver } from '../builder/driver.js';
 import { BuilderKernel } from '../builder/kernel.js';
 import { LOOP_EVOLUTION_CAPABILITY } from '../builder/capabilities.js';
+function summarizeEvent(event) {
+    return {
+        seq: event.seq,
+        at: event.at,
+        kind: event.kind,
+        lineageId: event.lineageId,
+        runId: event.runId,
+        payload: JSON.parse(JSON.stringify(event.payload, (_key, value) => typeof value === 'string' && value.length > 2_000 ? `${value.slice(0, 2_000)}…[truncated]` : value)),
+    };
+}
 function summarizeJournal(entry) {
     const result = entry.result === undefined ? undefined : JSON.parse(JSON.stringify(entry.result, (_key, value) => {
         if (typeof value === 'string' && value.length > 2_000)
@@ -38,11 +48,41 @@ export class LoopCandidateGateway {
         if (!llm)
             throw new Error('loop exploration: no independent builder llm available');
         const kernel = new BuilderKernel(this.options.root, `${this.options.sessionId}:loop-exploration`);
+        const resumeFromRunId = typeof context.resumeFromRunId === 'string' ? context.resumeFromRunId : undefined;
+        const previousRun = resumeFromRunId ? kernel.previousRunReference(resumeFromRunId) : undefined;
         const run = kernel.create({
             kind: 'loop_candidate',
             actor: { requirements, context },
             targetBefore: { registry: this.status(), context },
+            ...(previousRun ? {
+                previousRun,
+                lineageId: previousRun.lineageId,
+                parentRunId: previousRun.runId,
+                previousAttempt: {
+                    source: 'host-restart-resume',
+                    priorRunId: resumeFromRunId,
+                    observedAt: new Date().toISOString(),
+                    note: 'A host restart interrupted the prior attempt. Reuse or discard its read-only assets as you judge appropriate.',
+                },
+            } : {}),
         });
+        // The initiating user request is a normal durable conversation message as
+        // well as part of the immutable actor snapshot, so Builder can explicitly
+        // acknowledge or question it on its first micro-turn.
+        if (requirements.trim()) {
+            const actorMemo = typeof context.actorAssessment === 'string' ? context.actorAssessment : undefined;
+            const evidencePack = context.evidencePack;
+            const evidenceRefs = evidencePack && typeof evidencePack === 'object' && !Array.isArray(evidencePack)
+                && typeof evidencePack.manifestPath === 'string'
+                ? [evidencePack.manifestPath]
+                : undefined;
+            kernel.receiveActorMessage(run.id, {
+                rawUserText: requirements,
+                ...(actorMemo ? { actorMemo } : {}),
+                ...(evidenceRefs ? { evidenceRefs } : {}),
+                idempotencyKey: `initial:${run.id}`,
+            });
+        }
         return { accepted: true, mode: 'exploration', runId: run.id, state: 'created' };
     }
     /**
@@ -106,27 +146,84 @@ export class LoopCandidateGateway {
         const context = kernel.context(runId);
         const proposal = kernel.proposal(runId);
         const journal = context.journal;
+        const acknowledged = new Set(context.events
+            .filter((event) => event.kind === 'message_ack' && typeof event.payload.messageId === 'string')
+            .map((event) => event.payload.messageId));
         return {
             runId,
+            lineageId: context.run.lineageId,
             state: context.run.state,
             modelTurns: journal.filter((entry) => entry.kind === 'model' && entry.action === 'decision').length,
             toolSteps: journal.filter((entry) => entry.kind === 'tool').length,
             inboxMessages: context.messages.length,
+            pendingMessageIds: context.messages.filter((message) => !acknowledged.has(message.id)).map((message) => message.id),
             proposal: proposal
                 ? { available: true, hash: sha256(proposal), keys: Object.keys(proposal).slice(0, 20) }
                 : { available: false },
             journalTail: journal.slice(-12).map((entry) => summarizeJournal(entry)),
+            eventTail: context.events.slice(-12).map((event) => summarizeEvent(event)),
         };
     }
-    messageExploration(runId, text) {
-        const normalized = text.trim();
+    events(runId, cursor = {}, limit = 50) {
+        const kernel = new BuilderKernel(this.options.root, `${this.options.sessionId}:loop-exploration`);
+        const run = kernel.load(runId);
+        const reset = Boolean(cursor.runId && (cursor.runId !== runId || cursor.lineageId !== run.lineageId));
+        const afterSeq = reset ? 0 : Math.max(0, cursor.seq ?? 0);
+        const events = kernel.events(runId, afterSeq, limit).map((event) => summarizeEvent(event));
+        const nextSeq = events.at(-1)?.seq ?? afterSeq;
+        return { runId, lineageId: run.lineageId, events, cursor: `${run.lineageId}:${runId}:${nextSeq}`, reset };
+    }
+    messageExploration(runId, input) {
+        const rawUserText = typeof input === 'string' ? input : input.rawUserText;
+        const normalized = rawUserText.trim();
         if (!normalized)
             throw new Error('builder message must not be empty');
         if (normalized.length > 12_000)
             throw new Error('builder message exceeds 12000 characters');
+        if (typeof input !== 'string' && input.actorMemo !== undefined && input.actorMemo.length > 12_000)
+            throw new Error('builder actor memo exceeds 12000 characters');
+        if (typeof input !== 'string' && (input.evidenceRefs?.some((ref) => ref.length > 4_000) ?? false))
+            throw new Error('builder evidence reference exceeds 4000 characters');
+        if (typeof input !== 'string' && input.idempotencyKey !== undefined && (input.idempotencyKey.length < 1 || input.idempotencyKey.length > 200))
+            throw new Error('builder idempotency key must be 1-200 characters');
         const kernel = new BuilderKernel(this.options.root, `${this.options.sessionId}:loop-exploration`);
-        const message = kernel.receiveActorMessage(runId, normalized);
-        return { accepted: true, runId, state: kernel.load(runId).state, queuedAt: message.at };
+        const message = kernel.receiveActorMessage(runId, typeof input === 'string' ? normalized : { ...input, rawUserText: normalized });
+        return { accepted: true, runId, messageId: message.id, deduplicated: message.deduplicated === true, state: kernel.load(runId).state, queuedAt: message.at };
+    }
+    /** Pause/cancel are deterministic kernel transitions; resume is a new run. */
+    controlExploration(runId, action) {
+        const kernel = new BuilderKernel(this.options.root, `${this.options.sessionId}:loop-exploration`);
+        const run = kernel.control(runId, action);
+        return { runId, lineageId: run.lineageId, state: run.state };
+    }
+    /**
+     * Never replays a possibly in-flight command. The new attempt inherits the
+     * old assets by hash and copies prior actor messages for independent review.
+     */
+    resumeExploration(runId) {
+        const kernel = new BuilderKernel(this.options.root, `${this.options.sessionId}:loop-exploration`);
+        const prior = kernel.context(runId);
+        if (!['paused', 'waiting_for_input', 'cancelled'].includes(prior.run.state)) {
+            throw new Error(`only paused, waiting_for_input, or cancelled runs may resume: ${prior.run.state}`);
+        }
+        const requirements = typeof prior.input.actor.requirements === 'string' ? prior.input.actor.requirements : '';
+        const context = prior.input.actor.context && typeof prior.input.actor.context === 'object' && !Array.isArray(prior.input.actor.context)
+            ? prior.input.actor.context
+            : {};
+        const started = this.startExploration(requirements, { ...context, resumeFromRunId: runId });
+        if (!started.accepted)
+            return started;
+        for (const message of prior.messages) {
+            if (message.idempotencyKey?.startsWith('initial:'))
+                continue;
+            kernel.receiveActorMessage(started.runId, {
+                rawUserText: message.rawUserText,
+                ...(message.actorMemo ? { actorMemo: message.actorMemo } : {}),
+                ...(message.evidenceRefs ? { evidenceRefs: message.evidenceRefs } : {}),
+                ...(message.idempotencyKey ? { idempotencyKey: message.idempotencyKey } : {}),
+            });
+        }
+        return started;
     }
     /**
      * Verifier/gate rejection reopens an immutable Builder run with the report
@@ -140,8 +237,14 @@ export class LoopCandidateGateway {
         }
         const messages = kernel.context(runId).messages;
         const next = kernel.reopenFromRejection(runId, report);
-        for (const message of messages)
-            kernel.receiveActorMessage(next.id, message.text);
+        for (const message of messages) {
+            kernel.receiveActorMessage(next.id, {
+                rawUserText: message.rawUserText,
+                ...(message.actorMemo ? { actorMemo: message.actorMemo } : {}),
+                ...(message.evidenceRefs ? { evidenceRefs: message.evidenceRefs } : {}),
+                ...(message.idempotencyKey ? { idempotencyKey: message.idempotencyKey } : {}),
+            });
+        }
         return next.id;
     }
     status() {
