@@ -3,11 +3,39 @@ import { spawnSync } from 'node:child_process'
 import { join, relative, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { appendJsonl, atomicWriteJson, readJson, readJsonl, sha256, workspaceDir } from '../protocol/index.js'
+import { BuilderCapabilityRuntimeRegistry, type BuilderCapabilityToolContext } from './capabilities.js'
+import {
+  addObservedArtifact,
+  createBuilderProvenance,
+  inspectBuilderFile,
+  searchBuilderText,
+  traceBuilderArtifact,
+  type BuilderProvenanceGraph,
+} from './provenance.js'
 
 export type BuilderRunState = 'created' | 'exploring' | 'preflighting' | 'ready_to_submit' | 'waiting_for_input' | 'paused' | 'cancelled' | 'submitted' | 'aborted'
+/**
+ * Observable evidence-production phase. This is deliberately not an allow
+ * list: the Kernel records meaningful milestones and only rejects explicit
+ * illegal requests (for example malformed clarification/verification).
+ */
+export type BuilderPhase =
+  | 'observing'
+  | 'hypothesizing'
+  | 'baseline_simulating'
+  | 'exploring'
+  | 'candidate_simulating'
+  | 'ready_to_submit'
+  | 'waiting_for_actor'
+  | 'waiting_for_verification'
+  | 'submitted'
+  | 'aborted'
 export type BuilderRunKind = 'patch' | 'loop_candidate'
+export type BuilderRunMode = 'diagnosis' | 'implementation'
 export type BuilderJournalKind = 'model' | 'tool' | 'error' | 'snapshot' | 'state'
-export type BuilderEventKind = 'run_created' | 'state_changed' | 'actor_message_received' | 'tool_completed' | 'tool_failed' | 'message_ack' | 'builder_update' | 'needs_input' | 'proposal_drafted'
+export type BuilderEventKind = 'run_created' | 'state_changed' | 'actor_message_received' | 'tool_completed' | 'tool_failed' | 'message_ack' | 'builder_update' | 'needs_input' | 'proposal_drafted' | 'diagnosis_report'
+/** A public checkpoint owed after the Builder has stopped producing evidence. */
+export type BuilderProgressRequirement = 'none' | 'declare_direction' | 'produce_evidence'
 
 /** Actor-provided context is open natural language; only its transport is structured. */
 export interface BuilderMessageInput {
@@ -20,6 +48,7 @@ export interface BuilderMessageInput {
 
 export interface BuilderRunInput {
   kind?: BuilderRunKind
+  mode?: BuilderRunMode
   actor: Record<string, unknown>
   targetBefore: Record<string, unknown>
   previousAttempt?: Record<string, unknown>
@@ -46,6 +75,55 @@ export interface BuilderJournalEntry {
   inputHash: string
   result?: Record<string, unknown>
   error?: string
+}
+
+/**
+ * The exact model input is an auditable input artifact, not a reasoning trace.
+ * The prompt body is stored after secret-like value redaction; promptHash and
+ * promptBytes still bind the redacted view to the exact bytes sent.
+ */
+export interface BuilderPromptVisibleEntry {
+  schemaVersion: 1
+  seq: number
+  at: string
+  promptHash: string
+  promptBytes: number
+  visibleState: BuilderRunState
+  phase: BuilderPhase
+  progressStateVersion?: number
+  progressStateHash?: string
+  lastJournalAction?: string
+  lastToolResultHash?: string
+  pendingMessageIds: string[]
+  prompt: string
+  redacted: boolean
+}
+
+/**
+ * Small, public working memory for one Builder run.
+ * This is not a chain-of-thought field: it contains only declared direction,
+ * durable facts and kernel-observed progress signals for the next turn.
+ */
+export interface BuilderProgressState {
+  schemaVersion: 1
+  version: number
+  state: BuilderRunState
+  phase: BuilderPhase
+  objective?: string
+  hypothesis?: string
+  known: string[]
+  unknowns: string[]
+  nextIntent?: string
+  lastAction?: string
+  lastObservationHash?: string
+  unchangedReadStreak: number
+  /**
+   * A deterministic, temporary obligation raised only by the experimental
+   * no-progress guard. It is public state, not a hidden reasoning signal.
+   */
+  progressRequirement: BuilderProgressRequirement
+  pendingMessageIds: string[]
+  updatedAt: string
 }
 
 /** An inbound observation from the actor, delivered between Builder turns. */
@@ -91,12 +169,26 @@ export interface BuilderRunRecord {
   schemaVersion: 1
   id: string
   kind: BuilderRunKind
+  mode: BuilderRunMode
   state: BuilderRunState
+  phase: BuilderPhase
   createdAt: string
   updatedAt: string
   inputHash: string
   lineageId: string
   parentRunId?: string
+}
+
+/** Optional experimental progress guard; omitted means legacy free exploration. */
+export interface BuilderKernelOptions {
+  /** Reject an unchanged repeated read at this streak instead of waiting for the abort guard. */
+  repeatReadRejectAfter?: number
+  /**
+   * When enabled, a rejected unchanged read also creates a two-step progress
+   * checkpoint: declare a direction, then produce fresh evidence. Defaults to
+   * false so existing free exploration remains unchanged.
+   */
+  enforceProgressCheckpoints?: boolean
 }
 
 export type BuilderDecision =
@@ -107,24 +199,43 @@ export type BuilderDecision =
   | { kind: 'abort'; reason: string }
 
 export type BuilderToolAction =
-  | { name: 'read_input'; document: 'actor' | 'target_before' | 'previous_attempt' | 'previous_run' | 'world_model' | 'plan' }
+  | { name: 'read_input'; document: 'actor' | 'target_before' | 'previous_attempt' | 'previous_run' | 'world_model' | 'plan' | 'progress_state' | 'context_index' | 'provenance' }
   | { name: 'read_journal'; limit: number }
   | { name: 'write_world_model'; value: Record<string, unknown> }
   | { name: 'write_plan'; value: Record<string, unknown> }
+  /** Diagnosis-first pass output; this never changes a live target. */
+  | { name: 'write_diagnosis_report'; report: Record<string, unknown> }
   /** Read-only host exploration. Deployment decides the readable scope. */
   | { name: 'read_file'; path: string }
   | { name: 'list_directory'; path: string }
+  /** Search text across explicit read-only roots without invoking a shell. */
+  | { name: 'search_text'; query: string; roots?: string[]; maxResults?: number }
+  /** Inspect a source artifact's interface, imports/exports, hash and bounded preview. */
+  | { name: 'inspect_file'; path: string }
+  /** Follow factual producer/consumer/test/report edges; never returns a repair recommendation. */
+  | { name: 'trace_artifact'; artifact: string }
   /** Builder-owned, persistent multi-file scratch space. */
   | { name: 'write_workspace_file'; path: string; content: string }
   | { name: 'read_workspace_file'; path: string }
   /** Trusted-development command tool; stdout/stderr are durable feedback. */
-  | { name: 'run_workspace_command'; command: string; args: string[]; timeoutMs?: number }
+  | { name: 'run_workspace_command'; command: string; args?: string[]; timeoutMs?: number }
   /** A receipt or clarification request for an Actor-delivered message. */
   | { name: 'acknowledge_message'; messageId: string; status: string; understanding: string; nextAction?: string; question?: string }
   /** Actor-visible progress summary; never a hidden model-reasoning trace. */
   | { name: 'publish_progress'; summary: string; phase?: string; question?: string }
   /** A typed, durable question. The Actor owns asking the user and resuming work. */
-  | { name: 'request_input'; question: string; context?: string }
+  | {
+    name: 'request_input'
+    question: string
+    context?: string
+    kind?: 'clarification' | 'choice' | 'verification'
+    options?: Array<{ id: string; label: string; description?: string }>
+    whyNow?: string
+    evidenceRefs?: string[]
+    blocking?: boolean
+  }
+  /** Capability-owned execution. The kernel records the call but does not interpret its meaning. */
+  | { name: 'invoke_capability'; capability: string; tool: string; input: Record<string, unknown> }
   /** Generic frozen proposal for a capability; it never applies a target change. */
   | { name: 'write_submission'; proposal: Record<string, unknown> }
   /** Typed draft write; this is deliberately not a general filesystem tool. */
@@ -142,9 +253,14 @@ export function builderRunPaths(root: string, sessionId: string, id: string) {
     targetBefore: join(base, 'input', 'target-before.json'),
     previousAttempt: join(base, 'input', 'previous-attempt.json'),
     previousRun: join(base, 'input', 'previous-run.json'),
+    diagnosisReport: join(base, 'state', 'diagnosis-report.json'),
+    contextIndex: join(base, 'state', 'context-index.json'),
+    provenance: join(base, 'state', 'provenance.json'),
     worldModel: join(base, 'state', 'world-model.json'),
     plan: join(base, 'state', 'plan.json'),
+    progressState: join(base, 'state', 'progress-state.json'),
     journal: join(base, 'state', 'journal.jsonl'),
+    promptVisible: join(base, 'state', 'prompt-visible.jsonl'),
     events: join(base, 'state', 'events.jsonl'),
     snapshots: join(base, 'state', 'snapshots.jsonl'),
     workspace: join(base, 'workspace'),
@@ -158,7 +274,12 @@ export function builderRunPaths(root: string, sessionId: string, id: string) {
 
 /** Durable, builder-owned run state. The kernel—not an LLM—records every transition. */
 export class BuilderKernel {
-  constructor(private readonly root: string, private readonly sessionId: string) {}
+  constructor(
+    private readonly root: string,
+    private readonly sessionId: string,
+    private readonly capabilityRuntimes: BuilderCapabilityRuntimeRegistry = new BuilderCapabilityRuntimeRegistry(),
+    private readonly options: BuilderKernelOptions = {},
+  ) {}
 
   create(input: BuilderRunInput): BuilderRunRecord {
     const id = `builder-${Date.now()}-${randomUUID().slice(0, 8)}`
@@ -168,7 +289,9 @@ export class BuilderKernel {
       schemaVersion: 1,
       id,
       kind: input.kind ?? 'patch',
+      mode: input.mode ?? 'implementation',
       state: 'created',
+      phase: 'observing',
       createdAt: now,
       updatedAt: now,
       inputHash,
@@ -183,27 +306,50 @@ export class BuilderKernel {
     atomicWriteJson(paths.targetBefore, input.targetBefore)
     atomicWriteJson(paths.previousAttempt, input.previousAttempt ?? null)
     atomicWriteJson(paths.previousRun, input.previousRun ?? null)
+    atomicWriteJson(paths.provenance, createBuilderProvenance({
+      runId: id,
+      actorPath: paths.actor,
+      targetBeforePath: paths.targetBefore,
+      previousAttemptPath: paths.previousAttempt,
+      previousRunPath: paths.previousRun,
+      workspacePath: paths.workspace,
+      proposalPath: paths.submissionDraft,
+      submissionManifestPath: paths.submissionManifest,
+      actor: input.actor,
+      ...(input.previousAttempt ? { previousAttempt: input.previousAttempt } : {}),
+      ...(input.previousRun ? { previousRun: input.previousRun } : {}),
+    }))
+    atomicWriteJson(paths.contextIndex, buildContextIndex(paths, input, id))
     atomicWriteJson(paths.worldModel, { schemaVersion: 1, version: 0, facts: [], unknowns: [], hash: sha256({}) })
     atomicWriteJson(paths.plan, { schemaVersion: 1, state: 'created', steps: [] })
+    atomicWriteJson(paths.progressState, initialProgressState(record, input))
     atomicWriteJson(paths.record, record)
     this.append(id, 'state', 'create', { state: 'created', inputHash })
-    this.emit(id, 'run_created', { runId: id, state: 'created' })
+    this.emit(id, 'run_created', { runId: id, state: 'created', mode: record.mode })
     return record
   }
 
   load(id: string): BuilderRunRecord {
     const record = readJson<BuilderRunRecord>(builderRunPaths(this.root, this.sessionId, id).record)
     if (!record || record.schemaVersion !== 1) throw new Error(`unknown builder run: ${id}`)
-    return { ...record, lineageId: record.lineageId || `lineage-${record.id}` }
+    return {
+      ...record,
+      mode: record.mode ?? 'implementation',
+      lineageId: record.lineageId || `lineage-${record.id}`,
+      // Runs created before phase was introduced remain readable and acquire
+      // a conservative phase without mutating their historical journal.
+      phase: record.phase ?? phaseForState(record.state),
+    }
   }
 
   transition(id: string, state: BuilderRunState): BuilderRunRecord {
     const record = this.load(id)
     if (isTerminalState(record.state)) throw new Error(`builder run is terminal: ${record.state}`)
-    const next = { ...record, state, updatedAt: new Date().toISOString() }
+    const next = { ...record, state, phase: phaseForState(state, record.phase), updatedAt: new Date().toISOString() }
     atomicWriteJson(builderRunPaths(this.root, this.sessionId, id).record, next)
+    this.updateProgress(id, { state, phase: next.phase })
     this.append(id, 'state', `transition:${state}`, { from: record.state, to: state })
-    this.emit(id, 'state_changed', { from: record.state, to: state })
+    this.emit(id, 'state_changed', { from: record.state, to: state, phase: next.phase })
     return next
   }
 
@@ -221,20 +367,106 @@ export class BuilderKernel {
     return entry
   }
 
+  /** Persist the visible prompt input separately from the journal/decision log. */
+  recordPromptVisible(id: string, input: {
+    prompt: string
+    promptHash: string
+    promptBytes: number
+    visibleState: BuilderRunState
+    lastJournalAction?: string
+    lastToolResultHash?: string
+    pendingMessageIds: string[]
+    progressStateVersion?: number
+    progressStateHash?: string
+  }): BuilderPromptVisibleEntry {
+    const path = builderRunPaths(this.root, this.sessionId, id).promptVisible
+    const entry: BuilderPromptVisibleEntry = {
+      schemaVersion: 1,
+      seq: readJsonl<BuilderPromptVisibleEntry>(path).length + 1,
+      at: new Date().toISOString(),
+      promptHash: input.promptHash,
+      promptBytes: input.promptBytes,
+      visibleState: input.visibleState,
+      phase: this.load(id).phase,
+      ...(input.progressStateVersion === undefined ? {} : { progressStateVersion: input.progressStateVersion }),
+      ...(input.progressStateHash ? { progressStateHash: input.progressStateHash } : {}),
+      ...(input.lastJournalAction ? { lastJournalAction: input.lastJournalAction } : {}),
+      ...(input.lastToolResultHash ? { lastToolResultHash: input.lastToolResultHash } : {}),
+      pendingMessageIds: [...input.pendingMessageIds],
+      prompt: redactPrompt(input.prompt),
+      redacted: redactPrompt(input.prompt) !== input.prompt,
+    }
+    appendJsonl(path, entry)
+    return entry
+  }
+
+  /** Read the compact working memory used to recover a fresh model turn. */
+  progressState(id: string): BuilderProgressState {
+    const paths = builderRunPaths(this.root, this.sessionId, id)
+    const existing = readJson<BuilderProgressState>(paths.progressState)
+    if (existing && existing.schemaVersion === 1) return normalizeProgressState(existing, this.load(id))
+    const context = this.contextWithoutProgress(id)
+    const recovered = initialProgressState(context.run, {
+      actor: context.input.actor,
+      targetBefore: context.input.targetBefore,
+      ...(context.input.previousAttempt ? { previousAttempt: context.input.previousAttempt } : {}),
+      ...(context.input.previousRun ? { previousRun: context.input.previousRun } : {}),
+    })
+    atomicWriteJson(paths.progressState, recovered)
+    return recovered
+  }
+
   /** Record the model's declared decision without trusting it to write audit data. */
   recordDecision(id: string, decision: BuilderDecision): void {
     const result: Record<string, unknown> = { kind: decision.kind }
     if (decision.kind === 'tool') {
       result.action = decision.action.name
       result.actionHash = sha256(decision.action)
+      if (decision.action.name === 'invoke_capability') {
+        result.capability = decision.action.capability
+        result.capabilityTool = decision.action.tool
+      }
     }
     if (decision.kind === 'continue') result.summary = decision.summary.slice(0, 1000)
     if (decision.kind === 'submit') result.draftHash = sha256(this.submissionDraft(id) ?? null)
     if (decision.kind === 'abort') result.reason = decision.reason.slice(0, 1000)
     this.append(id, 'model', 'decision', result)
+    this.updateProgress(id, {
+      lastAction: decision.kind === 'tool' ? `tool:${decision.action.name}` : decision.kind,
+      ...(decision.kind === 'submit' ? { nextIntent: 'await independent verifier and gate decision' } : {}),
+      ...(decision.kind === 'abort' ? { nextIntent: 'stop; preserve evidence for actor review' } : {}),
+    })
   }
 
-  context(id: string): { run: BuilderRunRecord; input: BuilderRunInput; messages: BuilderMessage[]; journal: BuilderJournalEntry[]; events: BuilderEvent[] } {
+  context(id: string): { run: BuilderRunRecord; input: BuilderRunInput; messages: BuilderMessage[]; journal: BuilderJournalEntry[]; events: BuilderEvent[]; progressState: BuilderProgressState; diagnosisReport: Record<string, unknown> | null; contextIndex: Record<string, unknown>; provenance: BuilderProvenanceGraph } {
+    const paths = builderRunPaths(this.root, this.sessionId, id)
+    const actor = readJson<Record<string, unknown>>(paths.actor) ?? {}
+    const targetBefore = readJson<Record<string, unknown>>(paths.targetBefore) ?? {}
+    const previousAttempt = readJson<Record<string, unknown> | null>(paths.previousAttempt) ?? null
+    const previousRun = readJson<BuilderPreviousRunRef | null>(paths.previousRun) ?? null
+    const diagnosisReport = readJson<Record<string, unknown> | null>(paths.diagnosisReport) ?? null
+    const contextIndex = readJson<Record<string, unknown>>(paths.contextIndex) ?? {}
+    const provenance = readJson<BuilderProvenanceGraph>(paths.provenance) ?? createBuilderProvenance({
+      runId: id, actorPath: paths.actor, targetBeforePath: paths.targetBefore,
+      previousAttemptPath: paths.previousAttempt, previousRunPath: paths.previousRun,
+      workspacePath: paths.workspace, proposalPath: paths.submissionDraft,
+      submissionManifestPath: paths.submissionManifest, actor,
+      ...(previousAttempt ? { previousAttempt } : {}), ...(previousRun ? { previousRun } : {}),
+    })
+    return {
+      run: this.load(id),
+      input: { actor, targetBefore, ...(previousAttempt ? { previousAttempt } : {}), ...(previousRun ? { previousRun } : {}) },
+      messages: this.messages(id),
+      journal: readJsonl(paths.journal),
+      events: readJsonl(paths.events),
+      progressState: this.progressState(id),
+      diagnosisReport,
+      contextIndex,
+      provenance,
+    }
+  }
+
+  private contextWithoutProgress(id: string): { run: BuilderRunRecord; input: BuilderRunInput } {
     const paths = builderRunPaths(this.root, this.sessionId, id)
     const actor = readJson<Record<string, unknown>>(paths.actor) ?? {}
     const targetBefore = readJson<Record<string, unknown>>(paths.targetBefore) ?? {}
@@ -243,9 +475,6 @@ export class BuilderKernel {
     return {
       run: this.load(id),
       input: { actor, targetBefore, ...(previousAttempt ? { previousAttempt } : {}), ...(previousRun ? { previousRun } : {}) },
-      messages: this.messages(id),
-      journal: readJsonl(paths.journal),
-      events: readJsonl(paths.events),
     }
   }
 
@@ -305,6 +534,13 @@ export class BuilderKernel {
     appendJsonl(builderRunPaths(this.root, this.sessionId, id).messages, message)
     this.append(id, 'state', 'actor_message', { messageId: message.id, bytes: Buffer.byteLength(rawUserText, 'utf8'), messageHash: sha256(rawUserText), ...(idempotencyKey ? { idempotencyKey } : {}) })
     this.emit(id, 'actor_message_received', { messageId: message.id, rawUserHash: sha256(rawUserText), ...(actorMemo ? { actorMemoHash: sha256(actorMemo) } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) })
+    const progress = this.progressState(id)
+    this.updateProgress(id, {
+      objective: progress.objective ?? rawUserText.slice(0, 2_000),
+      pendingMessageIds: [...new Set([...progress.pendingMessageIds, message.id])],
+      nextIntent: 'acknowledge the latest actor message and reassess the hypothesis',
+      lastAction: 'actor_message_received',
+    })
     // A reply is durable input only. The Actor must explicitly resume the
     // background job; this prevents a message arrival from racing a worker
     // that has already returned at the needs_input boundary.
@@ -346,6 +582,7 @@ export class BuilderKernel {
       return { state: 'aborted' }
     }
     if (decision.kind === 'submit') {
+      if (run.mode === 'diagnosis') throw new Error('diagnosis pass cannot submit; write a diagnosis report and await user direction')
       const draft = this.submissionDraft(id)
       if (!draft) throw new Error('builder submission requires a proposal draft')
       const pendingMessages = this.unacknowledgedMessageIds(id)
@@ -375,7 +612,62 @@ export class BuilderKernel {
     try {
       if (decision.kind === 'tool') {
         const actionHash = sha256(decision.action)
+        const progress = this.progressState(id)
+        if (this.options.enforceProgressCheckpoints
+          && progress.progressRequirement !== 'none'
+          && !satisfiesProgressRequirement(progress.progressRequirement, decision.action.name)) {
+          const reason = `progress checkpoint required: ${progress.progressRequirement}; action ${decision.action.name} does not produce the required evidence`
+          this.append(id, 'error', decision.action.name, {
+            actionHash, noProgress: true, guard: 'progressCheckpoint', progressRequirement: progress.progressRequirement,
+          }, reason)
+          this.updateProgress(id, {
+            nextIntent: progressRequirementIntent(progress.progressRequirement),
+            lastAction: `guard:${progress.progressRequirement}`,
+          })
+          throw new Error(reason)
+        }
+        if (this.options.enforceProgressCheckpoints && progress.progressRequirement === 'declare_direction') {
+          const invalidCheckpoint = progressCheckpointValidation(decision.action)
+          if (invalidCheckpoint) {
+            const reason = `progress checkpoint is incomplete: ${invalidCheckpoint}`
+            this.append(id, 'error', decision.action.name, {
+              actionHash, noProgress: true, guard: 'progressCheckpoint', progressRequirement: progress.progressRequirement,
+            }, reason)
+            this.updateProgress(id, {
+              nextIntent: 'write a falsifiable hypothesis and nextIntent in world_model/plan before reading again',
+              lastAction: 'guard:declare_direction',
+            })
+            throw new Error(reason)
+          }
+        }
         const repeated = repeatedToolWithoutProgress(readJsonl<BuilderJournalEntry>(builderRunPaths(this.root, this.sessionId, id).journal), actionHash)
+        const repeatReadThreshold = this.options.repeatReadRejectAfter === undefined
+          ? undefined
+          : Math.max(1, Math.floor(this.options.repeatReadRejectAfter))
+        if (repeatReadThreshold !== undefined
+          && isReadAction(decision.action.name)
+          // Use the run-wide unchanged-read streak, not only one exact path.
+          // A model can otherwise evade the guard by alternating two stale
+          // files while still producing no new evidence.
+          && this.progressState(id).unchangedReadStreak >= Math.max(0, repeatReadThreshold - 1)) {
+          const progress = this.progressState(id)
+          const requirement = this.options.enforceProgressCheckpoints
+            ? progress.progressRequirement === 'none' ? 'declare_direction' : progress.progressRequirement
+            : progress.progressRequirement
+          const reason = `unchanged read rejected at streak ${progress.unchangedReadStreak + 1}: ${decision.action.name}`
+          this.append(id, 'error', decision.action.name, {
+            actionHash, repeated: progress.unchangedReadStreak + 1, noProgress: true,
+            guard: 'repeatReadRejectAfter', ...(requirement === 'none' ? {} : { progressRequirement: requirement }),
+          }, reason)
+          if (requirement !== 'none') {
+            this.updateProgress(id, {
+              progressRequirement: requirement,
+              nextIntent: progressRequirementIntent(requirement),
+              lastAction: `guard:${requirement}`,
+            })
+          }
+          throw new Error(reason)
+        }
         if (repeated >= 8) {
           const reason = `identical tool feedback repeated ${repeated + 1} times without progress: ${decision.action.name}`
           this.append(id, 'error', decision.action.name, { actionHash, repeated: repeated + 1, noProgress: true }, reason)
@@ -385,10 +677,17 @@ export class BuilderKernel {
       }
       const result = this.executeTool(id, decision.action)
       this.append(id, 'tool', decision.action.name, result)
+      this.updateProgressAfterTool(id, decision.action, result)
       this.emit(id, 'tool_completed', { action: decision.action.name, resultHash: sha256(result) })
       return result
     } catch (error) {
       this.append(id, 'error', decision.action.name, undefined, error)
+      this.updateProgress(id, {
+        lastAction: `error:${decision.action.name}`,
+        nextIntent: isReadAction(decision.action.name)
+          ? 'state the hypothesis or choose a new evidence-producing action after the unchanged-read rejection'
+          : 'inspect the tool error and decide whether to correct, ask, submit, or abort',
+      })
       this.emit(id, 'tool_failed', { action: decision.action.name, error: String(error).slice(0, 1_000) })
       throw error
     }
@@ -401,6 +700,7 @@ export class BuilderKernel {
     this.append(id, 'state', 'verifier_rejected', { reportHash: sha256(report) })
     return this.create({
       kind: context.run.kind,
+      mode: context.run.mode,
       actor: context.input.actor,
       targetBefore: context.input.targetBefore,
       previousAttempt: report,
@@ -410,22 +710,38 @@ export class BuilderKernel {
     })
   }
 
+  /** Add machine-readable progress feedback without preventing repeated reads. */
+  private annotateReadFeedback(id: string, action: string, target: string, result: Record<string, unknown>): Record<string, unknown> {
+    const prior = readJsonl<BuilderJournalEntry>(builderRunPaths(this.root, this.sessionId, id).journal)
+      .filter((entry) => entry.kind === 'tool' && entry.action === action && readTarget(entry.result) === target)
+      .at(-1)
+    const currentHash = sha256(stripReadObservation(result))
+    const priorHash = prior?.result ? sha256(stripReadObservation(prior.result)) : undefined
+    return {
+      ...result,
+      observation: prior
+        ? { newInformation: currentHash !== priorHash, unchangedSinceSeq: currentHash === priorHash ? prior.seq : undefined }
+        : { newInformation: true },
+    }
+  }
+
   private executeTool(id: string, action: BuilderToolAction): Record<string, unknown> {
     const paths = builderRunPaths(this.root, this.sessionId, id)
     if (action.name === 'read_input') {
       const path = {
         actor: paths.actor, target_before: paths.targetBefore, previous_attempt: paths.previousAttempt,
-        previous_run: paths.previousRun, world_model: paths.worldModel, plan: paths.plan,
+        previous_run: paths.previousRun, world_model: paths.worldModel, plan: paths.plan, progress_state: paths.progressState, context_index: paths.contextIndex, provenance: paths.provenance,
       }[action.document]
-      return { document: action.document, value: readJson<Record<string, unknown>>(path) ?? null }
+      return this.annotateReadFeedback(id, action.name, action.document, { document: action.document, value: readJson<Record<string, unknown>>(path) ?? null })
     }
     if (action.name === 'read_journal') {
       const limit = Math.max(1, Math.min(100, Math.floor(action.limit)))
-      return { entries: readJsonl<BuilderJournalEntry>(paths.journal).slice(-limit) }
+      return this.annotateReadFeedback(id, action.name, 'journal', { entries: readJsonl<BuilderJournalEntry>(paths.journal).slice(-limit) })
     }
     if (action.name === 'write_world_model') {
       atomicWriteJson(paths.worldModel, action.value)
       this.snapshot(id, 'state/world-model.json', action.value)
+      this.setPhase(id, 'hypothesizing')
       return { written: 'world_model', hash: sha256(action.value) }
     }
     if (action.name === 'write_plan') {
@@ -433,11 +749,26 @@ export class BuilderKernel {
       this.snapshot(id, 'state/plan.json', action.value)
       return { written: 'plan', hash: sha256(action.value) }
     }
+    if (action.name === 'write_diagnosis_report') {
+      if (this.load(id).mode !== 'diagnosis') throw new Error('write_diagnosis_report is only available in a diagnosis pass')
+      validateDiagnosisReport(action.report)
+      atomicWriteJson(paths.diagnosisReport, action.report)
+      this.snapshot(id, 'state/diagnosis-report.json', action.report)
+      this.setPhase(id, 'waiting_for_actor')
+      this.emit(id, 'diagnosis_report', {
+        reportHash: sha256(action.report),
+        directions: Array.isArray(action.report.directions) ? action.report.directions.length : 0,
+      })
+      this.transition(id, 'waiting_for_input')
+      return { written: 'diagnosis_report', path: paths.diagnosisReport, hash: sha256(action.report), waitingFor: 'user_direction' }
+    }
     if (action.name === 'read_file') {
       const file = resolve(action.path)
       if (!existsSync(file) || !statSync(file).isFile()) throw new Error('file is unavailable')
       const content = readFileSync(file, 'utf8')
-      return { path: file, content: content.slice(0, 64_000), truncated: content.length > 64_000 }
+      const result = this.annotateReadFeedback(id, action.name, file, { path: file, content: content.slice(0, 64_000), truncated: content.length > 64_000 })
+      this.observeArtifact(id, 'source', file, 'Source file read during Builder exploration.')
+      return result
     }
     if (action.name === 'list_directory') {
       const directory = resolve(action.path)
@@ -446,27 +777,49 @@ export class BuilderKernel {
         name: entry.name,
         type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
       }))
-      return { path: directory, entries, truncated: readdirSync(directory).length > entries.length }
+      return this.annotateReadFeedback(id, action.name, directory, { path: directory, entries, truncated: readdirSync(directory).length > entries.length })
+    }
+    if (action.name === 'search_text') {
+      const roots = action.roots?.length ? action.roots : [process.cwd(), paths.workspace]
+      const result = searchBuilderText(action.query, roots, action.maxResults)
+      for (const match of Array.isArray(result.matches) ? result.matches : []) {
+        if (match && typeof match === 'object' && typeof (match as Record<string, unknown>).path === 'string') {
+          const source = (match as Record<string, unknown>).path as string
+          this.observeArtifact(id, 'source', source, `Source matched text query ${JSON.stringify(action.query.slice(0, 160))}.`)
+        }
+      }
+      return result
+    }
+    if (action.name === 'inspect_file') {
+      const result = inspectBuilderFile(action.path)
+      this.observeArtifact(id, 'source', String(result.path), 'Source interface inspected during Builder exploration.')
+      return result
+    }
+    if (action.name === 'trace_artifact') {
+      return traceBuilderArtifact(this.provenance(id), action.artifact)
     }
     if (action.name === 'write_workspace_file') {
       const file = this.workspacePath(paths.workspace, action.path)
+      const relativePath = relative(paths.workspace, file)
       mkdirSync(resolve(file, '..'), { recursive: true })
       writeFileSync(file, action.content, 'utf8')
-      this.snapshot(id, `workspace/${action.path}`, action.content)
-      return { path: action.path, bytes: Buffer.byteLength(action.content, 'utf8'), hash: sha256(action.content) }
+      this.snapshot(id, `workspace/${relativePath}`, action.content)
+      this.setPhase(id, 'exploring')
+      return { path: relativePath, bytes: Buffer.byteLength(action.content, 'utf8'), hash: sha256(action.content) }
     }
     if (action.name === 'read_workspace_file') {
       const file = this.workspacePath(paths.workspace, action.path)
       if (!existsSync(file) || !statSync(file).isFile()) throw new Error('workspace file is unavailable')
       const content = readFileSync(file, 'utf8')
-      return { path: action.path, content: content.slice(0, 64_000), truncated: content.length > 64_000 }
+      return { path: relative(paths.workspace, file), content: content.slice(0, 64_000), truncated: content.length > 64_000 }
     }
     if (action.name === 'run_workspace_command') {
       mkdirSync(paths.workspace, { recursive: true })
       const timeout = Math.max(1_000, Math.min(300_000, Math.floor(action.timeoutMs ?? 120_000)))
-      const output = spawnSync(action.command, action.args, {
+      const output = spawnSync(action.command, action.args ?? [], {
         cwd: paths.workspace, encoding: 'utf8', timeout, maxBuffer: 256 * 1024,
       })
+      this.setPhase(id, 'exploring')
       return {
         command: action.command, args: action.args, cwd: paths.workspace,
         exitCode: output.status, signal: output.signal ?? undefined,
@@ -501,21 +854,51 @@ export class BuilderKernel {
       return { published: true, ...payload }
     }
     if (action.name === 'request_input') {
+      validateInputRequest(action)
       const payload = {
         question: action.question.slice(0, 4_000),
         ...(action.context ? { context: action.context.slice(0, 4_000) } : {}),
+        ...(action.kind ? { kind: action.kind } : {}),
+        ...(action.options?.length ? { options: action.options.slice(0, 8).map((option) => ({
+          id: option.id.slice(0, 120), label: option.label.slice(0, 500),
+          ...(option.description ? { description: option.description.slice(0, 1_000) } : {}),
+        })) } : {}),
+        ...(action.whyNow ? { whyNow: action.whyNow.slice(0, 4_000) } : {}),
+        ...(action.evidenceRefs?.length ? { evidenceRefs: action.evidenceRefs.slice(0, 16).map((ref) => ref.slice(0, 4_000)) } : {}),
+        ...(action.blocking === undefined ? { blocking: true } : { blocking: action.blocking }),
       }
       this.emit(id, 'needs_input', payload)
+      this.setPhase(id, action.kind === 'verification' ? 'waiting_for_verification' : 'waiting_for_actor')
       this.transition(id, 'waiting_for_input')
       return { requested: true, ...payload }
     }
+    if (action.name === 'invoke_capability') {
+      const runtime = this.capabilityRuntimes.get(action.capability)
+      if (!runtime) throw new Error(`capability runtime is unavailable: ${action.capability}`)
+      const context: BuilderCapabilityToolContext = {
+        root: this.root,
+        sessionId: this.sessionId,
+        runId: id,
+        workspacePath: paths.workspace,
+      }
+      const result = runtime.invoke(action.tool, action.input, context)
+      if (action.capability === 'workspace-simulation') {
+        const priorSimulation = readJsonl<BuilderJournalEntry>(paths.journal).some((entry) => entry.kind === 'tool' && entry.action === 'invoke_capability' && entry.result?.status !== undefined)
+        this.setPhase(id, priorSimulation ? 'candidate_simulating' : 'baseline_simulating')
+      }
+      return result
+    }
     if (action.name === 'write_submission') {
+      if (this.load(id).mode === 'diagnosis') {
+        throw new Error('diagnosis pass cannot write a proposal; write a diagnosis report and await user direction')
+      }
       atomicWriteJson(paths.submissionDraft, action.proposal)
       this.snapshot(id, 'submission/draft.json', action.proposal)
       const manifest = this.freezeSubmissionManifest(id, action.proposal)
       atomicWriteJson(paths.submissionManifest, manifest)
       this.snapshot(id, 'submission/manifest.json', manifest)
       this.emit(id, 'proposal_drafted', { proposalHash: manifest.proposalHash, manifestHash: sha256(manifest), keys: Object.keys(action.proposal).slice(0, 20) })
+      this.setPhase(id, 'ready_to_submit')
       return { written: 'submission_draft', hash: manifest.proposalHash, manifestHash: sha256(manifest) }
     }
     if (action.name === 'write_candidate_draft') {
@@ -577,6 +960,29 @@ export class BuilderKernel {
     return { path: action.path, content: readFileSync(candidate, 'utf8').slice(0, 16_000) }
   }
 
+  private provenance(id: string): BuilderProvenanceGraph {
+    const paths = builderRunPaths(this.root, this.sessionId, id)
+    const graph = readJson<BuilderProvenanceGraph>(paths.provenance)
+    if (graph?.schemaVersion === 1) return graph
+    const input = this.contextWithoutProgress(id).input
+    const created = createBuilderProvenance({
+      runId: id, actorPath: paths.actor, targetBeforePath: paths.targetBefore,
+      previousAttemptPath: paths.previousAttempt, previousRunPath: paths.previousRun,
+      workspacePath: paths.workspace, proposalPath: paths.submissionDraft,
+      submissionManifestPath: paths.submissionManifest, actor: input.actor,
+      ...(input.previousAttempt ? { previousAttempt: input.previousAttempt } : {}),
+      ...(input.previousRun ? { previousRun: input.previousRun } : {}),
+    })
+    atomicWriteJson(paths.provenance, created)
+    return created
+  }
+
+  private observeArtifact(id: string, role: Parameters<typeof addObservedArtifact>[1], path: string, summary: string): void {
+    const graph = this.provenance(id)
+    addObservedArtifact(graph, role, path, summary)
+    atomicWriteJson(builderRunPaths(this.root, this.sessionId, id).provenance, graph)
+  }
+
   private snapshot(id: string, ref: string, value: unknown): void {
     appendJsonl(builderRunPaths(this.root, this.sessionId, id).snapshots, {
       schemaVersion: 1,
@@ -584,6 +990,78 @@ export class BuilderKernel {
       ref,
       hash: sha256(value),
     })
+  }
+
+  private setPhase(id: string, phase: BuilderPhase): void {
+    const record = this.load(id)
+    if (record.phase === phase || isTerminalState(record.state)) return
+    const next = { ...record, phase, updatedAt: new Date().toISOString() }
+    atomicWriteJson(builderRunPaths(this.root, this.sessionId, id).record, next)
+    this.updateProgress(id, { phase, state: next.state, lastAction: `phase:${phase}` })
+    this.append(id, 'state', `phase:${phase}`, { phase, state: next.state })
+    this.emit(id, 'state_changed', { phase, state: next.state })
+  }
+
+  private updateProgressAfterTool(id: string, action: BuilderToolAction, result: Record<string, unknown>): void {
+    const progress = this.progressState(id)
+    const observation = result.observation && typeof result.observation === 'object' && !Array.isArray(result.observation)
+      ? result.observation as Record<string, unknown>
+      : undefined
+    const observedHash = observation
+      ? sha256(stripReadObservation(result))
+      : undefined
+    const unchanged = observation?.newInformation === false
+    const isRead = isReadAction(action.name)
+    const nextStreak = isRead
+      ? unchanged ? progress.unchangedReadStreak + 1 : 0
+      : 0
+    const pendingMessageIds = action.name === 'acknowledge_message'
+      ? progress.pendingMessageIds.filter((messageId) => messageId !== action.messageId)
+      : progress.pendingMessageIds
+    const nextIntent = action.name === 'request_input'
+      ? 'wait for Actor/user input before resuming'
+      : action.name === 'write_diagnosis_report'
+        ? 'wait for Actor/user to choose an implementation direction'
+      : action.name === 'write_submission' || action.name === 'write_candidate_draft'
+        ? 'submit the frozen proposal after any required preflight'
+        : action.name === 'invoke_capability'
+          ? 'inspect capability feedback and decide whether the hypothesis survived'
+          : action.name === 'write_world_model' || action.name === 'write_plan'
+            ? 'use the declared state to choose the next evidence-producing action'
+        : progress.nextIntent
+    // The no-progress breaker collects one public direction, then gets out
+    // of the Builder's way. Requiring a particular *next* action would turn
+    // this safety rail into a route planner and can block a necessary read.
+    const nextRequirement = progress.progressRequirement === 'declare_direction'
+      && satisfiesProgressRequirement('declare_direction', action.name)
+      ? 'none'
+      : progress.progressRequirement !== 'none'
+        && satisfiesProgressRequirement(progress.progressRequirement, action.name)
+        ? 'none'
+        : progress.progressRequirement
+    this.updateProgress(id, {
+      lastAction: action.name,
+      ...(observedHash ? { lastObservationHash: observedHash } : {}),
+      unchangedReadStreak: nextStreak,
+      pendingMessageIds,
+      progressRequirement: nextRequirement,
+      ...(nextIntent ? { nextIntent } : {}),
+      ...(action.name === 'write_world_model' ? extractWorldModelProgress(action.value, progress) : {}),
+      ...(action.name === 'write_plan' ? extractPlanProgress(action.value, progress) : {}),
+    })
+  }
+
+  private updateProgress(id: string, patch: Partial<BuilderProgressState>): BuilderProgressState {
+    const paths = builderRunPaths(this.root, this.sessionId, id)
+    const current = readJson<BuilderProgressState>(paths.progressState) ?? initialProgressState(this.load(id), this.contextWithoutProgress(id).input)
+    const next = normalizeProgressState({
+      ...current,
+      ...patch,
+      version: current.version + 1,
+      updatedAt: new Date().toISOString(),
+    }, this.load(id))
+    atomicWriteJson(paths.progressState, next)
+    return next
   }
 
   private unacknowledgedMessageIds(id: string): string[] {
@@ -630,9 +1108,11 @@ export class BuilderKernel {
       ['messages', paths.messages],
       ['targetBefore', paths.targetBefore],
       ['previousAttempt', paths.previousAttempt],
+      ['progressState', paths.progressState],
       ['worldModel', paths.worldModel],
       ['plan', paths.plan],
       ['journal', paths.journal],
+      ['promptVisible', paths.promptVisible],
       ['events', paths.events],
       ['snapshots', paths.snapshots],
       ['proposal', paths.proposal],
@@ -672,10 +1152,178 @@ export class BuilderKernel {
   }
 
   private workspacePath(workspace: string, requestedPath: string): string {
-    const path = resolve(workspace, requestedPath)
-    if (relative(workspace, path).startsWith('..')) throw new Error('workspace path escapes builder workspace')
+    // The tool is already scoped to the run workspace; a model that says
+    // "workspace/actor-loop.mjs" means the same file as "actor-loop.mjs".
+    const normalized = requestedPath === 'workspace' || requestedPath.startsWith('workspace/')
+      ? requestedPath.slice('workspace'.length).replace(/^\/+/, '')
+      : requestedPath
+    const path = resolve(workspace, normalized)
+    if (relative(workspace, path).startsWith('..')) {
+      const mapped = this.mapPriorWorkspacePath(requestedPath, workspace)
+      if (mapped) return mapped
+      throw new Error('workspace path escapes builder workspace')
+    }
     return path
   }
+
+  /**
+   * A read/write addressed at a prior run's workspace (absolute path from a
+   * rejection) means the same relative file in this run's workspace during a
+   * repair. Prior assets stay read-only; only the current workspace is writable.
+   */
+  private mapPriorWorkspacePath(requestedPath: string, workspace: string): string | null {
+    const resolved = resolve(requestedPath)
+    const marker = '/builder-runs/'
+    const workspaceMarker = '/workspace/'
+    const markerIndex = resolved.indexOf(marker)
+    if (markerIndex < 0) return null
+    const afterRun = resolved.slice(markerIndex + marker.length)
+    const workspaceIndex = afterRun.indexOf(workspaceMarker)
+    if (workspaceIndex < 0) return null
+    const relativePath = afterRun.slice(workspaceIndex + workspaceMarker.length)
+    if (!relativePath || relativePath.split('/').includes('..')) return null
+    const mapped = resolve(workspace, relativePath)
+    if (relative(workspace, mapped).startsWith('..')) return null
+    return mapped
+  }
+}
+
+function readTarget(result: Record<string, unknown> | undefined): string | undefined {
+  if (!result) return undefined
+  if (typeof result.path === 'string') return result.path
+  if (typeof result.document === 'string') return result.document
+  if (result.entries !== undefined) return 'journal'
+  return undefined
+}
+
+function initialProgressState(record: BuilderRunRecord, input: BuilderRunInput): BuilderProgressState {
+  const actorObjective = typeof input.actor.objective === 'string'
+    ? input.actor.objective
+    : typeof input.actor.requirements === 'string'
+      ? input.actor.requirements
+      : undefined
+  return {
+    schemaVersion: 1,
+    version: 0,
+    state: record.state,
+    phase: record.phase,
+    ...(actorObjective?.trim() ? { objective: actorObjective.slice(0, 2_000) } : {}),
+    known: [],
+    unknowns: [],
+    nextIntent: 'read the smallest relevant evidence, then state a falsifiable hypothesis',
+    lastAction: 'create',
+    unchangedReadStreak: 0,
+    progressRequirement: 'none',
+    pendingMessageIds: [],
+    updatedAt: record.updatedAt,
+  }
+}
+
+function normalizeProgressState(value: BuilderProgressState, record: BuilderRunRecord): BuilderProgressState {
+  return {
+    schemaVersion: 1,
+    version: Number.isFinite(value.version) ? Math.max(0, Math.floor(value.version)) : 0,
+    state: value.state ?? record.state,
+    phase: value.phase ?? record.phase,
+    ...(typeof value.objective === 'string' && value.objective.trim() ? { objective: value.objective.slice(0, 2_000) } : {}),
+    ...(typeof value.hypothesis === 'string' && value.hypothesis.trim() ? { hypothesis: value.hypothesis.slice(0, 2_000) } : {}),
+    known: normalizeStringList(value.known),
+    unknowns: normalizeStringList(value.unknowns),
+    ...(typeof value.nextIntent === 'string' && value.nextIntent.trim() ? { nextIntent: value.nextIntent.slice(0, 2_000) } : {}),
+    ...(typeof value.lastAction === 'string' ? { lastAction: value.lastAction.slice(0, 200) } : {}),
+    ...(typeof value.lastObservationHash === 'string' ? { lastObservationHash: value.lastObservationHash } : {}),
+    unchangedReadStreak: Number.isFinite(value.unchangedReadStreak) ? Math.max(0, Math.floor(value.unchangedReadStreak)) : 0,
+    progressRequirement: isProgressRequirement(value.progressRequirement) ? value.progressRequirement : 'none',
+    pendingMessageIds: normalizeStringList(value.pendingMessageIds),
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : record.updatedAt,
+  }
+}
+
+function normalizeStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map(item => item.slice(0, 2_000)))].slice(0, 64)
+    : []
+}
+
+function isProgressRequirement(value: unknown): value is BuilderProgressRequirement {
+  return value === 'none' || value === 'declare_direction' || value === 'produce_evidence'
+}
+
+function progressRequirementIntent(requirement: BuilderProgressRequirement): string {
+  return requirement === 'declare_direction'
+    ? 'write a falsifiable hypothesis/world model or plan before reading again'
+    : 'produce fresh evidence with simulation, a workspace command/edit, a question, submission, or abort'
+}
+
+/**
+ * Keep the checkpoint intentionally small. It does not prescribe the
+ * Builder's implementation; it only requires a public direction or a fresh
+ * observation once the same evidence has already been returned.
+ */
+function satisfiesProgressRequirement(requirement: BuilderProgressRequirement, action: BuilderToolAction['name']): boolean {
+  if (requirement === 'none') return true
+  if (requirement === 'declare_direction') {
+    return action === 'write_world_model'
+      || action === 'write_plan'
+      || action === 'request_input'
+      || action === 'write_submission'
+  }
+  if (requirement === 'produce_evidence') {
+    return action === 'invoke_capability'
+      || action === 'run_workspace_command'
+      || action === 'write_workspace_file'
+      || action === 'request_input'
+      || action === 'write_submission'
+  }
+  return action === 'invoke_capability'
+    || action === 'run_workspace_command'
+    || action === 'write_workspace_file'
+    || action === 'request_input'
+    || action === 'write_submission'
+}
+
+function progressCheckpointValidation(action: BuilderToolAction): string | undefined {
+  if (action.name === 'write_world_model') {
+    if (typeof action.value.hypothesis !== 'string' || !action.value.hypothesis.trim()) return 'world_model.hypothesis is required'
+    if (typeof action.value.nextIntent !== 'string' || !action.value.nextIntent.trim()) return 'world_model.nextIntent is required'
+  }
+  if (action.name === 'write_plan') {
+    const hasIntent = typeof action.value.nextIntent === 'string' && Boolean(action.value.nextIntent.trim())
+    const hasSteps = Array.isArray(action.value.steps) && action.value.steps.length > 0
+    if (!hasIntent && !hasSteps) return 'plan.nextIntent or a non-empty plan.steps is required'
+  }
+  return undefined
+}
+
+function extractWorldModelProgress(value: Record<string, unknown>, prior: BuilderProgressState): Partial<BuilderProgressState> {
+  const hypothesis = typeof value.hypothesis === 'string' ? value.hypothesis : prior.hypothesis
+  const known = Array.isArray(value.known) ? normalizeStringList(value.known) : Array.isArray(value.facts) ? normalizeStringList(value.facts) : prior.known
+  const unknowns = Array.isArray(value.unknowns) ? normalizeStringList(value.unknowns) : prior.unknowns
+  return {
+    ...(hypothesis ? { hypothesis: hypothesis.slice(0, 2_000) } : {}),
+    known,
+    unknowns,
+    nextIntent: typeof value.nextIntent === 'string' ? value.nextIntent.slice(0, 2_000) : prior.nextIntent,
+  }
+}
+
+function extractPlanProgress(value: Record<string, unknown>, prior: BuilderProgressState): Partial<BuilderProgressState> {
+  const objective = typeof value.objective === 'string' ? value.objective : prior.objective
+  const nextIntent = typeof value.nextIntent === 'string'
+    ? value.nextIntent
+    : Array.isArray(value.steps) && value.steps.length > 0
+      ? JSON.stringify(value.steps[0]).slice(0, 2_000)
+      : prior.nextIntent
+  return {
+    ...(objective ? { objective: objective.slice(0, 2_000) } : {}),
+    ...(nextIntent ? { nextIntent: nextIntent.slice(0, 2_000) } : {}),
+  }
+}
+
+function stripReadObservation(value: Record<string, unknown>): Record<string, unknown> {
+  const copy = { ...value }
+  delete copy.observation
+  return copy
 }
 
 /** Keep feedback durable without allowing a tool to recursively journal itself. */
@@ -688,6 +1336,13 @@ function boundedJournalValue(value: Record<string, unknown>): Record<string, unk
     originalHash: sha256(value),
     preview: encoded.slice(0, 15_000),
   }
+}
+
+/** Keep prompt evidence useful without copying obvious credentials into it. */
+function redactPrompt(prompt: string): string {
+  return prompt
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED_KEY]')
+    .replace(/((?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*)([^\s,;"']+)/gi, '$1[REDACTED_SECRET]')
 }
 
 function freezePathRefs(paths: string[]): Array<{ path: string; exists: boolean; hash?: string }> {
@@ -710,6 +1365,99 @@ function isTerminalState(state: BuilderRunState): boolean {
   return state === 'submitted' || state === 'aborted' || state === 'cancelled'
 }
 
+function isReadAction(action: BuilderToolAction['name']): boolean {
+  return action === 'read_file' || action === 'read_input' || action === 'read_journal' || action === 'list_directory' || action === 'read_workspace_file'
+}
+
+function phaseForState(state: BuilderRunState, prior?: BuilderPhase): BuilderPhase {
+  if (state === 'created') return 'observing'
+  if (state === 'submitted') return 'submitted'
+  if (state === 'aborted' || state === 'cancelled') return 'aborted'
+  if (state === 'ready_to_submit' || state === 'preflighting') return 'ready_to_submit'
+  if (state === 'waiting_for_input') return prior === 'waiting_for_verification' ? prior : 'waiting_for_actor'
+  if (state === 'exploring') return prior === 'observing' ? 'exploring' : (prior ?? 'exploring')
+  return prior ?? 'exploring'
+}
+
+/**
+ * Structured requests are the one place where the Kernel rejects an
+ * underspecified transition. Normal exploration remains unconstrained.
+ */
+function validateInputRequest(action: Extract<BuilderToolAction, { name: 'request_input' }>): void {
+  if (!action.question.trim()) throw new Error('request_input requires a non-empty question')
+  if (action.kind === 'choice') {
+    if (!action.options || action.options.length < 2) {
+      throw new Error('choice request requires at least two options')
+    }
+    if (!action.whyNow?.trim()) throw new Error('choice request requires whyNow')
+    if (!action.evidenceRefs || action.evidenceRefs.length === 0) {
+      throw new Error('choice request requires evidenceRefs')
+    }
+    const ids = action.options.map((option) => option.id.trim())
+    if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+      throw new Error('choice request options require unique non-empty ids')
+    }
+  }
+  if (action.kind === 'verification') {
+    if (!action.whyNow?.trim()) throw new Error('verification request requires whyNow')
+    if (!action.evidenceRefs || action.evidenceRefs.length === 0) {
+      throw new Error('verification request requires evidenceRefs')
+    }
+  }
+}
+
+function validateDiagnosisReport(report: Record<string, unknown>): void {
+  const directions = report.directions
+  if (!Array.isArray(directions) || directions.length < 1 || directions.length > 3) {
+    throw new Error('diagnosis report requires 1-3 directions')
+  }
+  for (const direction of directions) {
+    if (!direction || typeof direction !== 'object' || Array.isArray(direction)) throw new Error('diagnosis direction must be an object')
+    const value = direction as Record<string, unknown>
+    if (typeof value.id !== 'string' || !value.id.trim()) throw new Error('diagnosis direction requires id')
+    if (typeof value.goal !== 'string' || !value.goal.trim()) throw new Error('diagnosis direction requires goal')
+    if (!Array.isArray(value.evidenceRefs) || !value.evidenceRefs.every((ref) => typeof ref === 'string')) {
+      throw new Error('diagnosis direction requires evidenceRefs')
+    }
+    if (!Array.isArray(value.unknowns) || !value.unknowns.every((item) => typeof item === 'string')) {
+      throw new Error('diagnosis direction requires unknowns')
+    }
+  }
+  const question = report.question
+  if (!question || typeof question !== 'object' || Array.isArray(question)) throw new Error('diagnosis report requires a blocking question')
+  const questionValue = question as Record<string, unknown>
+  if (typeof questionValue.question !== 'string' || !questionValue.question.trim()) throw new Error('diagnosis question requires question')
+  if (!Array.isArray(questionValue.options) || questionValue.options.length < 2) throw new Error('diagnosis question requires at least two options')
+  if (!questionValue.options.every((option) => option && typeof option === 'object' && !Array.isArray(option)
+    && typeof (option as Record<string, unknown>).id === 'string'
+    && typeof (option as Record<string, unknown>).label === 'string')) {
+    throw new Error('diagnosis question options require id and label')
+  }
+  if (typeof questionValue.whyNow !== 'string' || !questionValue.whyNow.trim()) throw new Error('diagnosis question requires whyNow')
+  if (!Array.isArray(questionValue.evidenceRefs) || !questionValue.evidenceRefs.every((ref) => typeof ref === 'string')) {
+    throw new Error('diagnosis question requires evidenceRefs')
+  }
+}
+
+function buildContextIndex(paths: ReturnType<typeof builderRunPaths>, input: BuilderRunInput, runId: string): Record<string, unknown> {
+  const entries = [
+    { id: 'actor', path: paths.actor, summary: `Immutable actor handoff snapshot (keys: ${Object.keys(input.actor).slice(0, 20).join(', ') || 'none'}). Read with read_input(actor).` },
+    { id: 'target_before', path: paths.targetBefore, summary: 'Immutable target/baseline snapshot captured at run creation. Read with read_input(target_before).' },
+    { id: 'actor_messages', path: paths.messages, summary: 'Durable Actor/user inbox preserving original wording, memo, and evidence references.' },
+    { id: 'journal', path: paths.journal, summary: 'Append-only tool/model feedback journal; read the tail with read_journal.' },
+    { id: 'progress_state', path: paths.progressState, summary: 'Compact public working state: objective, hypothesis, known/unknowns, nextIntent and progress signals.' },
+    { id: 'world_model', path: paths.worldModel, summary: 'Builder-declared facts and hypothesis artifact.' },
+    { id: 'plan', path: paths.plan, summary: 'Builder-declared experiment plan artifact.' },
+    { id: 'previous_attempt', path: paths.previousAttempt, summary: 'Verifier/gate rejection or host restart report, when present.' },
+    { id: 'previous_run', path: paths.previousRun, summary: 'Read-only hash-bound assets from the prior immutable run, when present.' },
+    { id: 'events', path: paths.events, summary: 'Actor-facing lifecycle/tool summary events.' },
+    { id: 'provenance', path: paths.provenance, summary: 'Factual artifact graph: producer, consumer, test and report relations. Read with read_input(provenance) or trace_artifact; it contains no repair answer.' },
+    { id: 'workspace', path: paths.workspace, summary: 'Persistent Builder-owned workspace for edits, fixtures, commands and candidate experiments.' },
+    { id: 'submission', path: paths.submissionDraft, summary: 'Frozen proposal draft; only verifier/gate can approve or install it.' },
+  ]
+  return { schemaVersion: 1, runId, path: paths.contextIndex, generatedAt: new Date().toISOString(), instructions: 'This index is an address map, not a replacement for source evidence. Read only the entries needed for the next action.', entries }
+}
+
 /**
  * Count only consecutive repetitions whose tool feedback is byte-for-byte
  * unchanged. A repeated read/build is legitimate when the workspace changed;
@@ -725,7 +1473,7 @@ function repeatedToolWithoutProgress(journal: BuilderJournalEntry[], actionHash:
     if (decision.result?.actionHash !== actionHash) break
     const nextDecisionSeq = decisions[index + 1]?.seq ?? Number.POSITIVE_INFINITY
     const feedback = journal.find((entry) => entry.seq > decision.seq && entry.seq < nextDecisionSeq && (entry.kind === 'tool' || entry.kind === 'error'))
-    const currentHash = sha256(feedback ? { result: feedback.result ?? null, error: feedback.error ?? null } : null)
+    const currentHash = sha256(feedback ? { result: feedback.result ? stripReadObservation(feedback.result) : null, error: feedback.error ?? null } : null)
     if (feedbackHash === undefined) feedbackHash = currentHash
     if (currentHash !== feedbackHash) break
     count++

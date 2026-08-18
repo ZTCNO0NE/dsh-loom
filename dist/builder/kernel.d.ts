@@ -1,7 +1,18 @@
+import { BuilderCapabilityRuntimeRegistry } from './capabilities.js';
+import { type BuilderProvenanceGraph } from './provenance.js';
 export type BuilderRunState = 'created' | 'exploring' | 'preflighting' | 'ready_to_submit' | 'waiting_for_input' | 'paused' | 'cancelled' | 'submitted' | 'aborted';
+/**
+ * Observable evidence-production phase. This is deliberately not an allow
+ * list: the Kernel records meaningful milestones and only rejects explicit
+ * illegal requests (for example malformed clarification/verification).
+ */
+export type BuilderPhase = 'observing' | 'hypothesizing' | 'baseline_simulating' | 'exploring' | 'candidate_simulating' | 'ready_to_submit' | 'waiting_for_actor' | 'waiting_for_verification' | 'submitted' | 'aborted';
 export type BuilderRunKind = 'patch' | 'loop_candidate';
+export type BuilderRunMode = 'diagnosis' | 'implementation';
 export type BuilderJournalKind = 'model' | 'tool' | 'error' | 'snapshot' | 'state';
-export type BuilderEventKind = 'run_created' | 'state_changed' | 'actor_message_received' | 'tool_completed' | 'tool_failed' | 'message_ack' | 'builder_update' | 'needs_input' | 'proposal_drafted';
+export type BuilderEventKind = 'run_created' | 'state_changed' | 'actor_message_received' | 'tool_completed' | 'tool_failed' | 'message_ack' | 'builder_update' | 'needs_input' | 'proposal_drafted' | 'diagnosis_report';
+/** A public checkpoint owed after the Builder has stopped producing evidence. */
+export type BuilderProgressRequirement = 'none' | 'declare_direction' | 'produce_evidence';
 /** Actor-provided context is open natural language; only its transport is structured. */
 export interface BuilderMessageInput {
     rawUserText: string;
@@ -12,6 +23,7 @@ export interface BuilderMessageInput {
 }
 export interface BuilderRunInput {
     kind?: BuilderRunKind;
+    mode?: BuilderRunMode;
     actor: Record<string, unknown>;
     targetBefore: Record<string, unknown>;
     previousAttempt?: Record<string, unknown>;
@@ -41,6 +53,53 @@ export interface BuilderJournalEntry {
     inputHash: string;
     result?: Record<string, unknown>;
     error?: string;
+}
+/**
+ * The exact model input is an auditable input artifact, not a reasoning trace.
+ * The prompt body is stored after secret-like value redaction; promptHash and
+ * promptBytes still bind the redacted view to the exact bytes sent.
+ */
+export interface BuilderPromptVisibleEntry {
+    schemaVersion: 1;
+    seq: number;
+    at: string;
+    promptHash: string;
+    promptBytes: number;
+    visibleState: BuilderRunState;
+    phase: BuilderPhase;
+    progressStateVersion?: number;
+    progressStateHash?: string;
+    lastJournalAction?: string;
+    lastToolResultHash?: string;
+    pendingMessageIds: string[];
+    prompt: string;
+    redacted: boolean;
+}
+/**
+ * Small, public working memory for one Builder run.
+ * This is not a chain-of-thought field: it contains only declared direction,
+ * durable facts and kernel-observed progress signals for the next turn.
+ */
+export interface BuilderProgressState {
+    schemaVersion: 1;
+    version: number;
+    state: BuilderRunState;
+    phase: BuilderPhase;
+    objective?: string;
+    hypothesis?: string;
+    known: string[];
+    unknowns: string[];
+    nextIntent?: string;
+    lastAction?: string;
+    lastObservationHash?: string;
+    unchangedReadStreak: number;
+    /**
+     * A deterministic, temporary obligation raised only by the experimental
+     * no-progress guard. It is public state, not a hidden reasoning signal.
+     */
+    progressRequirement: BuilderProgressRequirement;
+    pendingMessageIds: string[];
+    updatedAt: string;
 }
 /** An inbound observation from the actor, delivered between Builder turns. */
 export interface BuilderMessage {
@@ -90,12 +149,25 @@ export interface BuilderRunRecord {
     schemaVersion: 1;
     id: string;
     kind: BuilderRunKind;
+    mode: BuilderRunMode;
     state: BuilderRunState;
+    phase: BuilderPhase;
     createdAt: string;
     updatedAt: string;
     inputHash: string;
     lineageId: string;
     parentRunId?: string;
+}
+/** Optional experimental progress guard; omitted means legacy free exploration. */
+export interface BuilderKernelOptions {
+    /** Reject an unchanged repeated read at this streak instead of waiting for the abort guard. */
+    repeatReadRejectAfter?: number;
+    /**
+     * When enabled, a rejected unchanged read also creates a two-step progress
+     * checkpoint: declare a direction, then produce fresh evidence. Defaults to
+     * false so existing free exploration remains unchanged.
+     */
+    enforceProgressCheckpoints?: boolean;
 }
 export type BuilderDecision = {
     kind: 'continue';
@@ -113,7 +185,7 @@ export type BuilderDecision = {
 };
 export type BuilderToolAction = {
     name: 'read_input';
-    document: 'actor' | 'target_before' | 'previous_attempt' | 'previous_run' | 'world_model' | 'plan';
+    document: 'actor' | 'target_before' | 'previous_attempt' | 'previous_run' | 'world_model' | 'plan' | 'progress_state' | 'context_index' | 'provenance';
 } | {
     name: 'read_journal';
     limit: number;
@@ -124,6 +196,11 @@ export type BuilderToolAction = {
     name: 'write_plan';
     value: Record<string, unknown>;
 }
+/** Diagnosis-first pass output; this never changes a live target. */
+ | {
+    name: 'write_diagnosis_report';
+    report: Record<string, unknown>;
+}
 /** Read-only host exploration. Deployment decides the readable scope. */
  | {
     name: 'read_file';
@@ -131,6 +208,23 @@ export type BuilderToolAction = {
 } | {
     name: 'list_directory';
     path: string;
+}
+/** Search text across explicit read-only roots without invoking a shell. */
+ | {
+    name: 'search_text';
+    query: string;
+    roots?: string[];
+    maxResults?: number;
+}
+/** Inspect a source artifact's interface, imports/exports, hash and bounded preview. */
+ | {
+    name: 'inspect_file';
+    path: string;
+}
+/** Follow factual producer/consumer/test/report edges; never returns a repair recommendation. */
+ | {
+    name: 'trace_artifact';
+    artifact: string;
 }
 /** Builder-owned, persistent multi-file scratch space. */
  | {
@@ -145,7 +239,7 @@ export type BuilderToolAction = {
  | {
     name: 'run_workspace_command';
     command: string;
-    args: string[];
+    args?: string[];
     timeoutMs?: number;
 }
 /** A receipt or clarification request for an Actor-delivered message. */
@@ -169,6 +263,22 @@ export type BuilderToolAction = {
     name: 'request_input';
     question: string;
     context?: string;
+    kind?: 'clarification' | 'choice' | 'verification';
+    options?: Array<{
+        id: string;
+        label: string;
+        description?: string;
+    }>;
+    whyNow?: string;
+    evidenceRefs?: string[];
+    blocking?: boolean;
+}
+/** Capability-owned execution. The kernel records the call but does not interpret its meaning. */
+ | {
+    name: 'invoke_capability';
+    capability: string;
+    tool: string;
+    input: Record<string, unknown>;
 }
 /** Generic frozen proposal for a capability; it never applies a target change. */
  | {
@@ -194,9 +304,14 @@ export declare function builderRunPaths(root: string, sessionId: string, id: str
     targetBefore: string;
     previousAttempt: string;
     previousRun: string;
+    diagnosisReport: string;
+    contextIndex: string;
+    provenance: string;
     worldModel: string;
     plan: string;
+    progressState: string;
     journal: string;
+    promptVisible: string;
     events: string;
     snapshots: string;
     workspace: string;
@@ -210,11 +325,27 @@ export declare function builderRunPaths(root: string, sessionId: string, id: str
 export declare class BuilderKernel {
     private readonly root;
     private readonly sessionId;
-    constructor(root: string, sessionId: string);
+    private readonly capabilityRuntimes;
+    private readonly options;
+    constructor(root: string, sessionId: string, capabilityRuntimes?: BuilderCapabilityRuntimeRegistry, options?: BuilderKernelOptions);
     create(input: BuilderRunInput): BuilderRunRecord;
     load(id: string): BuilderRunRecord;
     transition(id: string, state: BuilderRunState): BuilderRunRecord;
     append(id: string, kind: BuilderJournalKind, action: string, result?: Record<string, unknown>, error?: unknown): BuilderJournalEntry;
+    /** Persist the visible prompt input separately from the journal/decision log. */
+    recordPromptVisible(id: string, input: {
+        prompt: string;
+        promptHash: string;
+        promptBytes: number;
+        visibleState: BuilderRunState;
+        lastJournalAction?: string;
+        lastToolResultHash?: string;
+        pendingMessageIds: string[];
+        progressStateVersion?: number;
+        progressStateHash?: string;
+    }): BuilderPromptVisibleEntry;
+    /** Read the compact working memory used to recover a fresh model turn. */
+    progressState(id: string): BuilderProgressState;
     /** Record the model's declared decision without trusting it to write audit data. */
     recordDecision(id: string, decision: BuilderDecision): void;
     context(id: string): {
@@ -223,7 +354,12 @@ export declare class BuilderKernel {
         messages: BuilderMessage[];
         journal: BuilderJournalEntry[];
         events: BuilderEvent[];
+        progressState: BuilderProgressState;
+        diagnosisReport: Record<string, unknown> | null;
+        contextIndex: Record<string, unknown>;
+        provenance: BuilderProvenanceGraph;
     };
+    private contextWithoutProgress;
     messages(id: string): BuilderMessage[];
     events(id: string, afterSeq?: number, limit?: number): BuilderEvent[];
     /**
@@ -238,8 +374,15 @@ export declare class BuilderKernel {
     decide(id: string, decision: BuilderDecision): Record<string, unknown>;
     /** Kernel-owned verifier feedback starts a new immutable builder attempt. */
     reopenFromRejection(id: string, report: Record<string, unknown>): BuilderRunRecord;
+    /** Add machine-readable progress feedback without preventing repeated reads. */
+    private annotateReadFeedback;
     private executeTool;
+    private provenance;
+    private observeArtifact;
     private snapshot;
+    private setPhase;
+    private updateProgressAfterTool;
+    private updateProgress;
     private unacknowledgedMessageIds;
     private freezeSubmissionManifest;
     /** Create a hash-bound, read-only reference for a fresh immutable attempt. */
@@ -247,4 +390,10 @@ export declare class BuilderKernel {
     private emit;
     private submissionDraft;
     private workspacePath;
+    /**
+     * A read/write addressed at a prior run's workspace (absolute path from a
+     * rejection) means the same relative file in this run's workspace during a
+     * repair. Prior assets stay read-only; only the current workspace is writable.
+     */
+    private mapPriorWorkspacePath;
 }

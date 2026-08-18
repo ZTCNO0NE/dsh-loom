@@ -27,6 +27,12 @@
 - 修复：compact prompt 注入 rejection facts（failureSummary/previousCandidatePath/oraclePath + "fix the artifact → run oracle → submit"），新增单测；**173/173**。
 - 待办：同一 fixture 单跑 V4 Flash fresh repair pass 对照，确认"问题可见"是否改善收敛。
 
+### 2026-08-19 rejection-repair 复测：0/3 → 33%（1/3）
+
+- 四个根因逐层修复后收敛：① 失败事实直灌 prompt（0/3）；② prior-run 绝对路径→当前 workspace 映射（0/3，但能写出候选）；③ `workspace/` 前缀归一化（0/3，2/3 oracle 通过）；④ submit 缺 draft 的报错回显 journal（**1/3 完整闭环**：修复导出→oracle strict-order-pass→write_submission→submit）。
+- 剩余：成功信号后模型仍可能继续编辑并覆盖好候选（attempt 3），提交纪律不稳；不宣称已解决。
+- 记录与代码：run-records 5 份 + `src/builder/{kernel,driver}.ts` 修复；测试 **177/177**。
+
 ### 2026-08-18 23:15 短上下文 + 无进展跳转 + 用户中途指导闭环实验
 
 - 本轮确定性收缩：compact prompt 保留 durable progress/index、pending 原话和**最近一条压缩真实工具反馈**（上限 1.2KB），不恢复全量 journal/snapshot；无进展断路器在声明一次 `world_model/plan` 后立即恢复自由探索，不再强制下一种工具。

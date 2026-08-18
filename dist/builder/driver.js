@@ -86,6 +86,12 @@ export class BuilderDriver {
                 const result = kernel.decide(runId, decision);
                 if (decision.kind === 'tool')
                     toolSteps++;
+                if (decision.kind === 'tool' && this.options.successMarker
+                    && kernel.load(runId).state !== 'submitted' && kernel.load(runId).state !== 'aborted'
+                    && result && typeof result === 'object' && result.exitCode === 0
+                    && `${String(result.stdout ?? '')}${String(result.stderr ?? '')}`.includes(this.options.successMarker)) {
+                    kernel.transition(runId, 'ready_to_submit');
+                }
                 if (decision.kind === 'submit') {
                     return { state: 'submitted', runId, proposal: kernel.proposal(runId) ?? undefined, modelTurns, toolSteps };
                 }
@@ -98,9 +104,12 @@ export class BuilderDriver {
                 // error is journaled by the kernel and appears in the next prompt.
                 void result;
             }
-            catch {
+            catch (error) {
                 if (decision.kind === 'tool')
                     toolSteps++;
+                // A rejected decision (e.g. submit without a draft) is feedback, not
+                // a silent failure: journal it so the next prompt can correct it.
+                kernel.append(runId, 'error', decision.kind === 'tool' ? decision.action.name : decision.kind, undefined, error);
             }
         }
         const reason = Date.now() - startedAt > maxWallTimeMs
@@ -136,6 +145,9 @@ export class BuilderDriver {
         const pendingMessages = messages.filter((message) => !acknowledged.has(message.id));
         const capabilities = new BuilderCapabilityRegistry().registerAll(this.options.capabilities ?? []);
         const progressBanner = this.options.progressBanner ? deriveProgressBanner(context.journal) : '';
+        const evidenceSatisfied = context.run.state === 'ready_to_submit' && this.options.successMarker
+            ? `Oracle evidence satisfied (marker=${this.options.successMarker}). The remaining valid actions are write_submission then submit, or abort with a reason; do not keep exploring.`
+            : '';
         if (this.options.compactPrompt)
             return this.compactPrompt(context, pendingMessages, progressBanner);
         return [
@@ -183,6 +195,7 @@ export class BuilderDriver {
             ...(diagnosisMode ? [] : [JSON.stringify({ kind: 'submit' })]),
             JSON.stringify({ kind: 'abort', reason: '证据不足或不能安全提交' }),
             '出现 error/rejection 时，不把错误文本当结论。先按需沿事实关系追因：trace_artifact(error/report) → consumer 的实际输入 → producer/prior run → inspect_file 接口/实现 → 自主编辑、实验、提问、提交或 abort。每个因果主张必须引用已读文件或工具反馈；图谱不提供修复答案。工具报错和命令的 stdout/stderr 是下一轮可见反馈；由你判断可否纠正、继续或 abort。预检不是 verifier 通过。',
+            ...(evidenceSatisfied ? [evidenceSatisfied] : []),
             ...(progressBanner ? [progressBanner] : []),
             ...(context.progressState.progressRequirement !== 'none'
                 ? [`KERNEL PROGRESS CHECKPOINT (deterministic, temporary): ${context.progressState.progressRequirement === 'declare_direction'
@@ -213,6 +226,9 @@ export class BuilderDriver {
         const diagnosisMode = context.run.mode === 'diagnosis';
         const capabilities = new BuilderCapabilityRegistry().registerAll(this.options.capabilities ?? []);
         const latestFeedback = [...context.journal].reverse().find((entry) => entry.kind === 'tool' || entry.kind === 'error');
+        const evidenceSatisfied = context.run.state === 'ready_to_submit' && this.options.successMarker
+            ? `Oracle evidence satisfied (marker=${this.options.successMarker}). The remaining valid actions are write_submission then submit, or abort with a reason; do not keep exploring.`
+            : '';
         const previousAttempt = context.input.previousAttempt;
         const rejectionFacts = previousAttempt && (previousAttempt.verdict === 'rejected' || previousAttempt.failureSummary)
             ? {
@@ -245,7 +261,7 @@ export class BuilderDriver {
             `Capability ids (metadata is available from the context index): ${capabilities.list().map((capability) => capability.id).join(', ') || '(none)'}`,
             `Durable context index: ${String(context.contextIndex.path ?? 'read_input(context_index)')}. It contains every durable file address and a one-line content overview. Read it first only when you need to locate evidence; then read only the necessary entry.`,
             rejectionFacts
-                ? `Previous attempt rejection (facts, not pointers): ${JSON.stringify(rejectionFacts)}. Your job is to fix the artifact at previousCandidatePath so it satisfies the oracle at oraclePath: read it, make the minimal correction, run the oracle command, then write_submission and submit.`
+                ? `Previous attempt rejection (facts, not pointers): ${JSON.stringify(rejectionFacts)}. Your job is to fix the candidate so it satisfies the oracle at oraclePath: read previousCandidatePath (read-only), make the minimal correction, and write the repaired file to YOUR OWN workspace using a relative path such as actor-loop.mjs (the workspace tool is already rooted at your workspace; do not write to previousCandidatePath), run the oracle command against your workspace file, then write_submission and submit.`
                 : '',
             `Artifact/provenance graph: ${JSON.stringify({ path: 'read_input(provenance)', artifactCount: context.provenance.artifacts.length, failureIds: context.provenance.artifacts.filter((artifact) => artifact.role === 'failure_report').map((artifact) => artifact.id), candidateIds: context.provenance.artifacts.filter((artifact) => artifact.role === 'candidate').map((artifact) => artifact.id) })}. For an error or rejection, trace the report/candidate artifact before guessing a repair.`,
             `Pending Actor messages: ${JSON.stringify(pendingMessages.map((message) => ({ id: message.id, rawUserText: message.rawUserText, actorMemo: message.actorMemo, evidenceRefs: message.evidenceRefs })))}`,
@@ -255,6 +271,7 @@ export class BuilderDriver {
                 ? `Latest observable tool feedback (compressed; use it before rereading): ${JSON.stringify({ seq: latestFeedback.seq, kind: latestFeedback.kind, action: latestFeedback.action, ...(latestFeedback.result ? { result: compactPromptValue(latestFeedback.result, 1_200) } : {}), ...(latestFeedback.error ? { error: latestFeedback.error.slice(0, 800) } : {}) })}`
                 : '',
             'The immutable actor snapshot and Actor messages are the task handoff. Read actor only if the pending message, provenance graph and index do not identify the next evidence. Treat errors as pointers into artifacts: trace → inspect → change/test, not as an instruction to repeat a broad read.',
+            evidenceSatisfied,
             progressBanner,
         ].filter(Boolean).join('\n\n');
     }

@@ -21,6 +21,9 @@ export interface BuilderDriverOptions {
         prompt: number;
         completion: number;
     }) => void;
+    /** Deterministic terminal signal: a run_workspace_command whose stdout/stderr
+     * contains this marker with exit 0 marks the run ready_to_submit. */
+    successMarker?: string;
 }
 export interface BuilderDriverOutcome {
     state: 'submitted' | 'aborted' | 'paused' | 'cancelled' | 'waiting_for_input';

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -15,6 +15,81 @@ describe('BuilderKernel', () => {
     expect(resumed.run.state).toBe('exploring')
     expect(resumed.input).toMatchObject({ actor: { frameWatermark: 4 }, targetBefore: { entry: 'base' }, previousAttempt: { verdict: 'rejected' } })
     expect(resumed.journal).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'tool', action: 'inspect-entry', error: 'missing entry' })]))
+    expect(resumed.progressState).toMatchObject({ state: 'exploring', phase: 'exploring', known: [], unknowns: [] })
+  })
+
+  it('maintains a compact progress state without replacing the full evidence files', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-progress-state-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: { requirements: '提高真实任务成功率' }, targetBefore: { version: 1 } })
+    expect(kernel.progressState(run.id)).toMatchObject({
+      objective: '提高真实任务成功率', phase: 'observing', unchangedReadStreak: 0,
+      nextIntent: expect.stringContaining('falsifiable hypothesis'),
+    })
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_world_model', value: {
+      hypothesis: '减少重复读取可提高有效探索率', known: ['源码已可读'], unknowns: ['仿真是否复现'], nextIntent: '运行最小仿真',
+    } } })
+    expect(kernel.progressState(run.id)).toMatchObject({
+      phase: 'hypothesizing', hypothesis: '减少重复读取可提高有效探索率', known: ['源码已可读'], unknowns: ['仿真是否复现'], nextIntent: '运行最小仿真',
+    })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_input', document: 'progress_state' } })).toMatchObject({
+      document: 'progress_state', value: expect.objectContaining({ hypothesis: '减少重复读取可提高有效探索率' }),
+    })
+    expect(readFileSync(builderRunPaths(root, 's', run.id).progressState, 'utf8')).toContain('减少重复读取可提高有效探索率')
+  })
+
+  it('persists a durable context index that maps prompt references to full evidence files', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-context-index-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: { requirements: 'inspect a real failure', sourcePath: '/tmp/source.ts' }, targetBefore: { baseline: 'before' } })
+    const index = kernel.context(run.id).contextIndex
+    expect(index).toMatchObject({ runId: run.id, entries: expect.arrayContaining([
+      expect.objectContaining({ id: 'actor', path: builderRunPaths(root, 's', run.id).actor }),
+      expect.objectContaining({ id: 'journal', path: builderRunPaths(root, 's', run.id).journal }),
+      expect.objectContaining({ id: 'workspace', path: builderRunPaths(root, 's', run.id).workspace }),
+    ]) })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_input', document: 'context_index' } })).toMatchObject({
+      document: 'context_index', value: expect.objectContaining({ runId: run.id }),
+    })
+  })
+
+  it('persists an evidence-backed diagnosis report, waits for user direction, and forbids proposal submission', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-diagnosis-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ mode: 'diagnosis', actor: { requirements: '让 loop 更智能' }, targetBefore: {} })
+    const report = {
+      observations: [{ fact: 'recent runs repeatedly reread unchanged source', evidenceRefs: ['journal:18'] }],
+      directions: [
+        { id: 'convergence', goal: 'reduce repeated unchanged reads before a candidate is formed', evidenceRefs: ['journal:18'], unknowns: ['whether the user prioritizes reliability or latency'], cost: 'low' },
+        { id: 'task-success', goal: 'measure a concrete actor task failure before changing the loop', evidenceRefs: ['actor-handoff.md'], unknowns: ['which task matters most'], cost: 'medium' },
+      ],
+      question: {
+        question: 'Which direction should the next implementation pass prioritize?',
+        options: [{ id: 'convergence', label: 'Convergence' }, { id: 'task-success', label: 'Task success' }],
+        whyNow: 'The available evidence shows both problems but cannot infer the product priority.',
+        evidenceRefs: ['journal:18', 'actor-handoff.md'],
+      },
+    }
+
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'write_diagnosis_report', report } })).toMatchObject({
+      written: 'diagnosis_report', waitingFor: 'user_direction',
+    })
+    expect(kernel.load(run.id)).toMatchObject({ mode: 'diagnosis', state: 'waiting_for_input', phase: 'waiting_for_actor' })
+    expect(kernel.context(run.id).diagnosisReport).toEqual(report)
+    expect(kernel.events(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'diagnosis_report', payload: expect.objectContaining({ directions: 2 }) }),
+    ]))
+    expect(() => kernel.decide(run.id, { kind: 'submit' })).toThrow(/not runnable/)
+
+    const prohibited = kernel.create({ mode: 'diagnosis', actor: {}, targetBefore: {} })
+    expect(() => kernel.decide(prohibited.id, { kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'patch-evolution', payload: { id: 'must-not-submit' } } } })).toThrow(/diagnosis pass cannot write a proposal/)
+    expect(kernel.proposal(prohibited.id)).toBeNull()
+
+    const malformed = kernel.create({ mode: 'diagnosis', actor: {}, targetBefore: {} })
+    expect(() => kernel.decide(malformed.id, {
+      kind: 'tool', action: { name: 'write_diagnosis_report', report: { directions: [{ id: 'only' }] } },
+    })).toThrow(/diagnosis direction requires goal/)
+    expect(kernel.load(malformed.id).state).toBe('exploring')
   })
 
   it('does not permit a terminal builder run to be reopened', () => {
@@ -35,6 +110,10 @@ describe('BuilderKernel', () => {
     expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })).toMatchObject({
       path: source,
       content: 'actor failed at step 2\n',
+      observation: { newInformation: true },
+    })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })).toMatchObject({
+      observation: { newInformation: false, unchangedSinceSeq: expect.any(Number) },
     })
     expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'list_directory', path: root } })).toMatchObject({
       entries: expect.arrayContaining([expect.objectContaining({ name: 'actor-state.txt', type: 'file' })]),
@@ -51,6 +130,78 @@ describe('BuilderKernel', () => {
     kernel.decide(run.id, { kind: 'tool', action: { name: 'write_submission', proposal } })
     expect(kernel.decide(run.id, { kind: 'submit' })).toMatchObject({ state: 'submitted' })
     expect(kernel.proposal(run.id)).toEqual(proposal)
+  })
+
+  it('builds a factual rejection-to-candidate provenance route and exposes read-only causal navigation tools', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-provenance-'))
+    const candidate = join(root, 'candidate.mjs')
+    const oracle = join(root, 'oracle.mjs')
+    writeFileSync(candidate, 'export async function runActorLoop() { return 1 }\n', 'utf8')
+    writeFileSync(oracle, 'import { run } from "./candidate.mjs"\nawait run()\n', 'utf8')
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({
+      actor: { objective: 'repair the rejected candidate' }, targetBefore: {},
+      previousAttempt: { verdict: 'rejected', failureSummary: 'TypeError: run is not a function', candidatePath: candidate, oraclePath: oracle },
+    })
+    const graph = kernel.context(run.id).provenance
+    const failure = graph.artifacts.find((artifact) => artifact.role === 'failure_report')
+    expect(failure).toBeDefined()
+    const traced = kernel.decide(run.id, { kind: 'tool', action: { name: 'trace_artifact', artifact: failure!.id } })
+    expect(traced).toMatchObject({
+      found: true,
+      relatedArtifacts: expect.arrayContaining([expect.objectContaining({ path: candidate, role: 'candidate' })]),
+      edges: expect.arrayContaining([expect.objectContaining({ relation: 'consumes' })]),
+    })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'inspect_file', path: candidate } })).toMatchObject({
+      path: candidate,
+      exports: expect.arrayContaining(['runActorLoop']),
+      language: 'javascript',
+    })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'search_text', query: 'runActorLoop', roots: [root] } })).toMatchObject({
+      matches: expect.arrayContaining([expect.objectContaining({ path: candidate })]),
+    })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_input', document: 'provenance' } })).toMatchObject({
+      value: expect.objectContaining({ artifacts: expect.arrayContaining([expect.objectContaining({ path: candidate })]) }),
+    })
+  })
+
+  it('persists a structured clarification request without granting verification authority', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    expect(kernel.decide(run.id, {
+      kind: 'tool',
+      action: {
+        name: 'request_input', kind: 'choice',
+        question: '并发安全和吞吐应优先哪一个？',
+        options: [{ id: 'safe', label: '优先安全' }, { id: 'throughput', label: '优先吞吐', description: '需要真实性能 probe' }],
+        whyNow: '两个本地模拟均通过，无法确定产品取舍。',
+        evidenceRefs: ['artifact/sim-1.json'],
+      },
+    })).toMatchObject({ requested: true, kind: 'choice', blocking: true })
+    expect(kernel.load(run.id).state).toBe('waiting_for_input')
+    expect(kernel.events(run.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'needs_input', payload: expect.objectContaining({ options: expect.arrayContaining([expect.objectContaining({ id: 'safe' })]), whyNow: expect.any(String) }) }),
+    ]))
+    expect(kernel.load(run.id).phase).toBe('waiting_for_actor')
+  })
+
+  it('rejects malformed choice and verification requests without changing the run phase', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-input-guards-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    expect(() => kernel.decide(run.id, {
+      kind: 'tool', action: { name: 'request_input', kind: 'choice', question: '选择？', options: [{ id: 'only', label: '只有一个' }] },
+    })).toThrow(/at least two options/)
+    expect(kernel.load(run.id).phase).toBe('exploring')
+    expect(() => kernel.decide(run.id, {
+      kind: 'tool', action: { name: 'request_input', kind: 'verification', question: '请做真实验证。', whyNow: '仿真不足' },
+    })).toThrow(/evidenceRefs/)
+    expect(kernel.load(run.id).phase).toBe('exploring')
+    expect(kernel.decide(run.id, {
+      kind: 'tool', action: { name: 'request_input', kind: 'verification', question: '请做真实验证。', whyNow: '仿真不足', evidenceRefs: ['state/sim.json'] },
+    })).toMatchObject({ requested: true, kind: 'verification' })
+    expect(kernel.load(run.id).phase).toBe('waiting_for_verification')
   })
 
   it('records allowlisted tool feedback, freezes submission, and hands rejection to a fresh run', () => {
@@ -90,6 +241,48 @@ describe('BuilderKernel', () => {
     const journalPath = builderRunPaths(root, 's', run.id).journal
     expect(statSync(journalPath).size).toBeLessThan(1_000_000)
     expect(kernel.load(run.id).state).toBe('aborted')
+  })
+
+  it('can reject unchanged reads at an experimental deterministic threshold without aborting the run', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-progress-guard-'))
+    const kernel = new BuilderKernel(root, 's', undefined, { repeatReadRejectAfter: 2 })
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    const source = join(root, 'stable.txt')
+    writeFileSync(source, 'stable feedback\n', 'utf8')
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })).toThrow(/unchanged read rejected/)
+    expect(kernel.load(run.id).state).toBe('exploring')
+    expect(kernel.context(run.id).journal).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'error', action: 'read_file', result: expect.objectContaining({ guard: 'repeatReadRejectAfter' }) }),
+    ]))
+  })
+
+  it('turns a no-progress rejection into public direction and evidence checkpoints when enabled', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-checkpoint-'))
+    const kernel = new BuilderKernel(root, 's', undefined, {
+      repeatReadRejectAfter: 2,
+      enforceProgressCheckpoints: true,
+    })
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    const source = join(root, 'stable.txt')
+    writeFileSync(source, 'stable feedback\n', 'utf8')
+
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: join(root, 'another.txt') } })).toThrow(/unchanged read rejected/)
+    expect(kernel.progressState(run.id)).toMatchObject({ progressRequirement: 'declare_direction' })
+
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'read_journal', limit: 5 } })).toThrow(/progress checkpoint required/)
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'write_world_model', value: {} } })).toThrow(/hypothesis is required/)
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_world_model', value: {
+      hypothesis: '公开假设后才能区分重复事实和新证据', known: ['稳定文件内容未变化'], unknowns: ['仿真是否能复现'], nextIntent: '运行一次最小仿真',
+    } } })
+    expect(kernel.progressState(run.id)).toMatchObject({ progressRequirement: 'none' })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })).toMatchObject({ content: 'stable feedback\n' })
+    expect(kernel.context(run.id).journal).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'error', result: expect.objectContaining({ guard: 'progressCheckpoint', progressRequirement: 'declare_direction' }) }),
+    ]))
   })
 
   it('allows a repeated read when the workspace feedback changes', () => {
@@ -194,5 +387,36 @@ describe('BuilderKernel', () => {
     expect(() => kernel.decide(paused.id, { kind: 'tool', action: { name: 'read_journal', limit: 1 } })).toThrow(/not runnable/)
     expect(kernel.control(paused.id, 'cancel').state).toBe('cancelled')
     expect(() => kernel.control(paused.id, 'pause')).toThrow(/terminal/)
+  })
+
+  it('maps a prior-run workspace absolute path to the current repair workspace', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-workspace-map-'))
+    const kernel = new BuilderKernel(root, 's')
+    const prior = kernel.create({ actor: { objective: 'seed' }, targetBefore: {} })
+    const priorPaths = builderRunPaths(root, 's', prior.id)
+    kernel.decide(prior.id, { kind: 'tool', action: { name: 'write_workspace_file', path: 'actor-loop.mjs', content: 'export async function runActorLoop() {}' } })
+    const priorFile = join(priorPaths.workspace, 'actor-loop.mjs')
+    expect(existsSync(priorFile)).toBe(true)
+
+    const repair = kernel.create({ actor: { objective: 'fix' }, targetBefore: {} })
+    const repairPaths = builderRunPaths(root, 's', repair.id)
+    kernel.decide(repair.id, { kind: 'tool', action: { name: 'write_workspace_file', path: priorFile, content: 'export async function run(tools) { return [] }' } })
+    const repaired = join(repairPaths.workspace, 'actor-loop.mjs')
+    expect(readFileSync(repaired, 'utf8')).toContain('export async function run(tools)')
+    expect(readFileSync(priorFile, 'utf8')).toContain('runActorLoop')
+
+    expect(() => kernel.decide(repair.id, { kind: 'tool', action: { name: 'write_workspace_file', path: '/etc/passwd', content: 'x' } })).toThrow(/escapes builder workspace/)
+  })
+
+  it('normalizes a workspace-prefixed relative path to the run workspace root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-workspace-prefix-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_workspace_file', path: 'workspace/actor-loop.mjs', content: 'export async function run(tools) { return [] }' } })
+    const runPaths = builderRunPaths(root, 's', run.id)
+    expect(readFileSync(join(runPaths.workspace, 'actor-loop.mjs'), 'utf8')).toContain('export async function run(tools)')
+    expect(existsSync(join(runPaths.workspace, 'workspace', 'actor-loop.mjs'))).toBe(false)
+    const read = kernel.decide(run.id, { kind: 'tool', action: { name: 'read_workspace_file', path: 'workspace/actor-loop.mjs' } })
+    expect(read).toMatchObject({ path: 'actor-loop.mjs' })
   })
 })

@@ -590,4 +590,15 @@
 - 修复：`BuilderDriver.compactPrompt` 在存在 rejection 时注入 `Previous attempt rejection (facts, not pointers)`：verdict、failureSummary（≤1200 字符）、firstDivergence、previousCandidatePath、oraclePath，并显式指示"修复 previousCandidatePath 使其满足 oracle，然后运行 oracle 并提交"。
 - 测试：新增 compact prompt 失败事实单测；全量 **173/173**、check/build/diff-check 绿。
 - 状态：尚未跑 V4 Flash A/B，不宣称修复收敛已改善；下一步用同一 fixture 单跑一次 fresh repair pass 对照。
+
+### 2026-08-19 rejection-repair-convergence-1of3（失败事实+路径语义+终态信号 复测）
+
+- 复测序列（同一 fixture、20 turns/40 tools/2400 tokens、thinking disabled、compact prompt）：
+  1. 仅加 rejection facts：**0/3**。模型写 world model 明示"候选没导出 run，需修复"，但三次 `write_workspace_file` 写上一轮绝对路径全部被拒（workspace escapes）。
+  2. 加 prior-workspace 路径映射：**0/3**，但第 3 次编辑成功；文件落成 `workspace/workspace/actor-loop.mjs`（提示语误导"workspace/actor-loop.mjs"为相对路径）。
+  3. 加 `workspace/` 前缀归一化 + 提示改为 `actor-loop.mjs`：**0/3**，2/3 写出正确候选且 post-check oracle `strict-order-pass`；但成功后模型直接 `submit`，缺 draft 的报错被 driver 静默吞掉，5 次 submit 全部失败。
+  4. 加 submit 决策错误回显 journal：**1/3（33%）**——第 2 次完整闭环：修复导出 → oracle exit 0 `strict-order-pass` → write_submission → submit，proposal 带 evidence；第 1 次仍重复读取、第 3 次反复编辑+重跑 oracle（最终文件被覆盖成坏候选）未提交。
+- 四个确定性修复：compact prompt 注入 rejection facts；prior-run workspace 绝对路径映射到当前 run；`workspace/` 前缀归一化（含 read/write 结果返回归一化相对路径）；driver 对 submit/continue 等决策错误落 journal 反馈（不再静默）。
+- 记录：`run-records/2026-08-19-builder-oracle-rejection-{facts,workspace-map,workspace-normalize,ready-to-submit,submit-feedback}-convergence-rate-official.json`；成功样本 `submit-feedback` 记录 attempt 2。
+- 结论：收敛从 0% 到 33% 的增益来自"问题可见 + 工具路径语义正确 + 失败反馈可见"，不是提升回合数；剩余失败模式是模型在成功信号后仍继续编辑/覆盖候选，提交纪律仍不稳。
 - 结论等级：**causal-navigation-visible / causal-navigation-adoption-failed / repair-convergence=0%**。下一诊断应分析完整 provenance artifact 的表征与 runtime action surface；不要再以更多 token、更多尾插文本或更多固定 checkpoint 掩盖该失败。

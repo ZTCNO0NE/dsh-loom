@@ -371,6 +371,44 @@ describe('BuilderDriver', () => {
     expect(prompts[0]).toContain('candidate.run is not a function')
     expect(prompts[0]).toContain('/fixture/actor-loop.mjs')
     expect(prompts[0]).toContain('/fixture/strict-order-oracle.mjs')
-    expect(prompts[0]).toContain('fix the artifact')
+    expect(prompts[0]).toContain('YOUR OWN workspace')
+  })
+
+  it('marks a run ready_to_submit on a passing oracle marker and submits', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-success-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: { objective: 'fix candidate' }, targetBefore: {} })
+    const prompts: string[] = []
+    const outcome = await new BuilderDriver({
+      llm: decisionsLlm([
+        { kind: 'tool', action: { name: 'run_workspace_command', command: 'node', args: ['-e', "console.log('strict-order-pass')"] } },
+        { kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'patch-evolution', patch: { id: 'p1', targetId: 'x', targetKind: 'config', config: {}, dependencies: [], rationale: 'r', expectedOutcome: 'o', version: 1, createdAt: new Date().toISOString() } } } },
+        { kind: 'submit' },
+      ], prompts),
+      provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task', compactPrompt: true,
+      successMarker: 'strict-order-pass',
+    }).run(kernel, run.id)
+    expect(outcome.state).toBe('submitted')
+    expect(kernel.load(run.id).state).toBe('submitted')
+    expect(prompts[1]).toContain('Oracle evidence satisfied')
+  })
+
+  it('surfaces a rejected submit (missing draft) as visible feedback and recovers', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-submit-feedback-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    const prompts: string[] = []
+    const proposal = { capability: 'patch-evolution', patch: { id: 'p1', targetId: 'x', targetKind: 'config', config: {}, dependencies: [], rationale: 'r', expectedOutcome: 'o', version: 1, createdAt: new Date().toISOString() } }
+    const outcome = await new BuilderDriver({
+      llm: decisionsLlm([
+        { kind: 'submit' },
+        { kind: 'tool', action: { name: 'write_submission', proposal } },
+        { kind: 'submit' },
+      ], prompts),
+      provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task', compactPrompt: true,
+    }).run(kernel, run.id)
+    expect(outcome.state).toBe('submitted')
+    expect(kernel.proposal(run.id)).toEqual(proposal)
+    expect(prompts[1]).toContain('builder submission requires a proposal draft')
   })
 })
