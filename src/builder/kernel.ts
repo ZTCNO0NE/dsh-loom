@@ -477,6 +477,10 @@ export class BuilderKernel {
     if (action.name === 'acknowledge_message') {
       const message = this.messages(id).find((item) => item.id === action.messageId)
       if (!message) throw new Error(`actor message is unavailable: ${action.messageId}`)
+      const priorAck = readJsonl<BuilderEvent>(paths.events).find((event) => event.kind === 'message_ack' && event.payload.messageId === action.messageId)
+      if (priorAck) {
+        return { acknowledged: action.messageId, ...(priorAck.payload as Record<string, unknown>), deduplicated: true }
+      }
       const payload = {
         messageId: action.messageId,
         status: action.status.slice(0, 80),

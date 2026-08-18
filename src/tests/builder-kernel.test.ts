@@ -132,11 +132,16 @@ describe('BuilderKernel', () => {
       kind: 'tool',
       action: { name: 'publish_progress', phase: 'diagnosis', summary: '已开始检查调度路径。', question: '是否优先覆盖 12 工具场景？' },
     })
+    expect(kernel.decide(run.id, {
+      kind: 'tool',
+      action: { name: 'acknowledge_message', messageId: message.id, status: 'accepted', understanding: '重复回执不应增加事件。' },
+    })).toMatchObject({ acknowledged: message.id, deduplicated: true })
     expect(kernel.events(run.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'actor_message_received', payload: expect.objectContaining({ messageId: message.id }) }),
       expect.objectContaining({ kind: 'message_ack', payload: expect.objectContaining({ messageId: message.id, status: 'accepted' }) }),
       expect.objectContaining({ kind: 'builder_update', payload: expect.objectContaining({ phase: 'diagnosis', question: '是否优先覆盖 12 工具场景？' }) }),
     ]))
+    expect(kernel.events(run.id).filter((event) => event.kind === 'message_ack' && event.payload.messageId === message.id)).toHaveLength(1)
   })
 
   it('deduplicates retried actor delivery, rejects conflicting reuse, and requires acknowledgement before submit', () => {

@@ -358,6 +358,10 @@ export class BuilderKernel {
             const message = this.messages(id).find((item) => item.id === action.messageId);
             if (!message)
                 throw new Error(`actor message is unavailable: ${action.messageId}`);
+            const priorAck = readJsonl(paths.events).find((event) => event.kind === 'message_ack' && event.payload.messageId === action.messageId);
+            if (priorAck) {
+                return { acknowledged: action.messageId, ...priorAck.payload, deduplicated: true };
+            }
             const payload = {
                 messageId: action.messageId,
                 status: action.status.slice(0, 80),

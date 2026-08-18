@@ -427,3 +427,13 @@
 - 提交证据：`submission/manifest.json` 绑定 proposal/input/target-before hash 和 evidence/artifact refs。legacy staging draft 在 preflight 时补写同一 manifest；提交时发现声明产物或证据被修改/删除即 fail-closed。
 - 生命周期：新增 Kernel `pause` / `cancel`，Builder `request_input` 产生 typed `needs_input` event 并进入 `waiting_for_input`；Actor-facing `meta_builder_control` 的 `resume` 创建 `previousRun` 资产继承的新 attempt，并重新使用完整 Builder→裁决→gate executor，不重放中断副作用。job 如实落盘 paused/waiting_for_input/cancelled。
 - 确定性验证：`npm run check`、`npm test` **148/148**、`npm run build`、`git diff --check` 全绿；所有测试均使用临时隔离目录，未调用官方 API、未触碰生产/profile。仍需单独留档一次真实 Actor 多轮 pause→message→resume 演示。
+
+### 2026-08-18 real-actor-builder-mid-guidance（真实多轮中途指导）
+
+- 实验角色：本次由测试驱动器扮演用户与 Actor，Builder 使用官方 DeepSeek V4 Flash（`thinking=disabled`，maxTokens=2048）；只使用新建隔离目录 `/chenzute/dsh-src/eval/meta-workspace-actor-builder-guidance-2026-08-18T074405558Z`，未触碰 actor profile、生产服务或用户 workspace。
+- 初始用户原话：要求检查 actor loop 的可验证改进点，允许小改/重建/替换，但必须基于真实反馈，提交后由 verifier/gate 裁决，不能把未安装候选说成已生效。
+- 中途用户指导：把“真实并发安全与任务成功”置于“单纯降低并发数”之前；若只是串行化且没有提升证据，必须如实说明或请求确认。消息带 `idempotencyKey=guidance-turn-1`，原文、Actor memo 均进入 durable inbox。
+- 生命周期实测：初始 run `builder-1787039045558-793a3afd` 在 1 model turn/1 tool 后收到指导并被 pause；随后创建同 lineage 的新 immutable run `builder-1787039048618-5c0053cf`，`previous-run.json` 继承旧资产。新 run 首轮对初始请求和中途指导均产生 `message_ack`，证明指导跨 run 可见。
+- 结果：新 run 10 model turns/10 tool steps 后 `aborted`，无 proposal、无 verifier/gate、无安装；最终失败原因是 `builder model-turn budget exhausted`。期间三次 `list_directory` 使用不可用相对目录而失败，说明“全局读权限”目前仍缺少明确的源码根目录/探索入口投影；Builder 能看到指导，但没有收敛到提交。
+- 发现并修复：同一消息重复 `acknowledge_message` 以前会重复写 `message_ack` 事件，已改为 Kernel 幂等回执并加入回归测试。该修复不改变本次真机记录，后续重跑需确认重复回执不再占用回合。
+- 证据：`/chenzute/dsh-src/eval/run-records/2026-08-18T074405558Z-real-actor-builder-mid-guidance.json`。结论等级为 **communication-and-lifecycle-proof / no-adjudication**：证明用户中途指导的原文保真、事件回执、pause→immutable resume 和跨 run 继承；不证明候选质量、verifier/gate 通过或 loop 性能提升。

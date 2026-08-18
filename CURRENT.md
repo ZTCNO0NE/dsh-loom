@@ -23,6 +23,7 @@
 - 消息使用 Actor 稳定 `idempotencyKey` 去重；同 key 不同内容 fail-closed。`meta_builder_events` 返回 `${lineageId}:${runId}:${seq}` composite cursor，run 切换自动 `reset=true`，不会因 seq 重用漏事件。
 - `submission/manifest.json` 绑定 proposal、input、target-before、evidence/artifact hash；提交前若任一冻结内容变化即拒绝。
 - Kernel/Driver/Gateway 已覆盖 pause/cancel/resume 与 `request_input → needs_input`；resume 会保留旧 run 只读资产并重新走同一后台 executor。下一步只需做一次隔离 Actor 真机多轮演示，不再扩张协议边界。
+- 已完成一次真实官方 Builder 多轮中途指导实验：证据见 `docs/research/run-log.md` 与 `/chenzute/dsh-src/eval/run-records/2026-08-18T074405558Z-real-actor-builder-mid-guidance.json`。通信、pause→immutable resume、原文/memo 保真均通过；Builder 因相对源码目录探索失败和回合预算耗尽未提交 proposal，故没有 verifier/gate/安装或性能提升结论。后续应先补“源码根目录/候选入口”上下文，再重跑同一案例。
 
 ### 2026-08-18 v1.1 减法定稿（docs/v1-1-route.md）
 
