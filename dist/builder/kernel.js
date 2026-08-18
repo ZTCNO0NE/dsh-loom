@@ -179,8 +179,9 @@ export class BuilderKernel {
         appendJsonl(builderRunPaths(this.root, this.sessionId, id).messages, message);
         this.append(id, 'state', 'actor_message', { messageId: message.id, bytes: Buffer.byteLength(rawUserText, 'utf8'), messageHash: sha256(rawUserText), ...(idempotencyKey ? { idempotencyKey } : {}) });
         this.emit(id, 'actor_message_received', { messageId: message.id, rawUserHash: sha256(rawUserText), ...(actorMemo ? { actorMemoHash: sha256(actorMemo) } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) });
-        if (run.state === 'waiting_for_input')
-            this.transition(id, 'exploring');
+        // A reply is durable input only. The Actor must explicitly resume the
+        // background job; this prevents a message arrival from racing a worker
+        // that has already returned at the needs_input boundary.
         return message;
     }
     /** Kernel-owned lifecycle boundary. A paused/cancelled run never submits. */

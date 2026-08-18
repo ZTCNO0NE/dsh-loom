@@ -182,7 +182,7 @@ describe('BuilderKernel', () => {
     ]))
     expect(() => kernel.decide(waiting.id, { kind: 'tool', action: { name: 'read_journal', limit: 1 } })).toThrow(/not runnable/)
     kernel.receiveActorMessage(waiting.id, '用户确认保留严格顺序。')
-    expect(kernel.load(waiting.id).state).toBe('exploring')
+    expect(kernel.load(waiting.id).state).toBe('waiting_for_input')
 
     const paused = kernel.create({ actor: {}, targetBefore: {} })
     expect(kernel.control(paused.id, 'pause').state).toBe('paused')
