@@ -437,3 +437,9 @@
 - 结果：新 run 10 model turns/10 tool steps 后 `aborted`，无 proposal、无 verifier/gate、无安装；最终失败原因是 `builder model-turn budget exhausted`。期间三次 `list_directory` 使用不可用相对目录而失败，说明“全局读权限”目前仍缺少明确的源码根目录/探索入口投影；Builder 能看到指导，但没有收敛到提交。
 - 发现并修复：同一消息重复 `acknowledge_message` 以前会重复写 `message_ack` 事件，已改为 Kernel 幂等回执并加入回归测试。该修复不改变本次真机记录，后续重跑需确认重复回执不再占用回合。
 - 证据：`/chenzute/dsh-src/eval/run-records/2026-08-18T074405558Z-real-actor-builder-mid-guidance.json`。结论等级为 **communication-and-lifecycle-proof / no-adjudication**：证明用户中途指导的原文保真、事件回执、pause→immutable resume 和跨 run 继承；不证明候选质量、verifier/gate 通过或 loop 性能提升。
+
+### 2026-08-18 real-actor-builder-mid-guidance-rooted（补充源码根目录后的复验）
+
+- 为区分“上下文入口缺失”和 Builder 自身收敛问题，第二次实验只增加了 `/chenzute/dsh-src/deepseek-harness`、`packages/core/agent-loop/src/constants.ts` 两个事实，并保留同一中途指导、pause→resume 操作。其余探索路线仍由 Builder 自主决定。
+- Builder 成功读取并列出源码，未出现第一次的目录错误；但在 18 model turns/18 tools 内仍多次读取相同源码、重复调用 acknowledge（Kernel 已不再重复写 message_ack 事件），最终 `builder model-turn budget exhausted`，无 proposal、无 verifier/gate、无安装。
+- 证据：`/chenzute/dsh-src/eval/run-records/2026-08-18T074750285Z-real-actor-builder-mid-guidance-rooted.json`。该复验把问题定位为 Builder 的收敛/提交纪律，而非 Actor→Builder 消息丢失或路径不可见。结论仍为 **communication-and-lifecycle-proof / no-adjudication**。
