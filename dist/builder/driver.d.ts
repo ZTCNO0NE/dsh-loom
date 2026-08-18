@@ -12,6 +12,10 @@ export interface BuilderDriverOptions {
     maxToolSteps?: number;
     maxTokens?: number;
     maxWallTimeMs?: number;
+    /** Experimental text-only intervention; Kernel permissions remain unchanged. */
+    progressBanner?: boolean;
+    /** Replace repeated full prompt exemplars with a durable context-index map. */
+    compactPrompt?: boolean;
     capabilities?: readonly BuilderCapabilityPlugin[];
     onUsage?: (usage: {
         prompt: number;
@@ -35,6 +39,7 @@ export declare class BuilderDriver {
     constructor(options: BuilderDriverOptions);
     run(kernel: BuilderKernel, runId: string): Promise<BuilderDriverOutcome>;
     private prompt;
+    private compactPrompt;
     private stream;
     private parseDecision;
     private parseTool;

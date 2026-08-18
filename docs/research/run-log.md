@@ -443,3 +443,151 @@
 - 为区分“上下文入口缺失”和 Builder 自身收敛问题，第二次实验只增加了 `/chenzute/dsh-src/deepseek-harness`、`packages/core/agent-loop/src/constants.ts` 两个事实，并保留同一中途指导、pause→resume 操作。其余探索路线仍由 Builder 自主决定。
 - Builder 成功读取并列出源码，未出现第一次的目录错误；但在 18 model turns/18 tools 内仍多次读取相同源码、重复调用 acknowledge（Kernel 已不再重复写 message_ack 事件），最终 `builder model-turn budget exhausted`，无 proposal、无 verifier/gate、无安装。
 - 证据：`/chenzute/dsh-src/eval/run-records/2026-08-18T074750285Z-real-actor-builder-mid-guidance-rooted.json`。该复验把问题定位为 Builder 的收敛/提交纪律，而非 Actor→Builder 消息丢失或路径不可见。结论仍为 **communication-and-lifecycle-proof / no-adjudication**。
+
+### 2026-08-18 capability-runtime-simulation-and-builder-rerun
+
+- 架构落地：Builder Kernel 保留生命周期、journal、workspace、消息与提交冻结；新增 `BuilderCapabilityRuntimeRegistry`，capability 可以注入自己的 runtime tool。`loop-evolution` 和 `workspace-simulation` 由 capability 提供，核心不解释 capability 语义。
+- 新增 `SimulationRunner`：在 Builder-owned workspace 中写入 fixtures、运行命令、记录 stdout/stderr/exit code/duration、输入/fixture/output/report hash；fixture 路径不能逃逸 workspace。simulation 状态只有 `passed/failed/inconclusive`，不等价 verifier verdict。
+- 新增 `compareSimulationToReal`，并运行同一 actor contract 的仿真与隔离真实副本对照（sum/reverse/unknown 三例）：simulation 与 real 的 exitCode/stdout/stderr 全部一致，`consistent=true`，证据 `/chenzute/dsh-src/eval/run-records/2026-08-18-workspace-simulation-real-consistency.json`，claimLevel=`mechanism-consistent`。该实验只证明仿真执行器与对应隔离命令的一致性，不证明真实 DSH profile/live loop 的高保真。
+- 新增结构化 Builder → Actor `request_input`：支持 `clarification`、`choice`、`verification`、options、whyNow、evidenceRefs、blocking。Kernel 只持久化并暂停；Actor 负责向用户解释/转交，用户回复后由 Actor resume 新 immutable run。
+- 真实 Builder 复测：官方 V4 Flash，注册 `workspace-simulation` capability，18 model turns/36 tool budget。结果仍为 18 次重复读取 requirements/source，未调用 simulation、未写 submission、未进入 verifier/gate；记录 `/chenzute/dsh-src/eval/run-records/2026-08-18-builder-simulation-capability-real-run.json`。结论：仿真入口已存在且可用，但工具加入本身未解决开放任务的方向收敛；下一实验必须真实触发 choice/clarification，让用户选择明确目标后再跑同一 Builder。
+- 官方 Builder 最小 choice 测试：任务明确声明“吞吐 vs 顺序安全”不能从任何文件/仿真推导，V4 Flash 在 1 model turn/1 tool 后调用 `request_input(kind=choice)` 并进入 `waiting_for_input`；记录 `/chenzute/dsh-src/eval/run-records/2026-08-18-builder-official-clarification-request.json`。说明 Builder 可触发持久 Actor 交互协议；但内容复用了 prompt 的示例 options，故只计 protocol invocation proof，不计“模型依据证据提出高质量问题”。
+- 完整 action 归因：`builder-simulation-capability-real-run` 的 18 个 tool steps 中，requirements 被读取 15 次、错误 actor source 被读取 3 次；没有读取 durable world model/plan/journal，也没有 workspace 写入、命令执行、simulation、clarification 或 submission。该 trace 不能证明隐藏思维不存在，但证明 Builder 没有把思考转化为可观察的状态推进。为后续区分“模型看到了什么”和“模型做了什么”，`BuilderDriver` 新增 prompt hash、可见状态、上一工具反馈 hash 的 journal 记录，不保存隐藏思维链。
+- 上层使命补强 + 重复读取反馈复测：Builder prompt 增加“帮助 Actor 提升用户体验/任务成功率/安全”的使命与完成定义；read_file/read_input/list_directory/read_journal 对同一 hash 返回 `observation.newInformation=false` 和 `unchangedSinceSeq`。官方 V4 Flash 仍在 18 turns 内重复读 requirements/source，虽已看到 unchanged 反馈，仍未仿真、提问或提交。记录 `/chenzute/dsh-src/eval/run-records/2026-08-18-builder-mission-unchanged-feedback-rerun.json`。结论：使命目标是正确的上层目标，但不能替代任务方向和确定性进展机制。
+
+### 2026-08-18 builder-phase-evidence-guards
+
+- Kernel 落地：`BuilderRunRecord.phase` 持久化 observing/hypothesizing/baseline_simulating/exploring/candidate_simulating/waiting/ready/submitted 等公开里程碑；phase 仅用于观察和恢复，不是探索路线白名单。旧 run 缺 phase 时按 state 兼容读取。
+- 负向约束：`request_input(kind=choice)` 至少两个唯一选项；`kind=verification` 必须有 `whyNow` 与 evidenceRefs。非法请求 fail-closed，错误写入 journal 作为下一回合反馈；正常读写、命令、capability 调用仍开放。
+- 确定性验证：新增 Kernel guard/phase 测试，完整套件 **154/154**，`npm run check`、`npm run build`、`git diff --check` 通过。
+- 官方 V4 Flash 观察记录：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-phase-guard-real-run.json`；18 model turns/18 tool steps，仍重复读取 requirements（及 actor source），没有 world-model/plan、simulation、choice、submission，最终预算中止。phase guard 没有改变模型的开放任务收敛性；当前结论仍为 **kernel-protocol-proof / no-adjudication**，下一步应以明确的用户 choice 或可验证目标重跑，而不是继续增加工具白名单。
+
+### 2026-08-18 builder-direction-awareness
+
+- **缺证据/缺方向、无显式提问指令**：V4 Flash 在 1 回合选择 `abort`，理由明确指出“无源码、无 oracle、无用户偏好，无法安全提交改进候选”。记录 `/chenzute/dsh-src/eval/run-records/2026-08-18-builder-direction-awareness-no-explicit-ask.json`。结论：能识别缺口，但不一定主动沟通。
+- **可读源码 + 可仿真，但产品优先级不可推导、无显式‘请提问’指令**：V4 Flash 先读 actor source 与 requirements，第三回合主动调用 `request_input(kind=choice)`；问题为“需要用户确认哪一项优先级？”，选项为 throughput/ordering，带 `whyNow`、`evidenceRefs=[journal:5,journal:8]`、`blocking=true`，Kernel phase=`waiting_for_actor`。记录 `/chenzute/dsh-src/eval/run-records/2026-08-18-builder-direction-choice-no-explicit-ask.json`。
+- 结论等级：**direction-awareness + actor-choice-protocol-proof**。Builder 已能在仍有可探索事实、但无法从证据决定产品取舍时主动向 Actor 请求选择；下一步是回传用户原话/selectedOption，resume 新 immutable run，验证它是否改变 hypothesis/nextIntent 并继续 simulation→submit。
+
+### 2026-08-18 builder-direction-choice-resume-e2e
+
+- 第一 run 在 3 turns/3 tools 后主动发出 choice；Actor 将用户原话“用户选择优先吞吐，但不得牺牲已定义的安全契约；请验证候选后继续”与 `selectedOption=throughput` 写入旧 run inbox，并创建新 immutable run，继承旧 run 的 workspace/journal/assets hash。
+- 第二 run 首轮 `acknowledge_message` 的理解为“throughput-first while preserving the safety contract”，证明原话、选择和 Actor memo 都被 Builder 看见并正确解释。
+- 但第二 run 在 8 turns/8 tools 内再次读取相同 source/requirements，仅执行一次无关 `probe`；没有 world-model/plan 更新、没有 workspace simulation、没有 submission，最终 budget abort。记录：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-direction-choice-resume-e2e.json`。
+- 结论等级：**choice-delivery-and-resume-proof / post-choice-convergence-failed**。当前瓶颈已从“能否发现方向不足”转为“收到选择后能否把选择转成公开 hypothesis/nextIntent，并立即进入实验和提交”。
+
+### 2026-08-18 builder-prompt-visible-audit
+
+- 新增 `BuilderKernel.recordPromptVisible()` 与每 run 的 `state/prompt-visible.jsonl`。记录脱敏 prompt 文本、原始 hash/bytes、state/phase、上一工具结果 hash、pending message ids；不记录隐藏思维链，且 `promptVisible` 纳入 previousRun 只读资产继承。
+- 确定性测试：BuilderDriver/Kernel focused tests 19/19，随后 `npm run check`、`npm run build`、`git diff --check` 通过。
+- 官方 V4 Flash 复跑：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-prompt-visible-audit.json`；prompt-visible 路径为 `/data1/chenzute/cache/tmp/dsh-loom-builder-simulation-DKknjv/workspace/simulation-loop/builder-runs/builder-1787050726389-8252ff57/state/prompt-visible.jsonl`。首轮已看到错误 actor source、requirements、完成定义和 capability；第 7/8 回合 prompt 明确带有 `newInformation=false`/`unchangedSinceSeq`。
+- 行为：18 回合中 requirements 被读取 14 次、actor source 4 次，仍未 world-model/plan/simulation/submission。结论：重复 read 不是 Builder 看不到反馈；它在可见反馈明确无新增的情况下仍选择相同工具，属于模型 action policy/上下文注意力收敛问题。
+
+### 2026-08-18 builder-progress-ab-comparison
+
+- 实验开关：A=`BuilderDriver.progressBanner=true`，仅把“unchanged read”提示放到 prompt 末尾；B=`BuilderKernelOptions.repeatReadRejectAfter=2`，对相同目标/相同反馈的第 3 次 read 确定性拒绝。默认生产路径不启用。
+- 同任务、V4 Flash、10 model turns/12 tool budget：
+  - A：4 次 read、2 次 unchanged，0 simulation；产生 2 次 `write_submission` draft，但未执行最终 submit，预算 abort。
+  - B：4 次 read、2 次 unchanged；`read_workspace_file` 第 3 次被 Kernel reject，之后模型转向 `write_workspace_file` 和 candidate workspace 读取，0 simulation/0 submission，预算 abort。
+- 记录：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-progress-ab-comparison.json`。
+- 结论：banner 是概率性文本提示，不能强制转向；Kernel reject 确实改变 action 分布（由重复 read 转向 workspace 写入），但还不能保证 simulation→submit。下一步应测试 reject 后要求公开 progress artifact（hypothesis/plan）是否能继续提高收敛，而不是把所有探索路径固定化。
+
+### 2026-08-18 builder-compact-progress-state-real-run
+
+- 目的：验证 `state/progress-state.json` 是否能在不把完整 actor/target/journal 灌入每轮 prompt 的前提下，帮助官方 V4 Flash 恢复方向并减少无进展读取。
+- 实验：复用 `run-builder-simulation.mjs` 的故意错误 actor loop、同一 requirements/source/oracle，Builder 使用官方 `deepseek-v4-flash`，18 model turns/36 tool budget；代码先 `npm run build`，记录写入 `/chenzute/dsh-src/eval/run-records/2026-08-18-builder-progress-state-real-run.json`。本实验只创建隔离临时 workspace，未安装候选、未触碰 actor profile/生产服务。
+- 结构证据：每回合 prompt 注入 compact progress state；原始 actor/target 只带 hash、keys 和可按需读取入口；journal 仅带尾部反馈；`prompt-visible.jsonl` 记录 progressStateVersion/hash。prompt 平均 **11,574 bytes**、首回合 9,479 bytes；此前同任务 prompt-visible 审计平均约 **12,859 bytes**、首回合 9,641 bytes，输入规模约下降 10%。
+- 行为结果：18/18 model turns 和 18/18 tool steps；18 次均为同一 `read_file`，其中首两次有信息、后续 **16 次 `newInformation=false`**；未写 `world-model`/`plan`，未调用 simulation，未写/提交 proposal，最终 `builder model-turn budget exhausted`。最终 progress state 如实落盘 `unchangedReadStreak=16`、`state=aborted`、`lastAction=abort`。
+- 结论等级：**context-reduction-and-state-audit-proof / action-convergence-failed**。状态表已经成为持久记忆和 Actor 可见状态，但仅注入状态没有改变该模型的 action policy；不能宣称减少了重复读取或带来 loop 性能提升。下一步只做受控实验：将 kernel 的无进展反馈与 progress artifact 绑定，比较是否进入 simulation→submit，再决定是否默认开启重复读取负向约束。
+
+### 2026-08-18 builder-progress-checkpoint-real-run
+
+- 实现：新增默认关闭的 `BuilderKernelOptions.enforceProgressCheckpoints`。当 `repeatReadRejectAfter=2` 触发连续无新信息读取拒绝时，公开 `progress-state.json.progressRequirement`；先要求 `declare_direction`（`world_model.hypothesis + nextIntent` 或 `plan`，也可提问/提交），再要求 `produce_evidence`（simulation、workspace 命令/编辑、提问或提交）。不满足的动作被 fail-closed，原因同时进入 journal 和下一回合 prompt。新增 `allowLoopCandidates.repeatReadRejectAfter` / `enforceProgressCheckpoints` 配置，默认值分别为 `0` / `false`，不改变生产默认自由探索。
+- 确定性验证：Kernel 测试 **15/15**；随后 `npm run check`、`npm test` **159/159**、`npm run build`、`git diff --check` 均通过。测试证明 checkpoint 只在实验开关开启且无进展后生效，能按 `declare_direction → produce_evidence → none` 恢复。
+- 官方低预算复跑 A（12 turns/24 tools/2500 maxTokens）：记录 `/chenzute/dsh-src/eval/run-records/2026-08-18-builder-progress-checkpoint-real-run.json`。V4 Flash 在重复 read 被拒后实际完成 `write_world_model → baseline simulation → candidate simulation`，而不是继续读；但候选仿真因未生成 actor-loop 文件而失败，最终 12 turns 预算中止，无 submission。
+- 官方复跑 B（18 turns/36 tools/2500 maxTokens，同一开关）：记录 `/chenzute/dsh-src/eval/run-records/2026-08-18-builder-progress-checkpoint-real-run-18.json`。工具链为 3 次 `write_world_model`、3 次 simulation（均执行并有 passed/failed 反馈）、4 次重复读取拒绝；仍未写 workspace candidate 或 submission，最终预算中止。它证明 checkpoint 能把模型从纯 read 死循环推入“公开假设→仿真”，但不能保证语义上有效的候选或交付。
+- 诊断：尾插原始 error、纯 prompt banner 和强制单一工具都不足以保证语义收敛。确定性节点适合强制“可审计动作类别/产物存在”，不适合替模型决定候选内容；simulation capability 过于通用时，模型会以低价值 `fixture.mjs` 仿真满足动作要求。下一步应先改进 simulation 输入与候选 artifact 的关联审计，再评估是否需要更硬的 candidate-edit→candidate-simulation→submission 证据节点；不能把本轮计为真实演进或性能提升。
+
+### 2026-08-18 tycho-builder-source-comparison
+
+- 源码核查范围：`tycho/agent/builder.py`、`tycho/agent/dispatcher.py`、`tycho/agent/wm_signal.py`、`tycho/workspace/agent_tools.py`、`tycho/agent/agent.py` 与 Builder prompt/tests。
+- 关键事实：Tycho 没有重复 read reject、phase 白名单或强制下一工具。它用“单一可证伪目标 + pass 开始自动 verify diagnosis + 语义编辑后立即反馈 + bounded pass/fresh report + 外部 divergence trigger”形成循环。持久记忆是 `world_model.py`、`notes/world_model.md`、`world_model_report.md`，不是每轮回放完整工具日志。
+- 迁移结论：Loom 不能照搬 Tycho 的窄目标（我们还要候选、verifier/gate 和真实 replay），但应先做 `evidence-diagnosis → bounded Builder pass → fresh report → external re-trigger` 的结构实验。当前二级断路器只保留为默认关闭的保险丝，暂不继续增加 phase 节点；本次比较未改变生产路径。
+
+### 2026-08-18 multi-agent-loop-patterns-review（只读）
+
+- 审阅范围：本地 Prime Agent 的 RLM/harness/refine/daemon 文档与实现；OpenHands SDK 的 event-sourced conversation 和 `StuckDetector`；SWE-agent 的 action-observation、reviewer/retry；LangGraph 的 persistence/interrupt/time-travel 文档；AutoGen `BaseGroupChat` 的 termination/pause/resume/state。学习文档：`docs/research/builder-loop-patterns-comparison.md`。
+- 核查结论：重复工具调用不等价于“没有反馈”，而是可见性、信息增量、语义推进、交付推进四层中的语义推进失败。纯 prompt 尾插是概率信号；单一 Kernel reject 只能改变动作分布，不能保证候选语义收敛。
+- 建议的 Loom 结构保持 Builder 开放探索和 verifier/gate 独立：pass 启动有确定性 diagnosis；pass 内有预算和 candidate-linked feedback；结束必须产生 fresh report/proposal/needs_input/abort；stuck 由 Controller 按 action+observation 模式诊断后结束 pass；只有外部 divergence/rejection/用户新方向创建新 immutable attempt。未修改运行时代码或测试。
+
+### 2026-08-18 pass-diagnosis-spec
+
+- 将 pass 入口明确为 `evidence-diagnosis`，不是泛化问题列表：允许多个 secondary observations，但必须选择一个 `primaryObjective`。
+- 诊断字段固定为 symptom、problemClass、scope/baseline hash、firstDivergence、evidenceRefs、successCriteria、nonGoals、unknowns、passBudget 和 fresh exit；“loop 更智能”必须先翻译为收敛、任务成功、延迟/成本或可用性中的一个可观测目标。
+- 本轮只改规格与交接文档；没有运行模型、没有修改 Builder 代码。
+- Pass 责任边界补充为“固定外壳、可维护内核”：治理合同由 Controller/Actor/Verifier 固定，Builder 只能版本化维护 working diagnosis；target、验收标准、预算或安全边界变化必须通过 `diagnosis_revision` 进入 choice 或新 immutable pass。
+- 根据用户方向补充 diagnosis-first：对“更智能/全面优化”等开放请求，先产出带 evidence/unknowns/cost 的 1–3 个候选方向，再通过 Actor 向用户询问；选择后创建 implementation pass。无明确目标时允许再次询问，但采用小上限并在无答案时暂停，不反复读文件。
+
+### 2026-08-18 diagnosis-first 实装与官方低预算审计
+
+- 实装：`BuilderRunMode` 增加 `diagnosis | implementation`；diagnosis run 只允许 `write_diagnosis_report`，报告要求 1–3 个方向、每方向 evidenceRefs/unknowns、带 whyNow/evidenceRefs/至少两个 options 的 blocking question。报告写入后落 `state/diagnosis-report.json`、发 `diagnosis_report` event、进入 `waiting_for_input`；diagnosis pass 禁止 proposal/submit。`LoopCandidateGateway` 把 report 投影到 `meta_builder_status`，用户回复后 `resumeExploration` 创建同 lineage 的新 immutable `implementation` run，并继承前 run 的只读资产和用户原话。
+- 确定性闭环：新增 Kernel、Driver 与 Gateway 测试覆盖报告结构、禁止诊断提交、模式专属完成合同、Actor 可见投影、用户选择→新 implementation run→proposal freeze；`npm run check`、`npm test` **162/162**、`npm run build`、`git diff --check` 均通过。
+- 首次官方审计（同任务、V4 Flash、thinking disabled、6 turns/8 tools/1200 maxTokens）暴露了真实实现缺陷：Builder 5 次读（3 次无新信息）后预算 abort，未写 diagnosis report。`prompt-visible.jsonl` 证明原因是 Driver 在 diagnosis prompt 内同时保留通用的 `write_submission→submit` 完成定义和 proposal/submit 示例，和 diagnosis-only 合同冲突；不是缺少 actor source 或报告工具。
+- 修正：将完成定义、硬性回合规则、示例和 capability 交付文案按 run mode 分支；diagnosis prompt 只保留 `write_diagnosis_report` 作为完成出口，Kernel 也拒绝 `write_submission`。这不限制 implementation run 的自由探索，也不让 Kernel 决定认知路线。
+- 修正后同预算官方复跑：4 turns/4 tools：`acknowledge_message → read requirements → read actor source → write_diagnosis_report`；0 次无新增读取，产出 task-success/convergence/latency 三个方向和三选一问题，正确进入 `waiting_for_input`。原始 record：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-diagnosis-first-official-low-budget.json`；完整 A/B：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-diagnosis-first-prompt-contract-ab.json`。
+- 结论等级：**diagnosis-and-user-alignment-improvement**。它明确改善了开放请求的方向收敛与用户对齐；尚未跑用户选择后的官方 implementation pass，故不宣称 proposal、verifier/gate、安装、actor task 成功或 loop 性能提升。
+
+### 2026-08-18 compact-prompt + context-index 快速审计
+
+- 实验性实现：每个 Builder run 新增不可变 `state/context-index.json`，列出 actor/target/inbox/journal/progress/world-model/plan/previous-run/events/workspace/submission 的地址与一行概述；`read_input(context_index)` 可按需读取。新增 `BuilderDriver.compactPrompt`，只注入系统流转/通讯/权限规则、最小 JSON tool protocol、index 入口、pending Actor 原话、progress state 和 feedback hash；不再回放原始 snapshot、长 capability 描述、完整 index 或 task 正文。默认未开启。
+- 协议审计：首次 compact 复跑暴露 V4 Flash 使用 `{tool,input}` 和 `{name,input}` 两种等价包装，而旧 parser 只支持字段平铺，造成工具意图被误判。已兼容三种无语义差异的 JSON 包装，并以 Driver 回归测试覆盖；这不是扩大 Builder 权限。
+- 官方真实复跑：同一“顺序安全 vs 吞吐”模糊用户请求、V4 Flash、thinking disabled、7 turn 上限。prompt 从此前约 12–13KB 降至最终 **3,386–3,839 bytes**。模型能够读取 requirements、确认 Actor 原话并读取 actor snapshot，但仍在 7 turns 内重复 `read_input(actor)`，未发 `request_input`，最终预算 abort；无 workspace edit、proposal、verifier/gate 或安装。完整记录：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-minimal-user-guided-ambiguity-to-implementation-official.json`。
+- 结论等级：**context-footprint-reduction / communication-convergence-not-improved**。索引方案有效减少约 70% prompt bytes，且恢复了 compact JSON 协议互操作；但单一该变量未使 Builder 在此模糊任务中自主提问，不能默认开启或宣称性能/任务提升。下一步应将“为什么当前证据不足、可问的具体问题”作为 Actor evidence pack 的显式事实，再与保持自主选择的 Builder prompt 做一次独立对照；不能用强制 `request_input` 掩盖该缺口。
+
+### 2026-08-18 builder-short-context-progress-checkpoint-closed-loop-official
+
+- 目的：在不灌入全量 snapshot/journal 的前提下，给定一个明确、可证伪的严格依赖顺序目标，观察 `compactPrompt + repeatReadRejectAfter=2 + enforceProgressCheckpoints=true` 是否能完成候选→oracle→submission；实验操作者由 Actor 角色扮演用户并在公开停滞后介入。
+- 运行记录：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-short-context-progress-checkpoint-closed-loop-official.json`。隔离 fixture 为错误的 `Promise.all` actor loop、严格顺序 oracle 和 proposal contract；未触碰 live actor/profile/生产服务。
+- 为保持实验有效，补上四个确定性协议缺口：compact prompt 注入最近一条 1.2KB 工具反馈；`input`/`params` wrapper 归一化；首个完整 JSON 对象容错尾随 `}`；无参数 workspace command 合法。无新增权限或强制认知路线。
+- 初始 run（6 turns）触发无进展拒绝，Builder 写出公开 plan 但仍未候选；用户观察后按真实协议创建 immutable resume run，并转交原话要求停止重复读取、编辑候选、运行 oracle 后提交。
+- resume run 成功写出 `actor-loop.mjs`，但真实 oracle 失败：`TypeError: run is not a function`。该失败被记录为 rejection feedback 并尝试新 run；最终 run 在重复目录探索中预算耗尽，没有修复、`write_submission`、proposal、verifier/gate/install 或 replay。
+- 结论：**short-context-observation-and-user-retrigger-proof / candidate-edit-observed / oracle-repair-and-submission-failed**。断路器阻断无进展读并促成公开 plan；用户指导能促成候选编辑；两者都不能保证候选语义正确或交付收敛。本记录不是 loop 性能提升证据。
+
+### 2026-08-18 builder-oracle-rejection-fresh-pass-convergence-rate-official
+
+- 独立测量 3 个 fresh immutable repair runs；每个起点均为真实 oracle rejection：候选导出 `runActorLoop`，oracle 要求 `run`，错误为 `TypeError: run is not a function`。
+- 配置：V4 Flash、thinking disabled、compact prompt、`repeatReadRejectAfter=2`、`enforceProgressCheckpoints=true`、每个 pass 最多 20 model turns / 40 tool steps / 2400 maxTokens。
+- 成功定义：新 workspace candidate + oracle exit 0/`strict-order-pass` + `write_submission→submit`。verifier/gate/install 不计入本指标。
+- 记录：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-oracle-rejection-fresh-pass-convergence-rate-official.json`；结果 **0/3，0%**。三次均 `aborted` at 20 turns，candidate=false、oracle未运行、proposal=false；unchanged-read rejection 分别为 5、4、4 次。
+- 动作审计：Builder 反复读取 `previous_attempt`/`actor`，偶尔写 world-model/plan，但没有进入“读取旧候选→编辑导出→运行 oracle”链路。20 回合预算已足以排除单纯回合不足解释。
+- 结论：rejection 回注的持久化链路存在，但当前模型对 rejection 的语义修复收敛率为 **0%**；断路器是停滞保险丝，不是修复规划器。不能据此宣称 Builder 已具备 Tycho 式失败后自我修复能力。
+
+### 2026-08-18 builder-oracle-rejection-fresh-pass-thinking-enabled-official
+
+- 归因复验：保持同一 oracle rejection、fresh immutable run、20 turns/40 tools 与 compact context，只把官方 V4 Flash `thinking` 显式设为 `enabled`，maxTokens 提高到 4800。记录：`/chenzute/dsh-src/eval/run-records/2026-08-18-builder-oracle-rejection-fresh-pass-thinking-enabled-official.json`。
+- 结果 **0/1**：没有 candidate、oracle 或 proposal。动作比 disabled 多出 context-index 读取和一次 workspace command 尝试，但 command 被输出为 `find . -maxdepth 3 -type f | sort` 的单个 executable；Kernel 的 argv-only runner 返回 `spawnSync ... EACCES`。随后模型回到 index/world-model/repeated-read 回路。
+- 解释边界：此结果不等于 V4 Flash 不能修复 `export run` 这个简单 bug；它表明打开 thinking 仍不能自动弥补当前 agent 的候选定位、shell/argv 工具表达与 repair-action policy。默认生产/常规 Builder 路径仍关闭 thinking。
+
+### 2026-08-19 artifact-provenance-navigation-foundation
+
+- 问题定义：此前 `previous-attempt.json` 已持久化 rejection，但错误文本没有成为可查询的“consumer → actual input → producer/prior run → source interface”关系；官方 repair runs 因而未被证明能从 `run is not a function` 自主定位旧 candidate。
+- 上游审计：Tycho `f68912a`（Apache-2.0）提供 schema-first tool/verify-state/semantic-edit feedback 原则，但不是通用成品 agent；本机 Prime Agent `97b994c3d7c45ca1ae635190e91e9e58ddf2577c`（MIT）是开放 Builder runtime 的后续 adapter 参考。尝试浅拉 OpenHands 官方仓库时远端 HTTPS 传输无进展，已终止临时 clone，未引入半成品或第三方代码。
+- 实装：新增 `src/builder/provenance.ts` 与每 run 的 `state/provenance.json`。图只记录 factual artifact/edge：actor handoff、target-before、failure report、prior run/assets、workspace、source、candidate、submission、verification report 与 `consumes|produces|tests|reports_on|derived_from`；ID 由 role/path/hash 稳定生成。
+- 工具：新增 `trace_artifact`、`inspect_file`、`search_text` 与 `read_input(provenance)`；`search_text` 使用 argv 形式 `rg`，不会把 shell pipeline 当 executable。compact prompt 只投影 graph 入口和 failure/candidate IDs，完整图按需读取。系统纪律只要求错误先作为 artifact 指针被追踪，不给出修复结论，也不强制 Builder 经过固定 phase。
+- 确定性验证：新增 rejection→candidate trace、exports/interface inspect、search、compact-protocol schema 回归；`npm test` **172/172**、`npm run check`、`npm run build`、`git diff --check` 均通过。没有运行官方模型、没有触碰 profile/生产环境。
+- 结论等级：**causal-navigation-contract-proved / model-repair-convergence-not-yet-measured**。下一次官方对照必须只提供 rejection + graph（不直接提供 export 修复答案），测量 `trace → inspect → edit → oracle → submit` 是否完成。
+
+### 2026-08-19 builder-oracle-rejection-provenance-convergence-rate-official
+
+- 直接复测 V4 Flash（未先跑新的 baseline）：3 个独立 fresh immutable repair pass；每个 pass 先构造失败 candidate `runActorLoop`，由真实 Node oracle 产生 `TypeError: run is not a function`，原 run 提交后由 `reopenFromRejection` 创建 repair run。图中确定性存在 failure→candidate `consumes` 与 oracle→candidate `tests` 边；未把 `export run` 作为 prompt repair card 注入。
+- 配置：`deepseek-v4-flash`、thinking disabled、compact prompt、20 model turns/40 tools/2400 maxTokens、`repeatReadRejectAfter=2`、`enforceProgressCheckpoints=true`；新增变量仅是 provenance graph 和 `trace_artifact`/`inspect_file`/`search_text`。
+- 记录：`/chenzute/dsh-src/eval/run-records/2026-08-19-builder-oracle-rejection-provenance-convergence-rate-official.json`。成功条件：workspace candidate 存在、oracle exit 0/`strict-order-pass`、proposal 存在且 Builder state submitted。
+- 结果：**0/3，0%**。三次 repair run 都读取 `read_input(provenance)`（2/3 首轮），所有 prompt-visible 均有 Artifact/provenance graph 和 failure IDs；但 causal actions 全为 false：没有 trace、inspect、search、workspace edit、oracle command 或 submit。分别 20 turns/17 tools、20/16、20/15 后 budget abort。
+- 动作序列不是纯无反馈 read：以 `read_input(provenance|actor|context_index)` 后反复 `write_world_model` 为主，说明 V4 Flash 看见图谱仍没有将其采纳为新的 action primitive。此次不能把“图谱存在”误报为 repair 策略提升。
+
+### 2026-08-19 rejection-facts-in-prompt（失败事实直灌修复）
+
+- 审计 0/3 根因：compact prompt 只给图谱指针（failureIds/candidateIds）与 feedback index（hash），`TypeError: candidate.run is not a function` 原文只存在于 `input/previous-attempt.json`；三次 run 均未读 previous_attempt、未 trace，**模型从未看见问题原文**，动作退化为 read_input(actor|provenance|context_index) → 同一 hash 的 write_world_model。
+- 修复：`BuilderDriver.compactPrompt` 在存在 rejection 时注入 `Previous attempt rejection (facts, not pointers)`：verdict、failureSummary（≤1200 字符）、firstDivergence、previousCandidatePath、oraclePath，并显式指示"修复 previousCandidatePath 使其满足 oracle，然后运行 oracle 并提交"。
+- 测试：新增 compact prompt 失败事实单测；全量 **173/173**、check/build/diff-check 绿。
+- 状态：尚未跑 V4 Flash A/B，不宣称修复收敛已改善；下一步用同一 fixture 单跑一次 fresh repair pass 对照。
+- 结论等级：**causal-navigation-visible / causal-navigation-adoption-failed / repair-convergence=0%**。下一诊断应分析完整 provenance artifact 的表征与 runtime action surface；不要再以更多 token、更多尾插文本或更多固定 checkpoint 掩盖该失败。
