@@ -214,13 +214,22 @@ export class CandidateImporter {
             if (baselineCommit.toLowerCase() !== baseline.ref.toLowerCase()) {
                 throw new Error(`local DSH baseline commit mismatch: expected ${baseline.ref}, got ${baselineCommit}`);
             }
-            const baselinePackage = resolve(baselineRoot, GENERATED_PACKAGE_PATH);
-            if (!existsSync(join(baselinePackage, 'package.json'))) {
-                throw new Error(`pinned DSH baseline package is unavailable: ${baselinePackage}`);
+            // Materialize the full pinned tree (no network, no dirty working tree)
+            // so the audited sandbox build recipe resolves workspace references.
+            mkdirSync(target, { recursive: true });
+            const archive = join(dirname(target), `${request.id}.tar`);
+            const archiveBytes = execFileSync('git', ['-C', baselineRoot, 'archive', '--format=tar', baselineCommit], {
+                encoding: null, maxBuffer: 512 * 1024 * 1024, timeout: 120_000,
+            });
+            writeFileSync(archive, archiveBytes);
+            try {
+                execFileSync('tar', ['-xf', archive, '-C', target], { stdio: 'pipe', timeout: 120_000 });
             }
-            cpSync(baselinePackage, target, { recursive: true, dereference: false });
+            finally {
+                rmSync(archive, { force: true });
+            }
             const generatedEdits = applyBuilderGeneratedEdits(target, generatedSource);
-            const artifactPath = resolve(target);
+            const artifactPath = resolve(target, GENERATED_PACKAGE_PATH);
             if (!existsSync(join(artifactPath, 'package.json')))
                 throw new Error('candidate packagePath has no package.json');
             const build = this.buildArtifact(target, artifactPath, request);

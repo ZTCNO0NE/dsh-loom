@@ -3,6 +3,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Gate } from './gate/index.js';
 import { AutoPilot } from './meta/autopilot.js';
 import { IterationLoop } from './meta/loop.js';
@@ -19,11 +20,14 @@ import { officialDeepSeekLlm } from './llm/official.js';
 import { LoopCandidateGateway } from './candidates/gateway.js';
 import { CandidateImporter, CandidateRegistry } from './candidates/index.js';
 import { profileGateOps } from './candidates/profile-gate.js';
+import { createCandidateProfile } from './candidates/profile.js';
 import { installVerifiedCandidate } from './candidates/lifecycle.js';
-import { adjudicatePatch, adjudicateLoop } from './deliberation/index.js';
+import { adjudicatePatch, adjudicateLoop, classifyBuilderProposal } from './deliberation/index.js';
 import { createActorEvidencePack, readActorEvidencePack } from './evidence/index.js';
+import { runActorReplay, writeActorComparison } from './evidence/comparison.js';
 import { DEFAULT_LOCKED_TARGETS } from './policy.js';
 import { appendLedger, appendReport, readLedger, readPreferences, scenarioOf, } from './growth/index.js';
+const PLUGIN_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 export const name = 'dsh-meta-validate';
 export const inject = ['tools', 'agents', 'loader'];
 export const Config = Schema.object({
@@ -135,6 +139,14 @@ export function apply(ctx, config) {
     const refineState = { running: false };
     const jobQueue = [];
     let jobRunning = false;
+    const jobPathFor = (jobId) => join(root, 'workspace', config.sessionId, 'jobs', `${jobId}.json`);
+    const updateJob = (jobId, patch) => {
+        const path = jobPathFor(jobId);
+        const prior = readJson(path) ?? { schemaVersion: 1, id: jobId };
+        const next = { ...prior, ...patch, at: new Date().toISOString() };
+        atomicWriteJson(path, next);
+        return next;
+    };
     const withRefineRunning = async (fn) => {
         refineState.running = true;
         try {
@@ -174,7 +186,6 @@ export function apply(ctx, config) {
             }, config.notify.progressAfterMs)
             : null;
         void (async () => {
-            const jobPath = join(root, 'workspace', config.sessionId, 'jobs', `${job.id}.json`);
             if (config.notify.start) {
                 const isLoopExploration = job.request.kind === 'loop-exploration';
                 const reason = typeof job.request.requirements === 'string' && job.request.requirements.trim()
@@ -184,10 +195,10 @@ export function apply(ctx, config) {
                     ? `Builder 正在后台探索 loop：${reason}。你可以继续当前对话，也可查询或补充该 run。`
                     : `正在后台优化：${reason}。完成会通知你，不影响当前对话。`, isLoopExploration ? 'Builder 开始探索' : '开始后台优化');
             }
-            atomicWriteJson(jobPath, { schemaVersion: 1, id: job.id, status: 'running', request: job.request, at: new Date().toISOString() });
+            updateJob(job.id, { status: 'running', request: job.request });
             try {
                 const outcome = await withRefineRunning(job.run);
-                atomicWriteJson(jobPath, { schemaVersion: 1, id: job.id, status: 'finished', request: job.request, summary: outcome.summary, at: new Date().toISOString() });
+                updateJob(job.id, { status: 'finished', request: job.request, summary: outcome.summary });
                 if (config.notify.completion) {
                     const isLoopExploration = job.request.kind === 'loop-exploration';
                     injectNotice(isLoopExploration
@@ -196,7 +207,7 @@ export function apply(ctx, config) {
                 }
             }
             catch (error) {
-                atomicWriteJson(jobPath, { schemaVersion: 1, id: job.id, status: 'failed', request: job.request, error: String(error), at: new Date().toISOString() });
+                updateJob(job.id, { status: 'failed', request: job.request, error: String(error) });
                 injectNotice(`改进失败：${String(error).slice(0, 300)}`, '改进失败');
             }
             finally {
@@ -209,11 +220,13 @@ export function apply(ctx, config) {
     };
     const scheduleRefine = (request, run) => {
         const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        atomicWriteJson(join(root, 'workspace', config.sessionId, 'jobs', `${id}.json`), {
+        const initialRunId = typeof request.runId === 'string' ? request.runId : undefined;
+        atomicWriteJson(jobPathFor(id), {
             schemaVersion: 1,
             id,
             status: 'scheduled',
             request,
+            ...(initialRunId ? { activeRunId: initialRunId, runLineage: [initialRunId] } : {}),
             at: new Date().toISOString(),
         });
         jobQueue.push({ id, request, run });
@@ -258,13 +271,16 @@ export function apply(ctx, config) {
             return { ...(jobId ? { jobId } : {}), runId: explicitRunId };
         if (!jobId)
             return { error: 'jobId or runId is required' };
-        const job = readJson(join(root, 'workspace', config.sessionId, 'jobs', `${jobId}.json`));
+        const job = readJson(jobPathFor(jobId));
         if (!job)
             return { error: `unknown job: ${jobId}` };
-        if (job.request?.kind !== 'loop-exploration' || typeof job.request.runId !== 'string') {
+        const activeRunId = typeof job.activeRunId === 'string'
+            ? job.activeRunId
+            : typeof job.request?.runId === 'string' ? job.request.runId : undefined;
+        if (job.request?.kind !== 'loop-exploration' || !activeRunId) {
             return { error: `job is not a Builder loop exploration: ${jobId}` };
         }
-        return { jobId, runId: job.request.runId };
+        return { jobId, runId: activeRunId };
     };
     const proposer = new Proposer(ctx, {
         systemPrompt: '你是 dsh-meta-validate 的独立迭代者（builder）：基于用户需求、失败信号与配置快照，' +
@@ -701,16 +717,40 @@ export function apply(ctx, config) {
                             summary += '；未提交 proposal，不进入裁决';
                             break;
                         }
-                        let proposal;
-                        try {
-                            proposal = normalizeBuilderProposal(exploration.proposal);
+                        const classified = classifyBuilderProposal(exploration.proposal);
+                        if (classified.kind === 'malformed') {
+                            const rejection = {
+                                source: 'proposal-normalization',
+                                capability: exploration.proposal.capability,
+                                verdict: 'rejected',
+                                failureSummary: `invalid proposal: ${classified.reason}`,
+                                proposal: exploration.proposal,
+                                observedAt: new Date().toISOString(),
+                            };
+                            summary += `；${rejection.failureSummary}`;
+                            rejections.push(String(rejection.failureSummary));
+                            if (attempt < maxAttempts) {
+                                currentRunId = loopCandidateGateway.reopenExploration(currentRunId, rejection);
+                                updateJob(jobId, { activeRunId: currentRunId, runLineage: [...(readJson(jobPathFor(jobId))?.runLineage ?? [started.runId]), currentRunId] });
+                                summary += `；rejected → reopened=${currentRunId}`;
+                            }
+                            continue;
                         }
-                        catch (error) {
-                            summary += `；invalid proposal: ${String(error)}`;
+                        if (classified.kind === 'needs_verifier') {
+                            const draftPath = persistCapabilityDraft(root, config.sessionId, currentRunId, classified);
+                            summary += `；submitted capability=${classified.capability} → needs_verifier（未安装，需新 verifier；草案=${draftPath}）`;
+                            appendReport(root, config.sessionId, `能力草案：${classified.capability} → needs_verifier（等待新 verifier 接入；未安装）`);
                             break;
                         }
+                        const proposal = classified.proposal;
                         let verdict = 'rejected';
                         let reason;
+                        let rejectionReport = {
+                            source: 'deliberation',
+                            capability: proposal.capability,
+                            verdict: 'rejected',
+                            observedAt: new Date().toISOString(),
+                        };
                         if (proposal.capability === 'patch-evolution') {
                             const cases = await validator.loadRegressionCases();
                             const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline);
@@ -763,6 +803,14 @@ export function apply(ctx, config) {
                             });
                             verdict = result.verdict;
                             reason = result.reason;
+                            rejectionReport = {
+                                ...rejectionReport,
+                                verdict: result.verdict,
+                                failureSummary: result.reason ?? result.report.failureSummary,
+                                report: result.report,
+                                applied: result.applied,
+                                patch: result.patch,
+                            };
                             summary += `；patch verdict=${result.verdict} target=${result.patch.targetId} applied=${result.applied?.applied ?? false}`;
                         }
                         else {
@@ -780,19 +828,33 @@ export function apply(ctx, config) {
                             });
                             verdict = result.verdict;
                             reason = result.reason;
+                            rejectionReport = {
+                                ...rejectionReport,
+                                verdict: result.verdict,
+                                failureSummary: result.reason,
+                                candidateId: result.candidateId,
+                                evidence: result.evidence,
+                                install: result.install,
+                            };
                             summary += `；loop verdict=${result.verdict} candidate=${result.candidateId}${result.reason ? ` reason=${result.reason}` : ''}`;
                             appendReport(root, config.sessionId, `loop 演进：${result.candidateId} → ${result.verdict}${result.install ? ` state=${result.install.state}` : ''}`);
+                            if (result.install?.state === 'installed') {
+                                const comparison = replayInstalledLoopTask(result.candidateId, requirements || config.allowLoopCandidates.contractTask, config, root, config.sessionId, result);
+                                if (comparison) {
+                                    appendReport(root, config.sessionId, `同任务 before/after：${comparison.id} baseline=${comparison.baseline.durationMs}ms installed=${comparison.installed.durationMs}ms claim=${comparison.claimLevel}`);
+                                }
+                            }
                         }
                         if (verdict === 'approved')
                             break;
                         rejections.push(reason ?? 'rejected');
                         if (attempt < maxAttempts) {
+                            const priorLineage = readJson(jobPathFor(jobId))?.runLineage ?? [started.runId];
                             currentRunId = loopCandidateGateway.reopenExploration(currentRunId, {
-                                source: 'deliberation',
-                                verdict: 'rejected',
-                                failureSummary: reason ?? 'verifier rejected',
-                                observedAt: new Date().toISOString(),
+                                ...rejectionReport,
+                                failureSummary: reason ?? rejectionReport.failureSummary ?? 'verifier rejected',
                             });
+                            updateJob(jobId, { activeRunId: currentRunId, runLineage: [...priorLineage, currentRunId] });
                             summary += `；rejected → reopened=${currentRunId}`;
                         }
                         else {
@@ -906,55 +968,66 @@ function evidenceEventsOf(pack) {
     const eventsRef = pack.rawRefs.find((ref) => ref.name === 'events');
     if (!eventsRef?.exists)
         return [];
-    return readFileSync(eventsRef.path, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
-}
-function normalizeBuilderProposal(value) {
-    const capability = value.capability;
-    if (capability === 'patch-evolution' && value.patch && typeof value.patch === 'object' && !Array.isArray(value.patch)) {
-        return {
-            capability,
-            patch: value.patch,
-            ...(typeof value.rationale === 'string' ? { rationale: value.rationale } : {}),
-        };
-    }
-    if (capability === 'loop-evolution' && value.loop && typeof value.loop === 'object' && !Array.isArray(value.loop)) {
-        return {
-            capability,
-            loop: value.loop,
-            ...(typeof value.rationale === 'string' ? { rationale: value.rationale } : {}),
-        };
-    }
-    throw new Error(`unsupported builder proposal capability: ${String(capability)}`);
-}
-function yamlRows(rows) {
-    return Object.entries(rows).map(([id, row]) => {
-        const value = row;
-        const name = value?.name ?? id;
-        const config = value?.config ?? {};
-        const configLines = JSON.stringify(config, null, 2).split('\n').map((line) => `    ${line}`).join('\n');
-        return `- id: ${id}\n  name: ${JSON.stringify(name)}\n  config:\n${configLines}`;
-    }).join('\n');
+    const source = eventsRef.snapshotPath ?? eventsRef.path;
+    return readFileSync(source, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
 }
 /**
- * v1.1 loop contract overlay: current loader rows (llm/model/meta-validate)
- * plus an agent-loop row pointing at the staged candidate entry. The contract
- * runner runs the same probe task against this overlay in an isolated runtime.
+ * Persist a well-formed but unknown capability submission as a draft awaiting
+ * a new verifier. It is never installed and never blocked from exploration.
+ */
+function persistCapabilityDraft(root, sessionId, runId, draft) {
+    const dir = join(root, 'workspace', sessionId, 'capability-drafts');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${runId}.json`);
+    atomicWriteJson(path, {
+        schemaVersion: 1,
+        runId,
+        state: 'needs_verifier',
+        capability: draft.capability,
+        payload: draft.payload,
+        rationale: draft.rationale ?? null,
+        artifacts: draft.artifacts ?? [],
+        submittedAt: new Date().toISOString(),
+    });
+    return path;
+}
+/**
+ * v1.1 loop contract overlay: llm/model rows plus an inserted meta-validate
+ * observer. The candidate loop itself is resolved through the Loader-level
+ * candidate profile, never through an overlay name (dsh only resolves package
+ * names, not absolute entries).
  */
 function writeContractOverlay(manifest, ctx, baseline, root, sessionId, config) {
     const rows = currentConfigOf(ctx, baseline);
     const metaRow = rows['meta-validate'];
-    rows['meta-validate'] = {
-        name: metaRow?.name ?? '/chenzute/dsh-meta-validate-handoff/dist/index.js',
-        config: { ...(metaRow?.config ?? {}), mode: 'observe', sessionId: 'loom-contract' },
-    };
-    rows['agent-loop'] = {
-        name: join(manifest.artifactPath, manifest.entry),
-        config: manifest.config,
-    };
+    const metaName = metaRow?.name ?? '/chenzute/dsh-meta-validate-handoff/dist/index.js';
+    const metaConfig = { ...(metaRow?.config ?? {}), mode: 'observe', sessionId: 'loom-contract' };
+    // The contract runner owns its isolated workspace via DSH_META_VALIDATE_ROOT;
+    // the host session workspaceRoot must not redirect observer frames.
+    delete metaConfig.workspaceRoot;
+    delete metaConfig.runtimeRoot;
+    const selectorRows = ['llm-deepseek', 'agent-default-model']
+        .filter((id) => rows[id])
+        .map((id) => {
+        const row = rows[id];
+        const config = { ...(row.config ?? {}) };
+        // currentConfigOf redacts any key containing "token"; the contract
+        // overlay needs the real numeric maxTokens to boot the model row.
+        if (id === 'llm-deepseek' && config.maxTokens === '***')
+            config.maxTokens = 8192;
+        return { id, row: { name: row.name, config } };
+    });
     const dir = join(root, 'workspace', sessionId, 'loop-candidates', 'overlays');
     mkdirSync(dir, { recursive: true });
     const path = join(dir, `${manifest.id}.yml`);
-    writeFileSync(path, `${yamlRows(rows)}\n`, 'utf8');
+    const body = [
+        ...selectorRows.map(({ id, row }) => {
+            const configLines = JSON.stringify(row.config ?? {}, null, 2).split('\n').map((line) => `    ${line}`).join('\n');
+            return `- id: ${id}\n  name: ${JSON.stringify(row.name ?? id)}\n  config:\n${configLines}`;
+        }),
+        `- insert:\n    - id: meta-validate\n      name: ${JSON.stringify(metaName)}\n      config:\n${JSON.stringify(metaConfig, null, 2).split('\n').map((line) => `        ${line}`).join('\n')}`,
+    ].join('\n');
+    writeFileSync(path, `${body}\n`, 'utf8');
     return path;
 }
 /**
@@ -972,12 +1045,23 @@ async function verifyLoopContract(manifest, ctx, baseline, root, sessionId, conf
     const reportPath = join(runtimeRoot, 'reports', `${manifest.id}.json`);
     mkdirSync(dirname(reportPath), { recursive: true });
     try {
+        const profile = createCandidateProfile({
+            runtimeRoot,
+            candidateId: manifest.id,
+            candidateArtifact: manifest.artifactPath,
+            baseBundle: cfg.baseBundle,
+            dependencyRoot: cfg.dependencyRoot,
+            additionalDependencyRoots: cfg.additionalDependencyRoots,
+        });
         const out = execFileSync(cfg.contractCommand[0], [
             ...cfg.contractCommand.slice(1),
             'check', overlay, cfg.contractTask, cfg.goldenPath,
-            '--expected-entry', join(manifest.artifactPath, manifest.entry),
+            '--profile', profile.profile,
+            '--profile-home', profile.home,
+            '--expected-entry', profile.runtimeEntry,
+            '--regression',
         ], {
-            cwd: process.cwd(),
+            cwd: PLUGIN_ROOT,
             encoding: 'utf8',
             timeout: 300_000,
             env: {
@@ -1035,6 +1119,49 @@ async function installLoopCandidate(candidateId, config, root) {
         },
     }, candidateId);
     return installVerifiedCandidate(registry, candidateId, ops);
+}
+/**
+ * Replay the exact delegated task once against the base profile and once
+ * against the cold-installed candidate profile. This is deliberately an
+ * evidence artifact only: an exit code is not promoted to a broad improvement
+ * claim without a task oracle and the independent contract/gate reports.
+ */
+function replayInstalledLoopTask(candidateId, task, config, root, sessionId, adjudication) {
+    const cfg = config.allowLoopCandidates;
+    if (!cfg.runtimeRoot || !config.isolation.cwd || config.isolation.dshCommand.length === 0)
+        return null;
+    const id = `loop-${candidateId}-${Date.now()}`;
+    const baseCommand = [
+        ...config.isolation.dshCommand,
+        '--profile', config.isolation.profile,
+        ...config.isolation.baseOverlays.flatMap((overlay) => ['--patch', overlay]),
+    ];
+    const installedCommand = [...config.isolation.dshCommand, '--profile', `loom-${candidateId}`];
+    const outputDir = join(root, 'workspace', sessionId, 'comparisons', id);
+    const baseline = runActorReplay({
+        label: 'baseline', command: baseCommand, cwd: config.isolation.cwd,
+        env: { ...childEnv(), DSH_HOME: join(cfg.runtimeRoot, 'baseline-home') },
+        task, outputPath: join(outputDir, 'baseline.stdout'), timeoutMs: config.isolation.probeTimeoutMs,
+    });
+    const installed = runActorReplay({
+        label: 'installed', command: installedCommand, cwd: config.isolation.cwd,
+        env: { ...childEnv(), DSH_HOME: join(cfg.runtimeRoot, 'loader-profiles', candidateId) },
+        task, outputPath: join(outputDir, 'installed.stdout'), timeoutMs: config.isolation.probeTimeoutMs,
+    });
+    return writeActorComparison({
+        root,
+        sessionId,
+        id,
+        task,
+        baseline,
+        installed,
+        contractPass: Boolean(adjudication.evidence?.contractReport),
+        regressionPass: Boolean(adjudication.evidence?.regressionReport),
+        gatePass: adjudication.install?.state === 'installed',
+        beforeSnapshot: adjudication.install?.before,
+        afterSnapshot: adjudication.install?.after,
+        extra: { candidateId, evidence: adjudication.evidence ?? null },
+    });
 }
 /**
  * Real, redacted config snapshot for the builder (08 §12 I6): every loader row

@@ -15,8 +15,18 @@ import { recordCandidateVerification, installVerifiedCandidate } from '../candid
  * applies anything; this is the only place a proposal becomes a target change.
  */
 export type BuilderProposal =
-  | { capability: 'patch-evolution'; patch: MetaPatch; rationale?: string }
-  | { capability: 'loop-evolution'; loop: LoopEvolutionProposal; rationale?: string }
+  | { capability: 'patch-evolution'; patch: MetaPatch; rationale?: string; artifacts?: string[] }
+  | { capability: 'loop-evolution'; loop: LoopEvolutionProposal; rationale?: string; artifacts?: string[] }
+
+/** Capability-neutral model-facing envelope; known payloads are normalized
+ * before adjudication, while unknown-but-well-formed capabilities become
+ * `needs_verifier` drafts (never installed, never blocked from submission). */
+export interface BuilderProposalEnvelope {
+  capability: string
+  payload: Record<string, unknown>
+  rationale?: string
+  artifacts?: string[]
+}
 
 export interface LoopEvolutionProposal {
   id: string
@@ -69,6 +79,66 @@ export interface LoopAdjudicationResult {
 }
 
 export type AdjudicationResult = PatchAdjudicationResult | LoopAdjudicationResult
+
+export type ProposalClassifyResult =
+  | { kind: 'known'; proposal: BuilderProposal }
+  | { kind: 'needs_verifier'; capability: string; payload: Record<string, unknown>; rationale?: string; artifacts?: string[] }
+  | { kind: 'malformed'; reason: string }
+
+/**
+ * Classify a frozen submission without narrowing Builder exploration:
+ * known capabilities are normalized for adjudication, unknown capabilities
+ * with a payload become `needs_verifier` drafts, malformed envelopes are the
+ * only thing that may be reopened as a rejection.
+ */
+export function classifyBuilderProposal(value: Record<string, unknown>): ProposalClassifyResult {
+  const capability = typeof value.capability === 'string' ? value.capability : ''
+  const rationale = typeof value.rationale === 'string' ? value.rationale : undefined
+  const artifacts = Array.isArray(value.artifacts) && value.artifacts.every((item) => typeof item === 'string')
+    ? value.artifacts as string[]
+    : undefined
+  if (capability === 'patch-evolution') {
+    const payload = value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) ? value.payload : value.patch
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { kind: 'malformed', reason: `${capability} proposal missing payload` }
+    }
+    return {
+      kind: 'known',
+      proposal: {
+        capability: 'patch-evolution',
+        patch: payload as MetaPatch,
+        ...(rationale ? { rationale } : {}),
+        ...(artifacts ? { artifacts } : {}),
+      },
+    }
+  }
+  if (capability === 'loop-evolution') {
+    const payload = value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) ? value.payload : value.loop
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { kind: 'malformed', reason: `${capability} proposal missing payload` }
+    }
+    return {
+      kind: 'known',
+      proposal: {
+        capability: 'loop-evolution',
+        loop: payload as LoopEvolutionProposal,
+        ...(rationale ? { rationale } : {}),
+        ...(artifacts ? { artifacts } : {}),
+      },
+    }
+  }
+  if (!capability) return { kind: 'malformed', reason: 'proposal missing capability' }
+  if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
+    return { kind: 'malformed', reason: `capability ${capability} submitted without payload` }
+  }
+  return {
+    kind: 'needs_verifier',
+    capability,
+    payload: value.payload as Record<string, unknown>,
+    ...(rationale ? { rationale } : {}),
+    ...(artifacts ? { artifacts } : {}),
+  }
+}
 
 function isPatchProposal(proposal: BuilderProposal): proposal is Extract<BuilderProposal, { capability: 'patch-evolution' }> {
   return proposal.capability === 'patch-evolution'
@@ -154,7 +224,6 @@ export async function adjudicateLoop(
   }
   if (!verification.passed) {
     const registry = new CandidateRegistry(root)
-    registry.stage(manifest)
     recordCandidateVerification(registry, manifest.id, {
       passed: false,
       reason: verification.reason ?? 'independent contract verification failed',
@@ -169,7 +238,6 @@ export async function adjudicateLoop(
   }
 
   const registry = new CandidateRegistry(root)
-  registry.stage(manifest)
   const approved = recordCandidateVerification(registry, manifest.id, {
     passed: true,
     evidence: verification.evidence,

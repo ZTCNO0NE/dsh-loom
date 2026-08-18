@@ -3,8 +3,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { MetaPatch, ValidationReport } from '../types.js'
-import { adjudicate, adjudicateLoop, adjudicatePatch, type BuilderProposal, type LoopEvolutionProposal } from '../deliberation/index.js'
-import type { CandidateManifest } from '../candidates/index.js'
+import { adjudicate, adjudicateLoop, adjudicatePatch, classifyBuilderProposal, type BuilderProposal, type LoopEvolutionProposal } from '../deliberation/index.js'
+import { CandidateRegistry, type CandidateManifest } from '../candidates/index.js'
 
 function patchProposal(overrides: Partial<MetaPatch> = {}): BuilderProposal {
   const patch: MetaPatch = {
@@ -89,6 +89,15 @@ const fakeManifest: CandidateManifest = {
   createdBy: 'builder',
 }
 
+function stagingImporter(root: string): { acquire: () => CandidateManifest } {
+  return {
+    acquire: () => {
+      new CandidateRegistry(root).stage(fakeManifest)
+      return fakeManifest
+    },
+  }
+}
+
 describe('deliberation', () => {
   it('applies an approved patch proposal through gate', async () => {
     const proposal = patchProposal()
@@ -147,7 +156,7 @@ describe('deliberation', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-delib-'))
     const result = await adjudicateLoop(loopProposal() as never, {
       root,
-      importer: { acquire: () => fakeManifest } as never,
+      importer: stagingImporter(root) as never,
       verifyContract: async () => ({ passed: false, reason: 'C8 failed' }),
     })
     expect(result).toMatchObject({ kind: 'loop', verdict: 'rejected', reason: 'C8 failed' })
@@ -157,7 +166,7 @@ describe('deliberation', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-delib-'))
     const result = await adjudicateLoop(loopProposal() as never, {
       root,
-      importer: { acquire: () => fakeManifest } as never,
+      importer: stagingImporter(root) as never,
       verifyContract: async () => ({
         passed: true,
         evidence: { contractReport: '/ev/contract.json', regressionReport: '/ev/regression.json', verifiedAt: new Date().toISOString() },
@@ -202,9 +211,18 @@ describe('deliberation', () => {
       sessionId: 's',
       validator: {} as never,
       gate: {} as never,
-      importer: { acquire: () => fakeManifest } as never,
+      importer: stagingImporter(root) as never,
       verifyContract: async () => ({ passed: false, reason: 'C1 failed' }),
     })
     expect(loopResult).toMatchObject({ kind: 'loop', verdict: 'rejected', reason: 'C1 failed' })
+  })
+
+  it('classifies unknown-but-well-formed capabilities as needs_verifier drafts', () => {
+    const known = classifyBuilderProposal({ capability: 'patch-evolution', payload: { id: 'p1' }, rationale: 'r' })
+    expect(known).toMatchObject({ kind: 'known' })
+    const unknown = classifyBuilderProposal({ capability: 'self-hosting-verifier', payload: { draft: true }, artifacts: ['a.json'] })
+    expect(unknown).toMatchObject({ kind: 'needs_verifier', capability: 'self-hosting-verifier', artifacts: ['a.json'] })
+    expect(classifyBuilderProposal({})).toMatchObject({ kind: 'malformed', reason: 'proposal missing capability' })
+    expect(classifyBuilderProposal({ capability: 'unknown-x' })).toMatchObject({ kind: 'malformed', reason: expect.stringContaining('without payload') })
   })
 })

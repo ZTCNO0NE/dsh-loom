@@ -68,7 +68,9 @@ export class BuilderKernel {
         const paths = builderRunPaths(this.root, this.sessionId, id);
         const seq = readJsonl(paths.journal).length + 1;
         const entry = {
-            schemaVersion: 1, seq, kind, action, result, at: new Date().toISOString(),
+            schemaVersion: 1, seq, kind, action,
+            ...(result === undefined ? {} : { result: boundedJournalValue(result) }),
+            at: new Date().toISOString(),
             inputHash: this.load(id).inputHash,
             ...(error === undefined ? {} : { error: String(error) }),
         };
@@ -78,8 +80,10 @@ export class BuilderKernel {
     /** Record the model's declared decision without trusting it to write audit data. */
     recordDecision(id, decision) {
         const result = { kind: decision.kind };
-        if (decision.kind === 'tool')
+        if (decision.kind === 'tool') {
             result.action = decision.action.name;
+            result.actionHash = sha256(decision.action);
+        }
         if (decision.kind === 'continue')
             result.summary = decision.summary.slice(0, 1000);
         if (decision.kind === 'submit')
@@ -123,6 +127,12 @@ export class BuilderKernel {
             this.transition(id, 'exploring');
         this.recordDecision(id, decision);
         if (decision.kind === 'continue') {
+            const journal = readJsonl(builderRunPaths(this.root, this.sessionId, id).journal);
+            const priorDecision = [...journal].reverse().find((entry) => entry.kind === 'model' && entry.action === 'decision' && entry.seq !== journal[journal.length - 1]?.seq);
+            if (priorDecision?.result?.kind === 'continue') {
+                this.append(id, 'error', 'continue', undefined, 'continue requires a new tool action; consecutive no-op turns are not allowed');
+                throw new Error('continue requires a new tool action; consecutive no-op turns are not allowed');
+            }
             return { state: this.load(id).state, continue: true };
         }
         if (decision.kind === 'abort') {
@@ -144,6 +154,17 @@ export class BuilderKernel {
             return { state: 'submitted' };
         }
         try {
+            if (decision.kind === 'tool') {
+                const actionHash = sha256(decision.action);
+                const repeated = readJsonl(builderRunPaths(this.root, this.sessionId, id).journal)
+                    .filter((entry) => entry.kind === 'model' && entry.action === 'decision' && entry.result?.actionHash === actionHash).length;
+                if (repeated >= 8) {
+                    const reason = `identical tool action repeated ${repeated + 1} times: ${decision.action.name}`;
+                    this.append(id, 'error', decision.action.name, { actionHash, repeated: repeated + 1 }, reason);
+                    this.transition(id, 'aborted');
+                    return { state: 'aborted', reason };
+                }
+            }
             const result = this.executeTool(id, decision.action);
             this.append(id, 'tool', decision.action.name, result);
             return result;
@@ -306,4 +327,16 @@ export class BuilderKernel {
             throw new Error('workspace path escapes builder workspace');
         return path;
     }
+}
+/** Keep feedback durable without allowing a tool to recursively journal itself. */
+function boundedJournalValue(value) {
+    const encoded = JSON.stringify(value);
+    if (encoded.length <= 16_000)
+        return value;
+    return {
+        truncated: true,
+        originalBytes: Buffer.byteLength(encoded, 'utf8'),
+        originalHash: sha256(value),
+        preview: encoded.slice(0, 15_000),
+    };
 }

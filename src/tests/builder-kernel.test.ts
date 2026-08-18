@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -68,5 +68,17 @@ describe('BuilderKernel', () => {
     const next = kernel.reopenFromRejection(run.id, { verdict: 'rejected', firstDivergence: 'entry' })
     expect(kernel.context(next.id).input.previousAttempt).toMatchObject({ verdict: 'rejected' })
     expect(() => kernel.decide(next.id, { kind: 'tool', action: { name: 'inspect_staging', path: '../outside' } })).toThrow(/unavailable/)
+  })
+
+  it('bounds recursive read_journal feedback instead of growing without limit', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-journal-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: { task: 'journal' }, targetBefore: {} })
+    for (let i = 0; i < 40 && kernel.load(run.id).state !== 'aborted'; i++) {
+      kernel.decide(run.id, { kind: 'tool', action: { name: 'read_journal', limit: 100 } })
+    }
+    const journalPath = builderRunPaths(root, 's', run.id).journal
+    expect(statSync(journalPath).size).toBeLessThan(1_000_000)
+    expect(kernel.load(run.id).state).toBe('aborted')
   })
 })

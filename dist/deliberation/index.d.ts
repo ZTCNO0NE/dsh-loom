@@ -10,11 +10,22 @@ export type BuilderProposal = {
     capability: 'patch-evolution';
     patch: MetaPatch;
     rationale?: string;
+    artifacts?: string[];
 } | {
     capability: 'loop-evolution';
     loop: LoopEvolutionProposal;
     rationale?: string;
+    artifacts?: string[];
 };
+/** Capability-neutral model-facing envelope; known payloads are normalized
+ * before adjudication, while unknown-but-well-formed capabilities become
+ * `needs_verifier` drafts (never installed, never blocked from submission). */
+export interface BuilderProposalEnvelope {
+    capability: string;
+    payload: Record<string, unknown>;
+    rationale?: string;
+    artifacts?: string[];
+}
 export interface LoopEvolutionProposal {
     id: string;
     displayName: string;
@@ -69,6 +80,26 @@ export interface LoopAdjudicationResult {
     reason?: string;
 }
 export type AdjudicationResult = PatchAdjudicationResult | LoopAdjudicationResult;
+export type ProposalClassifyResult = {
+    kind: 'known';
+    proposal: BuilderProposal;
+} | {
+    kind: 'needs_verifier';
+    capability: string;
+    payload: Record<string, unknown>;
+    rationale?: string;
+    artifacts?: string[];
+} | {
+    kind: 'malformed';
+    reason: string;
+};
+/**
+ * Classify a frozen submission without narrowing Builder exploration:
+ * known capabilities are normalized for adjudication, unknown capabilities
+ * with a payload become `needs_verifier` drafts, malformed envelopes are the
+ * only thing that may be reopened as a rejection.
+ */
+export declare function classifyBuilderProposal(value: Record<string, unknown>): ProposalClassifyResult;
 /**
  * Adjudicate a frozen patch proposal: fixed verifier first, gate only after
  * approval. Rejection is returned to the caller, which reopens the Builder run.

@@ -1,5 +1,60 @@
 import { CandidateRegistry } from '../candidates/index.js';
 import { recordCandidateVerification } from '../candidates/lifecycle.js';
+/**
+ * Classify a frozen submission without narrowing Builder exploration:
+ * known capabilities are normalized for adjudication, unknown capabilities
+ * with a payload become `needs_verifier` drafts, malformed envelopes are the
+ * only thing that may be reopened as a rejection.
+ */
+export function classifyBuilderProposal(value) {
+    const capability = typeof value.capability === 'string' ? value.capability : '';
+    const rationale = typeof value.rationale === 'string' ? value.rationale : undefined;
+    const artifacts = Array.isArray(value.artifacts) && value.artifacts.every((item) => typeof item === 'string')
+        ? value.artifacts
+        : undefined;
+    if (capability === 'patch-evolution') {
+        const payload = value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) ? value.payload : value.patch;
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return { kind: 'malformed', reason: `${capability} proposal missing payload` };
+        }
+        return {
+            kind: 'known',
+            proposal: {
+                capability: 'patch-evolution',
+                patch: payload,
+                ...(rationale ? { rationale } : {}),
+                ...(artifacts ? { artifacts } : {}),
+            },
+        };
+    }
+    if (capability === 'loop-evolution') {
+        const payload = value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) ? value.payload : value.loop;
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return { kind: 'malformed', reason: `${capability} proposal missing payload` };
+        }
+        return {
+            kind: 'known',
+            proposal: {
+                capability: 'loop-evolution',
+                loop: payload,
+                ...(rationale ? { rationale } : {}),
+                ...(artifacts ? { artifacts } : {}),
+            },
+        };
+    }
+    if (!capability)
+        return { kind: 'malformed', reason: 'proposal missing capability' };
+    if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
+        return { kind: 'malformed', reason: `capability ${capability} submitted without payload` };
+    }
+    return {
+        kind: 'needs_verifier',
+        capability,
+        payload: value.payload,
+        ...(rationale ? { rationale } : {}),
+        ...(artifacts ? { artifacts } : {}),
+    };
+}
 function isPatchProposal(proposal) {
     return proposal.capability === 'patch-evolution';
 }
@@ -76,7 +131,6 @@ export async function adjudicateLoop(proposal, deps) {
     }
     if (!verification.passed) {
         const registry = new CandidateRegistry(root);
-        registry.stage(manifest);
         recordCandidateVerification(registry, manifest.id, {
             passed: false,
             reason: verification.reason ?? 'independent contract verification failed',
@@ -90,7 +144,6 @@ export async function adjudicateLoop(proposal, deps) {
         };
     }
     const registry = new CandidateRegistry(root);
-    registry.stage(manifest);
     const approved = recordCandidateVerification(registry, manifest.id, {
         passed: true,
         evidence: verification.evidence,

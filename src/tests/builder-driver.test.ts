@@ -96,4 +96,21 @@ describe('BuilderDriver', () => {
     expect(outcome.state).toBe('aborted')
     expect(prompts[0]).not.toContain('switch_git_source、builder_generated 或 abort')
   })
+
+  it('accepts the equivalent tool-name wrapper emitted by a model', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-wrapper-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    const outcome = await new BuilderDriver({
+      llm: decisionsLlm([
+        { kind: 'tool', action: { action: 'write_world_model', value: { observed: true } }, note: 'metadata' },
+        { kind: 'abort', reason: 'done' },
+      ]),
+      provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task',
+    }).run(kernel, run.id)
+    expect(outcome.state).toBe('aborted')
+    expect(kernel.context(run.id).journal).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'tool', action: 'write_world_model' }),
+    ]))
+  })
 })

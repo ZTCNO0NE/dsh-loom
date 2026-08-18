@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AutopilotState, EvolutionSignal } from '../types.js'
 import { atomicWriteJson, paths, PROTOCOL_VERSION, readJson, readJsonl, sha256 } from '../protocol/index.js'
@@ -12,7 +12,7 @@ export interface ActorEvidencePack {
   sessionId: string
   createdAt: string
   watermark: { frameCount: number; eventCount: number; lastFrameAt: string | null }
-  rawRefs: Array<{ name: string; path: string; exists: boolean; bytes: number; lineCount: number; sha256?: string }>
+  rawRefs: Array<{ name: string; path: string; snapshotPath?: string; exists: boolean; bytes: number; lineCount: number; sha256?: string }>
   deterministicDigest: RuntimeDigest
   actorHandoff: { path: string; sha256: string; supplied: boolean }
   configSnapshot: { path: string; sha256: string }
@@ -73,8 +73,10 @@ function defaultHandoff(options: ActorEvidencePackOptions, digest: RuntimeDigest
 }
 
 /**
- * Freeze an index over the actor's current evidence without copying the raw
- * transcript. Raw files remain the source of truth; summaries are navigation.
+ * Freeze an index over the actor's current evidence. The original path remains
+ * discoverable for broader Builder exploration, while `snapshotPath` is the
+ * immutable evidence input used by verifiers and replay. This avoids claiming
+ * a frozen pack while reading an append-only live transcript.
  */
 export function createActorEvidencePack(options: ActorEvidencePackOptions): ActorEvidencePack {
   const digest = buildRuntimeDigest({
@@ -104,7 +106,14 @@ export function createActorEvidencePack(options: ActorEvidencePackOptions): Acto
     ['world-state', paths.worldState(options.root, options.sessionId)],
     ['actor-profile', paths.actorProfile(options.root, options.sessionId)],
   ]
-  const rawRefs = sourcePaths.map(([name, path]) => ({ name, path, ...rawFile(path) }))
+  const rawDir = join(dir, 'raw')
+  mkdirSync(rawDir, { recursive: true })
+  const rawRefs = sourcePaths.map(([name, path]) => {
+    const info = rawFile(path)
+    const snapshotPath = info.exists ? join(rawDir, `${name}.snapshot`) : undefined
+    if (snapshotPath) copyFileSync(path, snapshotPath)
+    return { name, path, ...(snapshotPath ? { snapshotPath } : {}), ...info }
+  })
   const configInfo = rawFile(configPath)
   const handoffInfo = rawFile(handoffPath)
   const frameRows = readJsonl<{ ts?: string }>(paths.frames(options.root, options.sessionId))

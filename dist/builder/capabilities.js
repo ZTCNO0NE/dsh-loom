@@ -40,6 +40,9 @@ export class BuilderCapabilityRegistry {
             targetKinds: plugin.targetKinds ?? [],
             tools: plugin.tools ?? [],
             instructions: plugin.instructions ?? '',
+            verifierIds: plugin.verifierIds ?? [],
+            gateId: plugin.gateId ?? null,
+            proposalSchema: plugin.proposalSchema ?? null,
         })).join('\n');
     }
 }
@@ -51,4 +54,7 @@ export const LOOP_EVOLUTION_CAPABILITY = {
     targetKinds: ['actor-loop'],
     tools: ['read_file', 'list_directory', 'write_workspace_file', 'read_workspace_file', 'run_workspace_command', 'write_submission'],
     instructions: 'Choose your own exploration path. A candidate may be a small edit, a rebuilt loop, or a complete replacement; report what you tried and why.',
+    verifierIds: ['loop-contract-v1', 'loop-regression-v1'],
+    gateId: 'profile-cold-install-v1',
+    proposalSchema: 'loop-evolution-v1',
 };

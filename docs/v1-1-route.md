@@ -80,3 +80,8 @@ evidence/<id>/
 - 已砍：`discoverLoopCandidate` / Git 获取入口；被动触发链从激活路径移除（代码暂留归档）。
 - 配置（loop leg 启用条件）：`allowLoopCandidates.{baselineRoot,baseBundle,dependencyRoot,contractCommand,contractTask,goldenPath}`；未配置时 loop 裁决 fail-closed（`loop runtime not configured`）。
 - 测试：133/133（新增 deliberation 6 条 + reopen 1 条）；`npm run check` / `npm run build` / `git diff --check` 全绿。
+
+### 2026-08-18 真机实证（e2e16 + 确定性 gate 复现）
+
+- 27b actor 主动委托 → V4 Flash Builder 提交 `loop-evolution` proposal（并行 10→1 单文件编辑）→ 本地 baseline 构建 → **C0/C1-C8/C6 全绿** → approved → **profile gate 冷安装（C0 冒烟 pass）** → 同任务重跑 **admissible=true（causal-workload）**。
+- 期间修复 6 个真实 bug（见 run-log「loop-e2e-proposal-adjudication-gate」）；Builder 自由探索收敛性仍不稳，提交成功率依赖模型行为。

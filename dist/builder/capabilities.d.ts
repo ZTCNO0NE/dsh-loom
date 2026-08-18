@@ -11,6 +11,10 @@ export interface BuilderCapabilityPlugin {
     targetKinds?: readonly string[];
     tools?: readonly BuilderToolName[];
     instructions?: string;
+    /** Governance is selected after exploration; it is not a Builder route limit. */
+    verifierIds?: readonly string[];
+    gateId?: string;
+    proposalSchema?: string;
 }
 /** Small registry used to compose capability context without hard-coding a workflow. */
 export declare class BuilderCapabilityRegistry {

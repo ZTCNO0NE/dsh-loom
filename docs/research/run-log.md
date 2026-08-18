@@ -396,3 +396,10 @@
 - 缺口：新 Builder 探索路径在 verifier/gate 拒绝后只记录结果，没有像旧 Proposer 路径那样回注；Builder 看不到拒绝原因，无法再改。
 - 修复：`LoopCandidateGateway.reopenExploration(runId, report)` 基于 `BuilderKernel.reopenFromRejection` 重开不可变 run，把拒绝报告写入 `previous-attempt.json`（Builder 首轮即可 `read_input(previous_attempt)` 看到），actor inbox 消息随附到下一 run；后台 job 最多 `allowLoopCandidates.builderMaxReopenAttempts` 次（默认 3），每次拒绝后自动重开并再跑 Builder → 裁决。
 - 测试：**133/133**（新增 reopen 单测：拒绝报告可读 + inbox 保留）；`npm run check` / `npm run build` / `git diff --check` 全绿。
+
+### 2026-08-18 loop-e2e-proposal-adjudication-gate（真实 proposal→裁决→冷安装→同任务重跑）
+
+- 链路：27b actor 主动调用 `meta_auto(exploreLoop=true)` → V4 Flash Builder（5 回合/4 工具：read_file、sha256sum、git rev-parse、write_submission）→ `loop-evolution` proposal → 本地 baseline git archive 整树 + builder edits + bwrap 无网络构建 → contract-runner profile 模式（**C0 pass、C1-C8 pass、C6 fromzero L1-L5 pass**）→ approved → profile gate 冷安装（C0 冒烟 pass、before/after 落盘）→ 同任务重跑（baseline/installed 均 exit 0，**admissible=true，claimLevel=causal-workload**；installed 1.52× 更慢与串行语义一致，不宣称性能提升）。
+- 修复的真实 bug：① `adjudicateLoop` 在 importer 已 stage 后二次 stage（candidate already exists）；② importer 只拷包目录 → 沙箱构建缺 workspace 引用，改为 git archive 整树；③ candidate profile 依赖锚点缺 `dsh-invariants` → dependencyRoot 用仓库级 node_modules；④ 契约 overlay 的 `maxTokens` 被脱敏成 `***` → 重建 llm 行恢复 8192；⑤ 契约 overlay 继承主会话 workspaceRoot 导致 frames 落错处 → 删除，由 `DSH_META_VALIDATE_ROOT` 接管；⑥ `--regression` 的 fromzero-verify 相对路径以 dsh checkout 为 cwd → 固定为插件仓库根。
+- 产物：e2e16 workspace（builder runs/proposal/registry/install report/comparison）；确定性复现脚本 `eval/gate-e2e-verify.mjs`；快照 `run-records/2026-08-18-loop-e2e-proposal-adjudication-gate.json`。
+- 结论与剩余：proposal→裁决→gate→重跑链路真实闭环；Builder 自由探索的收敛性仍不稳（e2e17 attempt 1 卡重复 read_file 未提交），属模型行为问题，后续可引导"完成最小必要探索后尽早 submit"。

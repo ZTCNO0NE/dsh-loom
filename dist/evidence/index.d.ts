@@ -14,6 +14,7 @@ export interface ActorEvidencePack {
     rawRefs: Array<{
         name: string;
         path: string;
+        snapshotPath?: string;
         exists: boolean;
         bytes: number;
         lineCount: number;
@@ -42,8 +43,10 @@ export interface ActorEvidencePackOptions {
     actorAssessment?: string;
 }
 /**
- * Freeze an index over the actor's current evidence without copying the raw
- * transcript. Raw files remain the source of truth; summaries are navigation.
+ * Freeze an index over the actor's current evidence. The original path remains
+ * discoverable for broader Builder exploration, while `snapshotPath` is the
+ * immutable evidence input used by verifiers and replay. This avoids claiming
+ * a frozen pack while reading an append-only live transcript.
  */
 export declare function createActorEvidencePack(options: ActorEvidencePackOptions): ActorEvidencePack;
 /** Read a previously frozen manifest for status/reporting tools. */

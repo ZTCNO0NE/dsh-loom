@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { atomicWriteJson, paths, PROTOCOL_VERSION, readJson, readJsonl, sha256 } from '../protocol/index.js';
 import { buildRuntimeDigest } from '../meta/digest.js';
@@ -45,8 +45,10 @@ function defaultHandoff(options, digest) {
     ].join('\n') + '\n';
 }
 /**
- * Freeze an index over the actor's current evidence without copying the raw
- * transcript. Raw files remain the source of truth; summaries are navigation.
+ * Freeze an index over the actor's current evidence. The original path remains
+ * discoverable for broader Builder exploration, while `snapshotPath` is the
+ * immutable evidence input used by verifiers and replay. This avoids claiming
+ * a frozen pack while reading an append-only live transcript.
  */
 export function createActorEvidencePack(options) {
     const digest = buildRuntimeDigest({
@@ -75,7 +77,15 @@ export function createActorEvidencePack(options) {
         ['world-state', paths.worldState(options.root, options.sessionId)],
         ['actor-profile', paths.actorProfile(options.root, options.sessionId)],
     ];
-    const rawRefs = sourcePaths.map(([name, path]) => ({ name, path, ...rawFile(path) }));
+    const rawDir = join(dir, 'raw');
+    mkdirSync(rawDir, { recursive: true });
+    const rawRefs = sourcePaths.map(([name, path]) => {
+        const info = rawFile(path);
+        const snapshotPath = info.exists ? join(rawDir, `${name}.snapshot`) : undefined;
+        if (snapshotPath)
+            copyFileSync(path, snapshotPath);
+        return { name, path, ...(snapshotPath ? { snapshotPath } : {}), ...info };
+    });
     const configInfo = rawFile(configPath);
     const handoffInfo = rawFile(handoffPath);
     const frameRows = readJsonl(paths.frames(options.root, options.sessionId));

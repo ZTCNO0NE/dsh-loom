@@ -14,6 +14,12 @@
 - loop leg 启用需配置 `allowLoopCandidates.{baselineRoot,baseBundle,dependencyRoot,contractCommand,contractTask,goldenPath}`，未配置 fail-closed；
 - 测试 133/133（新增 deliberation 6 条 + verifier 拒绝回注 reopen 1 条，删除 discover 3 条）。
 
+### 2026-08-18 真机实证（e2e16 + 确定性 gate 复现）
+
+- **proposal→裁决→gate→同任务重跑全链路真实闭环**：27b 主动委托 → V4 Flash Builder 提交 loop-evolution proposal（5 回合/4 工具）→ 本地 baseline 构建 → C0/C1-C8/C6 全绿 → approved → profile gate 冷安装（C0 冒烟 pass、before/after 落盘）→ 同任务重跑 admissible=true（causal-workload）。
+- 修复 6 个真实 bug（二次 stage、git archive 整树、依赖锚点、maxTokens 脱敏、workspaceRoot 串味、C6 cwd）；快照 `run-records/2026-08-18-loop-e2e-proposal-adjudication-gate.json`。
+- 剩余：Builder 自由探索收敛性不稳（e2e17 卡重复 read_file 未提交），后续引导"最小必要探索后尽早 submit"。
+
 ## 当前进行中（loop 层放开，按序）
 
 ### Builder 基础重定（2026-08-18，优先于继续扩展候选网关）
