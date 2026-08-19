@@ -1,6 +1,8 @@
 import { CandidateRegistry } from './index.js';
 import type { LlmStreamLike } from '../meta/propose.js';
-import { type BuilderMessageInput, type BuilderRunState } from '../builder/kernel.js';
+import { type BuilderKernelOptions, type BuilderMessageInput, type BuilderProgressState, type BuilderRunMode, type BuilderRunState } from '../builder/kernel.js';
+import { BuilderCapabilityRuntimeRegistry } from '../builder/capabilities.js';
+import { type MiniSweRuntimeOptions } from '../builder/mini-swe.js';
 export interface LoopCandidateGatewayOptions {
     enabled: boolean;
     root: string;
@@ -13,15 +15,28 @@ export interface LoopCandidateGatewayOptions {
     builderMaxModelTurns?: number;
     builderMaxToolSteps?: number;
     builderMaxWallTimeMs?: number;
+    /** Broad user requests begin with an evidence-backed direction-selection pass. */
+    diagnosisFirst?: boolean;
+    /** Optional no-progress experiment; omitted keeps free exploration unchanged. */
+    builderKernelOptions?: BuilderKernelOptions;
     onUsage?: (usage: {
         prompt: number;
         completion: number;
     }) => void;
+    capabilityRuntimes?: BuilderCapabilityRuntimeRegistry;
+    /**
+     * v1.2 implementation runtime. Loom-native remains available only for
+     * durable diagnosis/clarification when a run is explicitly in diagnosis
+     * mode; it is not the production complex-source implementation path.
+     */
+    executionRuntime?: 'loom-native' | 'mini-swe';
+    miniSwe?: Omit<MiniSweRuntimeOptions, 'model'>;
 }
 export interface LoopExplorationResult {
     accepted: boolean;
     mode: 'exploration';
     runId: string;
+    passMode: BuilderRunMode;
     state: 'submitted' | 'aborted' | 'paused' | 'cancelled' | 'waiting_for_input';
     proposal?: Record<string, unknown>;
     modelTurns: number;
@@ -34,6 +49,7 @@ export type LoopExplorationStart = {
     mode: 'exploration';
     runId: string;
     state: 'created';
+    passMode: BuilderRunMode;
 } | {
     accepted: false;
     mode: 'exploration';
@@ -45,14 +61,37 @@ export interface LoopExplorationStatus {
     runId: string;
     lineageId: string;
     state: BuilderRunState;
+    passMode: BuilderRunMode;
     modelTurns: number;
     toolSteps: number;
     inboxMessages: number;
     pendingMessageIds: string[];
+    progressState: BuilderProgressState;
     proposal: {
         available: boolean;
         hash?: string;
         keys?: string[];
+    };
+    diagnosisReport: {
+        available: boolean;
+        hash?: string;
+        directions?: Array<{
+            id?: string;
+            goal?: string;
+            evidenceRefs?: string[];
+            unknowns?: string[];
+            cost?: string;
+        }>;
+        question?: {
+            question?: string;
+            whyNow?: string;
+            options?: Array<{
+                id?: string;
+                label?: string;
+                description?: string;
+            }>;
+            evidenceRefs?: string[];
+        };
     };
     journalTail: Array<{
         seq: number;
@@ -77,7 +116,9 @@ export interface LoopExplorationStatus {
  */
 export declare class LoopCandidateGateway {
     private readonly options;
+    private readonly runtimes;
     constructor(options: LoopCandidateGatewayOptions);
+    private kernel;
     /** Create a durable run before it enters the background queue. */
     startExploration(requirements: string, context?: Record<string, unknown>): LoopExplorationStart;
     /**
@@ -131,6 +172,7 @@ export declare class LoopCandidateGateway {
      * observations remain visible to the next attempt.
      */
     reopenExploration(runId: string, report: Record<string, unknown>): string;
+    private materializeMiniWorkspace;
     status(): ReturnType<CandidateRegistry['list']>;
     private persist;
 }

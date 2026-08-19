@@ -1,6 +1,190 @@
 # CURRENT.md — 当前状态与交接
 
-更新：2026-08-19 18:24（Asia/Shanghai）
+## 2026-08-20 Windows 源码 checkout host peer 修复（进行中）
+
+- Windows 真机启动已定位到 DSH 宿主缺口，而非 mini-SWE 或 patch 路径：源码版 `apps/cli/package.json` 将 `@deepseek-ai/dsh-tools` 放在 `devDependencies`，`healProfilesModuleFallback` 只扫描 `dependencies/peerDependencies`，因此 `%USERPROFILE%\\.dsh\\profiles\\node_modules` 缺少该 peer。
+- `bin/dsh-loom.mjs setup` 现在会在当前目录或 `DSH_ROOT` 识别 DSH 源码 checkout，确认 `packages/core/tools/lib/index.js` 存在后，安全建立 `profiles/node_modules/@deepseek-ai/dsh-tools` junction/symlink；真实目录不会覆盖。若尚未构建则给出确定命令 `pnpm --filter @deepseek-ai/dsh-tools build`。
+- README 与 `docs/USAGE.md` 已补充该差异及 Windows 排错路径。Node 语法检查、`npm run check`、mini-SWE 定向 4 tests、`git diff --check` 通过。
+- 尚未发布 `1.2.9`，待用户用新 setup 在 Windows 重跑并确认 Loom profile 能完成冷启动；若仍缺其他 host peer，应继续按相同依赖闭包证据修复，不盲目把整套 DSH core vendored 进 Loom。
+- `dsh-loom@1.2.9` 已发布并由 npm registry 核验（integrity `sha512-ZBv+GTCW4pS0hxnzNZRV8A50tyjpHCNly6X/qZ1cxSphF7INwZp82mvwGGZXvCA1Aah5FL33fonJaPdJd5jKsQ==`）。
+- 复测仍出现同一错误，说明用户使用的 setup 未完成 host fallback。`1.2.10` 已改为：检测到源码 checkout 且 `dsh-tools/lib/index.js` 缺失时自动运行 `pnpm --filter @deepseek-ai/dsh-tools build`；构建失败会在 setup 阶段退出，不再生成“看似成功”的 patch。已构建、发布并核验 `dsh-loom@1.2.10`。
+- Windows 实测显示 `@deepseek-ai/dsh-tools` 本身没有 package-local `build` script，1.2.10 的 filter 命令因此失败但仍继续。`1.2.11` 改用 DSH 根目录 `pnpm run build:lib:host`，并在 host 修复失败时立即退出；已发布并核验。
+- Web 实测随后暴露同类的 `@deepseek-ai/dsh-client-ui-directory-picker-native` 缺口，确认不能继续单包补丁。setup 已改为扫描 DSH CLI 的 dependencies/devDependencies/peerDependencies 及递归闭包，一次性建立所有 host fallback；缺少 `lib` 时统一执行根目录 `pnpm run build:lib:host`。README/USAGE 已同步。当前仅本地验证通过，尚未发布新版本，待 Windows 重跑确认后再发。
+- Windows 复测确认 client 包只有在 `pnpm run build:lib:client` 后才生成 `lib/index.js`。setup 现按 host→client 两阶段构建，README/USAGE 已同步；`dsh-loom@1.2.13` 已发布。下一步是用户重跑 setup 并确认 Web UI 冷启动。
+- Linux 冷安装验证通过：源码闭包修复、mini-SWE venv、patch 生成均成功。过程中发现 `@types/*` 类型包没有 runtime `lib`，不应触发宿主构建；setup 已改按 `main`/`exports` 判断运行时入口。该修复待发布为 `1.2.14`。
+- 文档补齐 Builder 独立凭据说明：默认 `DSH_META_API_KEY`/`DEEPSEEK_API_KEY`，Terra 使用 `LOOM_TERRA_API_KEY` + `LOOM_TERRA_BASE_URL`；明确 `dsh-loom` 是 bundle 而非 skill，Actor key 不会自动成为 Builder key。
+- `meta_status` 新增脱敏 Builder health projection：provider、model、`credentialConfigured` 和缺失提示，不返回任何 key。`dsh-loom@1.2.15` 已发布；仍未开放通过 Actor 明文写入凭据，当前安全入口是启动 DSH 前设置环境变量。
+
+## 2026-08-20 文章插图版式调整
+
+- 对外科普文章 `output/20260820-agent-work-package-and-self-evolution.md` 保留工程总览 SVG 与正文结构图，新增/保留水墨织机、档案纸、夜桥、织机河流、色彩花园五张近期诗意插图。
+- 诗意插图不再附加“隐喻翻译”或图下注释，解释全部放回正文；源稿不引用 Qwen `generated-backgrounds` 图片。
+- 已生成轻量 HTML 预览：`output/20260820-agent-work-package-and-self-evolution.preview-v11.html`；图片路径检查与 `git diff --check` 通过。
+
+## 2026-08-20 知乎科普文章发布
+
+- 发布前将 Mermaid 源码替换为知乎可上传的 PNG 图，并补齐全部图片 alt；知乎 preflight 通过，唯一 WARN 为长句统计。
+- 文章已公开发布：<https://zhuanlan.zhihu.com/p/2073645917077612083>。
+- 发布过程中第一次后台请求延迟返回，造成重复文章；已核对并删除重复 ID `2073645919174766986`，仅保留上述文章。
+- 重新审校正文强调层级：加粗仅保留协议字段、核心定义、执行边界和事实/轨迹等关键概念；已通过原文章 ID 更新并重新发布，未产生新重复文章。
+- 修复知乎框架图文字丢失：原 Mermaid SVG 的 `foreignObject` 经 librsvg 转 PNG 时未绘制节点文字；现改由 Chromium 渲染 SVG 后导出 PNG，并将 context/ledger 两图改为纵向大字号版（约 1000px 宽、1500px 高）。已更新同一知乎文章。
+
+更新：2026-08-19 22:32（Asia/Shanghai）
+
+## 2026-08-20 v1.2.8 修复 profile 隔离的 schemastery 依赖
+
+- Windows 真机错误 `Cannot find module ... @deepseek-ai/schemastery/lib/index.mjs` 定位为 package manifest 缺陷：Loom 在 `src/index.ts` 直接 runtime import schemastery，但此前错误地只列为 `devDependency`。
+- `@deepseek-ai/schemastery@^3.18.1` 已移入正式 `dependencies`；`cordis`、`dsh-tools` 保持 peer，因为它们必须与 DSH 宿主共享实例。
+- 发布并从 npm registry 核验 `dsh-loom@1.2.8` manifest：dependencies 含 schemastery，peerDependencies 仅含 cordis/dsh-tools。profile 安装后应在 Loom 自身 node_modules 解析该模块，不再向 `%USERPROFILE%\.dsh\profiles\node_modules` 回溯。
+- 发布前 check、定向 tests、build、pack dry-run、diff-check 已通过。
+
+## 2026-08-20 v1.2.7 DSH profile 启动语法修正
+
+- 根据 Windows 实测修正全部启动示例：Loom profile 必须使用 `pnpm dsh --profile loom --patch <absolute-patch>`；不能写成 `pnpm dsh web --profile loom ...`。
+- 原因是 DSH 的 `web` 是固定 `--profile web` 别名，不能与 Loom profile 组合；`dsh-loom setup` 输出和 `start` 转发逻辑同步修正。
+- README/USAGE 已明确该规则，并保留 `pnpm dsh web` 作为“先验证 DSH 默认 Web 是否可用”的独立检查。
+- 发布前将运行 check、定向测试、build、pack dry-run、diff-check；版本目标 `1.2.7`。
+
+## 2026-08-20 v1.2.6 路径与 DSH 启动文档修正
+
+- 将 setup/启动示例改为显式 `runtimeRoot` + 同一绝对 `patch` 路径，消除 `%USERPROFILE%\.dsh\meta-validate` 与相对 `.meta-validate` 的混淆。
+- 各平台文档要求先单独确认 DSH 自身可启动；不再把 `tsx/esm`、DSH 构建产物缺失等宿主问题误归因于 Loom。
+- npm README 同步更新，发布 `dsh-loom@1.2.6`。
+
+## 2026-08-20 快速开始重构（文档待随下次 release 发布）
+
+- README 快速开始不再混合“总览、源码 checkout、全局 CLI、平台差异”在同一条流程中，改为开头选择表 → 统一前置条件 → Windows PowerShell / macOS Terminal / Linux shell / 全局 CLI 四条各自完整的连续命令。
+- 三个源码 checkout 区块各自包含：安装固定版本 Loom、`--dump-config` 验证、平台 wrapper setup、正确顺序的 `pnpm dsh web --profile loom --patch ...` 启动；用户无需跨段落拼接命令。
+- 文档明确 mini-SWE 本体已 vendored、Python >=3.10、依赖镜像边界，以及 Windows profile bin 不进入 PATH 的原因。`git diff --check` 通过。
+- 根据 Windows 实测再次修正：不再在启动命令中写假设的相对 `.meta-validate`；各平台先显式设置 `runtime_root`，将 setup 生成的同一绝对 patch 路径传给 DSH。文档要求先独立验证 `pnpm dsh web`，把 DSH 的 `tsx/esm`/构建故障与 Loom runtime 安装分开排查。
+
+## 2026-08-20 v1.2.5 Python 前置条件校验
+
+- mini-SWE 2.4.6 的 `requires-python >=3.10` 现已从文档前置条件升级为 bootstrap 的确定性 preflight：创建 venv 前读取解释器版本，低于 3.10 或不可运行时清晰退出，不产生半初始化 runtime。
+- README 的 Windows/macOS/Linux 区块统一声明 Python >=3.10、首次依赖源可访问和 DSH provider 已配置；Windows 支持 `$env:PYTHON` 指向 conda/pyenv 解释器。
+- 发布并核验 `dsh-loom@1.2.5`；check、定向 tests、build、pack dry-run、diff-check 通过。
+
+## 2026-08-20 v1.2.4 跨平台安装入口
+
+- 快速开始已拆成 Windows PowerShell、macOS Terminal、Linux shell、全局 CLI 四个明确板块；每一块给出该系统的 setup 与 DSH 启动命令、Python 前置条件和网络/镜像边界。
+- 包内新增 `bin/setup-windows.ps1` 与 `bin/setup-unix.sh`：前者保留用户 PYTHON override、默认 `python`，后者统一委托 Node CLI 的 Unix 逻辑；不复制 bootstrap 实现，平台路径仍由唯一的 Node 核心维护。
+- 修正 setup 完成提示的 DSH 参数顺序为 `dsh web --profile ... --patch ...`。
+- `check`、定向 tests、build、pack dry-run、diff-check 通过；tarball 确认含两个平台 wrapper、vendored source/config/provenance。待发布 npm `1.2.4`。
+
+## 2026-08-20 v1.2.3 vendored mini-SWE supplier
+
+- 针对用户实测的北航 PyPI 镜像不含 `mini-swe-agent`，将固定 commit 的 MIT mini-SWE 2.4.6 源码发行包 vendored 到 `runtime/mini-swe-agent-2.4.6.tar.gz`（约 1.1MB）；不携带平台相关 Python venv（原本地 checkout 约 466MB，主要是 `.venv`）。
+- `dsh-loom setup` 优先从 npm 包内本地 tarball 安装 mini-SWE 本体，不再依赖用户 Python registry 提供该包；其余 Python 依赖仍需从可用镜像、官方 PyPI 或 wheelhouse 获取。
+- provenance 安装说明、README/USAGE 镜像边界已更新；`--source` 仍可用于高级部署和本地测试。
+- 发布 `dsh-loom@1.2.3`，npm registry 已核验；check、定向测试、build、pack dry-run、diff-check 通过，tarball 包含 vendored source/config/provenance。
+
+## 2026-08-20 v1.2.2 Windows runtime bootstrap 修复
+
+- 修复用户实测的 Windows 缺陷：`python3` 默认命令、Unix `bin/` venv 路径不适用于 Windows。
+- bootstrap 现在按平台使用：Windows `python`、`Scripts\python.exe`、`Scripts\mini.exe`；Linux/macOS 继续使用 `python3`、`bin/python`、`bin/mini`。
+- Python/venv/pip/DSH 启动失败现在输出具体诊断；`bundledMiniSwePaths` 主链 resolver 同步采用平台路径。
+- 修复 `dsh-loom start` 调用 DSH 时的参数顺序（`web --profile ... --patch ...`），避免 DSH 报“web takes none of parent options”。
+- README/USAGE 增加 Windows 源码 checkout 分支和 PATH/bin shim 说明。
+- 发布 `dsh-loom@1.2.2`，registry 已核验该版本存在；check、定向测试、build、diff-check 通过。
+
+## 2026-08-20 v1.2 一键 mini-SWE runtime（代码完成；首次实际 bootstrap 正在验证）
+
+- npm 包现在随附固定的 `runtime/mini-swe-agent-v2.4.6.yaml` 与 `runtime/mini-swe-agent.provenance.json`（mini-SWE `2.4.6`、来源 commit、许可证）；`package.json` 明确将 runtime 纳入 tarball。
+- 新增 `src/builder/bundled-mini-swe.ts`：默认从用户自己的 `$DSH_META_VALIDATE_ROOT/runtime/mini-swe-agent-2.4.6/bin/mini` 取 executable，从包内取 pinned config；显式 host override 仍保留给高级部署。
+- `dsh-loom setup` 创建该用户缓存内的隔离 venv 并安装固定版本；`dsh-loom start --profile loom web` 会在缺失时先 setup，再自动携带生成的 active-evolution patch 启动 DSH。不会写入 npm 包、DSH checkout、生产 profile 或凭据。
+- README/USAGE 快速开始已改为用户无需填写 executable/config path，并诚实说明首次 bootstrap 需要 Python 3、网络/PyPI；Config/Skill Actor 主入口 E2E 仍是产品发布门槛。
+- 已通过 `npm run check`、全量 `npm test` **233/233**、`npm run build`、`npm pack --dry-run`（确认 runtime/config/provenance/bin 都在 tarball）与 `git diff --check`。本机 `--source /chenzute/dsh-src/mini-swe-agent` 的真实 bootstrap 已启动，依赖安装尚待完成确认；不应把此单次机器安装作为发行 E2E。
+
+## 2026-08-20 README v1.2 叠加更新（文档完成）
+
+- GitHub 图文 README 保留 v1.0–v1.1 的架构图、历史案例和可读性；不再以重写方式丢弃这些材料。
+- 新增 v1.2 顶部状态框、Actor 任务卡流程图、三列表格（历史案例/设计方向/v1.2 标记）、refine 的 v1.2 artifact 交付案例，以及“测试绿不等于能力发布”的证据表。
+- 新图 `docs/figures/fig-version-evidence-trajectory.svg` 同时展示工程回归 **101 → 133 → 231** 与研究主张的定性上下波动；图注明确下行是收回未被证据支撑的发布主张、不是性能倒退。
+- README 明确：产品轨只承诺用户主动的 Config/Skill；Loop 为 mini-SWE 实现、Loom 编排的研究轨；Config/Skill 主入口真机 E2E 仍是发布门槛。
+- README 的快速开始与 `docs/USAGE.md` 已从旧版“自动后台优化”改为 v1.2 全流程：DSH 首次启动 → Loom profile 安装/`--dump-config` → host-owned mini-SWE runtime 前置条件 → Actor 任务卡确认/状态/取消/重做，并预留三张真实对话截图位置。明确当前缺少可分发 runtime supplier，故普通 npm 用户尚不能一键开启主动演进。
+
+## 2026-08-20 v1.2 产品轨：Actor 对话任务卡与会话委托（代码完成；真实主入口 E2E 待跑）
+
+- 新增 durable `EvolutionTaskSession`：每个 Actor 会话保存当前待确认、进行中与最近终态的计划引用、用户原话、Actor 解释、候选与进度 cursor；它只是会话指针，plan/run 本体始终 immutable。新请求不能覆盖已有待确认或进行中任务。
+- `meta_auto(plan)` 返回安全的 Actor 任务卡：没有 planId、target kind/id、workspace 路径、before snapshot 或隐藏推理；卡片新增候选、确认问题、controls、timeline、retryability。`meta_auto(execute)` 不再要求 Actor 提供 planId，默认只确认当前会话的待确认任务。
+- 新增 `meta_evolution_control(status|cancel_queued)`：无需用户给内部 ID；只能取消仍在内存队列、尚未获得 workspace 的任务。已经 implementing/verifying 的 mini-SWE pass 明确拒绝强杀，避免破坏可审计边界。
+- 用户卡状态为 waiting_for_confirmation → queued → implementing → verifying → completed | not_applied | not_completed | cancelled；`verifying` 只由 Controller 进入真实 adjudication 前写入。宿主重载把 queued/running job 与相应 plan 标记为 interrupted，绝不自动续跑。
+- `redo=true` 对最近 rejected/aborted/cancelled/interrupted 任务创建新的 immutable plan，复用原用户意图与宿主目标，但重新冻结本次 evidence；不会重开或修改旧 plan/workspace。
+- 失败通知不回显原始错误文本，user-evolution 统一投影为“未完成、未生效、已取消”卡片。新增会话存储回归；当前 `npm run check` 与 `npm test` **230/230** 通过。
+- 仍待真实验收：Config 与 Skill 各一条完整 `Actor 自然语言请求 → 候选确认 → 后台 mini-SWE → Verifier/Gate → cold replay/rollback → Actor 结果解释` E2E，完成前不得把这层宣称为用户可用。
+
+## 2026-08-20 v1.2 运行时收敛：Loom 编排，mini-SWE 实现
+
+- 生产 `meta_auto(exploreLoop=true)` 现在只接受 `allowLoopCandidates.executionRuntime=mini-swe`；`loom-native` 配置会被明确拒绝，不能再作为源码编辑器进入 Loop 实现链。
+- `executionRuntime` 默认已改为 `mini-swe`。Loom-native 只保留为 diagnosis/clarification pass：持久化 evidence、方向、choice 与 actor 通讯；用户/actor 选择后，implementation pass 自动物化 mini-SWE workspace，再交独立 Verifier/Gate。
+- 保留旧 BuilderKernel/Driver 单测仅用于 durable protocol、inbox、proposal/rejection 兼容回归；它们不属于 v1.2 复杂源码实现矩阵，也不应再触发正式模型实验。
+- 新增回归证明：当 mini-SWE 被选为 implementation runtime 时，diagnosis pass 不 materialize/调用 mini-SWE，仍由 Loom-native 生成 waiting_for_input；后续 implementation 才使用 mini-SWE。`candidate-gateway` 12/12、TypeScript check、diff-check 通过。
+- mini-SWE 已接到正式主链的 child env：LoopCandidateGateway 与 ActorEvolutionGateway 均从 host env 映射 Terra/official OpenAI-compatible base URL/key 到子进程的 `OPENAI_*`，并设置 `MSWEA_CONFIGURED=true`。该 env 仅传 `runMiniSwe` child，不序列化到 plan/prompt/workspace/trajectory/evidence。新增 mapping tests；定向 17/17、check/build/diff-check 通过。
+- 产品体验第一层：`meta_auto(plan)` 现在只返回 user-facing plan view（目标/风险/验收/证据数量），不回显 before snapshot 或内部 refs；`execute` 先 durable queue 再入后台 job，不阻塞 Actor，也不能重复排队；新增 `meta_evolution_status(jobId|planId)` 将 immutable plan/job 投影为等待确认、执行中、已生效或未生效及原因。controller queue 回归覆盖已补。
+- 产品体验第二层：新增 `evolution/presentation.ts` stable task-card schema（phase/headline/current+next/actions/result），Plan/Execute/status 都返回此 card，且测试证明不会包含 raw evidence path。后台 job 开始/完成通知现在读取同一 card，向 Actor 注入“隔离实现中、尚未生效、独立裁决中”或“已生效/未生效+原因”，不再泛化为“优化完成、reload 后生效”。只展示真实存在的 `confirm_execute/view_status/view_evidence` 操作。
+
+## 2026-08-19 v1.2 双轨控制面（代码完成；真实 E2E/矩阵未完成）
+
+- `meta_auto` 已新增产品轨 `evolutionMode=plan|execute`。Plan 冻结 Actor evidence pack、宿主解析 config/skill target；Execute 只接收原有 immutable `planId`，经 `ActorEvolutionGateway → mini-SWE isolated workspace → compiler → Validator → Gate`，没有直接安装旁路。
+- Config target 必须是宿主已有且不含 credential 字段的行；Skill id 必须 kebab-case，entry 固定为 `<id>/SKILL.md`。用户可提供意图，不能提供 before/path 或在 execute 时换目标。`activeEvolution` 默认关闭，必须明确配置 mini-SWE runtime。
+- 新增 `src/evolution/controller.ts` durable plan controller 与 `src/loop-experiments/matrix.ts`。矩阵强制三层任务 × 三个 immutable slots，保留失败并按分类统计；只有每层至少一条完成 edit→tests→submit→Verifier/Gate→cold replay→rollback，且九槽齐全，`releaseEligible=true`。
+- README 已重写为双轨边界；不再宣称自动自治、整体 Actor 性能或 Loop 已稳定可用。
+- 本次验证：`npm test` **222/222**、`npm run check`、`npm run build`、`git diff --check`、`npm pack --dry-run` 全通过。注意工作树含既有用户未提交改动和 build `dist/`；未做 git commit/publish。
+- 尚未完成且不可宣称：Config 与 Skill 各一条真实 **meta_auto 主入口** E2E；Loop 三层任务各 3 个 fresh run 与公开 raw records。现有 scheduler/refine records 只能作基线/先例，不自动计入 v1.2 阈值。
+
+### 2026-08-19 v1.2 测试启动结果（未达阈值）
+
+- fresh Skill runtime 复测：`builder-1787154571104-7f66fa2c` 真实 mini-SWE 提交，Verifier approved，Gate applied，cold Loader 安装前/后/rollback 后 probes 均 exit 0（正文载入断言在 raw report）。它复测的是 Gateway E2E，不是 `meta_auto` 入口，故不替代产品轨入口门槛。
+- Loop matrix `scheduler-prepare-overlap` attempt 1：`builder-1787154678894-60b94e7b` 在新的 immutable DSH archive 先真实复现 `parallel-safe prepares were serialized`，随后 mini-SWE 修改源码并通过 host-required delayed-prepare regression + `tool-calls.spec.ts`，提交 formal proposal。raw: `/chenzute/dsh-src/eval/run-records/2026-08-19-v12-loop-matrix/scheduler-prepare-overlap-attempt-1.json`。尚未走 C0–C8/Gate/cold replay/rollback，因此是 implementation-pass success、**不是** matrix complete success。
+- Loop matrix `oracle-rejection-repair` attempts 1–3：官方 V4 Flash adapter 三条 fresh immutable repair run 均在 20 model turns 后得到空白/非 JSON decision，0 tools、0 edit、0 oracle、0 submission；raw: `/chenzute/dsh-src/eval/run-records/2026-08-19-v12-loop-matrix/oracle-rejection-repair-attempts-1-3.json`。这是重复的 runtime/model-response contract 断链，不能归因于代码修复能力；遵循单变量纪律，下一次只切换为已验证能执行的 mini-SWE/Terra runtime，不再加 prompt 或预算。
+- 单变量 mini-SWE/Terra control 已完成：`oracle-rejection-repair-mini-attempt-1.json` 在 6 model turns 内检查 candidate/oracle、将 `runActorLoop` 改为 `run`、真实获得 `strict-order-pass`、写出 `outbox/proposal.json` 并 Submitted。raw: `/chenzute/dsh-src/eval/run-records/2026-08-19-v12-loop-matrix/oracle-rejection-repair-mini-attempt-1.json`。这是 execution-runtime implementation/oracle 成功；该 eval fixture 尚未被 `LoopCandidateGateway` 编译成 DSH loop envelope，故仍未进入 Verifier/Gate/cold replay/rollback，不算 complete success。
+
+## 2026-08-19 真实 refine skill：mini-SWE → verifier/Gate → cold Loader → rollback（已完成）
+
+- fresh immutable mini-SWE pass `builder-1787149918682-c881e8a5` 在孤立 `actor-module/` 自主生成 `refine-evidence-20260819/SKILL.md`，并留下 durable `Submitted` trajectory（5 API calls）。bundle 含有效 frontmatter、`EVIDENCE_REFINEMENT_MARKER` 与可用的 evidence-first refine 流程：观察失败 → 可证伪假设 → 最小安全检查 → 窄变更 → 说明限度；没有人工补写 bundle。
+- frozen `patch-evolution` proposal 经现有 `Validator.skillIsolation` 的真实 DSH `--dump-config` catalog diff 和冷 actor probe 通过，再由既有 `Gate` 安装到 eval-owned skill root。安装后的独立冷 DSH CLI process 实际调用 `skill(refine-evidence-20260819)`，脚本化 LLM 从 tool result 读取正文 marker；raw record：`/chenzute/dsh-src/eval/run-records/2026-08-19-real-refine-skill/report.json`。
+- 强证据序列：安装前 cold probe=`skill-body-missing`；Verifier=`approved` 且 `skill isolation: pass`；Gate `applied=true`；安装后 cold probe=`skill-body-loaded`；Gate-owned rollback 后目录不存在且 cold probe 回到 `skill-body-missing`。全部路径在 `/chenzute/dsh-src/eval/meta-workspace-real-refine-20260819/`，未触碰 DSH checkout、用户 skill root、profile 或生产。
+- 修复 mini-SWE adapter 的真实配置缺口：`MiniSweRuntimeOptions.env` 现在可由宿主显式传递模型 route/credential 环境，且只进入子进程、不进入 prompt/workspace/trajectory。新增回归覆盖。首次 run 因缺此 bridge abort；第二次/第三次 staging probe 暴露并修正了 eval harness 的 skill root depth 和 skill-name 回显断言，三次记录均保留，最终 pass 不掩盖前两次失败。
+- 边界：这证明 Builder 能创建一个隔离、可加载且有用的 refine **skill artifact**，并证明 DSH Loader 返回了它的正文；它**不**证明任意 LLM 在开放任务中必然遵循该技能，亦不证明 actor 已具备自动触发 refine、复杂多文件改造成功率或整体性能提升。
+
+### 2026-08-19 refine 的最小触发验收（已完成）
+
+- 已补“上一次聚焦检查失败 + 用户要求复盘、先不要修改”的冷 DSH Actor E2E：`/chenzute/dsh-src/eval/run-records/2026-08-19-refine-trigger-acceptance.json`。Actor 的确定性触发 policy 实际发出 `skill(refine-evidence-20260819)`，并在 tool result 正文可见后输出五段计划：Observed failure、Falsifiable hypothesis、Smallest safe check、Proposed next step、Limits。
+- 因而 v1 的触发边界可明确写为：**用户显式要求 refine/复盘/优化失败，或 Actor 已持有失败事实后要求证据式复盘**。这证明“触发→加载→使用输出结构”可运行；自动触发判别的召回率、真实模型遵循率与主观体验仍是后续统计评测，不作为当前门槛。
+
+## 2026-08-19 cold Loader candidate 的正式裁决、安装与回滚（已完成）
+
+- 新 immutable `builder-generated` candidate `cold-loader-prepare-20260819` 已以真实 `contract-runner` 得到一份完整报告：C0、C1–C4、C6（from-zero L1–L5）、C7、C8 全部 `pass`。报告：`/chenzute/dsh-src/eval/meta-workspace-cold-loader-20260819/runtime/reports/cold-loader-prepare-20260819-contract.json`。
+- 期间发现并修复两个评测底座问题：① Loom 启动的非交互 `pnpm dsh` 子进程必须固定 `CI=true`，否则 pnpm 会在 pipe 下中止 modules 修复而造成假 C0 失败；② C6 不能引用会被 `build` 清理的 `dist/fromzero/**`，四个 test fixture 已迁到受版本控制的 `fixtures/fromzero/**`，eval overlay 引用稳定资产。两者均有确定性回归覆盖。
+- Verifier 将 staging candidate 依次推进 `pending → verified → approved`；Gate 从空快照创建隔离 Loader profile，C0 entry smoke 通过，安装 receipt：`runtime/candidates/installations/cold-loader-prepare-20260819.json`。
+- 安装后在真实 cold DSH CLI Loader 下重跑 5× baseline/installed 16 个 `isConcurrencySafe`、100ms body-delay calls；两侧均 16/16 完成。中位数：baseline wall 5992.9ms / start span 1.664ms / body window 111.02ms；installed 5763.6ms / 1.651ms / 111.95ms。完整原始 stdout/timeline：`/chenzute/dsh-src/eval/run-records/2026-08-19-cold-loader-16-gate-installed-repeated/report.json`。该 plugin 没有 delayed prepare，故结论严格限于 **cold Loader task completion/non-regression**，不把 229ms wall 差或此 workload 宣称为性能提升。
+- 补齐 `rollbackInstalledCandidate`：已安装 profile 的 Gate-owned remove 会单独写 rollback receipt，不覆盖 install receipt；真实 receipt：`runtime/candidates/installations/cold-loader-prepare-20260819.rollback.json`，before `exists=true`、after `exists=false`，registry 回到 `approved`。生产/profile 未触及。
+
+## 2026-08-19 20:12 性能边界时序补充（已完成，cold Loader 未完成）
+
+- baseline 与 Builder candidate 各自以真实 `Context + AgentLoop + ToolRuntime + AgentRegistry + MockAdapter` 运行同一边界矩阵；原始 session frames/timeline 已持久化到 `/chenzute/dsh-src/eval/run-records/2026-08-19-mini-swe-prepare-boundaries-{baseline,candidate}-raw-frames.json`。
+- mixed-exclusive：两边都先并行启动 `p1/p2`，均在其结束后启动 exclusive `x`，`p3/p4` 又均在 `x` 结束后启动；候选没有因 prepare 并发优化越过 barrier（baseline 158.9ms，candidate 155.0ms，均为单次边界观察，非性能声明）。
+- abort-draining：pool=2 时两边只启动 `p1/p2`，取消后等待二者结束；`p3/p4/x` 都持久化为 `ABORTED_BEFORE_DISPATCH`。cancel→idle 为 baseline 87.5ms、candidate 88.5ms。
+- failure-draining：注入 scheduler failure 后两边都只让已启动 `c2` drain，failure 时尚无 `turn/end`，随后才出现错误结束；没有新的 dispatch。failure→idle baseline 5.0ms、candidate 2.7ms（由受控 release 决定，不作加速比较）。
+- 两边均通过隔离 workspace 的 Vitest benchmark；这补的是 safety/non-regression timing evidence，仍不等于 cold profile Loader 级 workload 或整体 Actor 性能。
+
+## 2026-08-19 20:18 cold Loader workload 进展与真实缺口
+
+- baseline 已经通过真实 DSH CLI cold process（`node --import tsx/esm apps/cli/src/bin.ts --profile headless`）及外部 Loader patch 完成一次 scripted mock tool round trip；这证明评测入口可走 Loader，而不是 Context fixture。
+- 尝试从 approved candidate 的 gate artifact 重新物化隔离 Loader profile 时，`createCandidateProfile()` fail-closed：artifact 的 `node_modules/@deepseek-ai/cordis` 是 symlink。profile artifact hash 明确禁止 symlink，故不能把这个后续污染的 staging directory 当作可重装 artifact。
+- 这是必须修复的 Importer/staging hygiene 问题：成功 stage 必须只保留 candidate package publish/runtime bytes（不含 build-time node_modules symlink），或用独立 immutable package artifact；不能手工忽略 hash 或复制 profile 来继续测试。cold Loader 16-call baseline/installed 对照暂停在此 gate，尚未形成结论。
+
+## 2026-08-19 20:33 Importer runtime artifact 修复与 cold Loader smoke
+
+- `CandidateImporter` 现将 build workspace 与 install artifact 分离：构建仍在完整 git archive staging tree 中运行，但 manifest 只指向 `candidates/artifacts/<id>` 下的 `package.json + lib/**` regular-file runtime copy。复制拒绝 symlink，显式排除 build-time `node_modules`；新增回归覆盖 source package 含 dependency symlink 时 artifact 仍可 hash。
+- 用原始 Builder durable proposal 重新执行 Importer，产生新 immutable candidate `cold-loader-prepare-20260819`，artifact hash `cc712d…541e6d`；它可被 `createCandidateProfile()` 正常物化为 Loader profile。
+- baseline 与新 candidate profile 已分别用真实 DSH CLI cold process、同一外部 mock Loader patch 完成一轮 tool round-trip。该结果只证明 runtime artifact hygiene + Loader 可重装，不替代 16-call repeated workload、verifier/gate promotion 或性能结论。
+
+## 2026-08-19 20:38 cold profile Loader 16-call workload（第一轮完成）
+
+- 为避免 Context fixture 冒充 Loader，新增 eval-only external CJS plugin：Loader 载入后注册 scripted adapter，首轮生成 16 个 `isConcurrencySafe` `cold_delay` calls，每个 body 固定 100ms。CJS `apply()` 内动态加载已构建 DSH modules，规避外置 `.ts` 在 Loader/tsx 中的 ESM require-cycle；DSH checkout 未修改。
+- baseline headless profile 与 candidate `loom-cold-loader-prepare-20260819` 各在独立 DSH_HOME 的 cold CLI process 成功运行并输出 `16 delay tools completed`。原始 tool timeline：`/chenzute/dsh-src/eval/run-records/2026-08-19-cold-loader-16-{baseline,candidate}-timeline.json`；原始 actor session frames 为各自 DSH_HOME 下 zstd JSONL。
+- 观测：两侧均 16/16 start/end；baseline start span 1.74ms、body window 112.0ms，candidate 1.71ms、113.2ms。这只证明通过真实 Loader 后候选仍保持 16-body并发与任务成功；该 plugin 没有 delayed `prepare()`，因此不能替代已有 prepare-overlap 因果 benchmark，也不能宣称 Loader workload 加速。
 
 ## 一句话状态
 
@@ -12,6 +196,11 @@
 - `actor-composition` 仍缺真实 DSH transaction adapter：不能复用单 patch Gate 伪装为原子多目标安装；必须以一个 staged composite artifact、一次冷 smoke 和可验证的全量回滚实现。
 - 性能只能主张已测的 prepare-overlap 路径；发布前若要主张“真实性能提升”，必须补齐 16-call、body latency、exclusive/abort/failure quiescence 与 raw actor-frame workload 的同基线重复原始记录。未完成这些时可发布功能/安全修复，但 release notes 必须明确不作整体性能宣称。
 - 打包审计已修：`npm run build` 先清空生成目录，`prepack` 删除 `dist/fromzero`/`dist/meta-workspace` 残留；dry-run tarball 由 86 缩至 77 文件且不含两类运行产物。`package-lock.json` 根版本也已从历史 `0.1.0` 同步到 `1.1.0`。
+
+### 2026-08-19 性能证据补齐：16-call/body（进行中）
+
+- Builder 真实 candidate `builder-1787123618188-d57a45a7` 对 pinned baseline 的 16-call 独立 scheduler matrix（每侧每档 5 次、pool=16、prepare=100ms）已完成：body=0ms 的 wall 中位数 **1645→133ms**、prepare span **1525→4.94ms**；body=50ms 的 wall **1695→180ms**、prepare span **1525→5.65ms**。两侧任务完整、0 error。record：`/chenzute/dsh-src/eval/run-records/2026-08-19-mini-swe-prepare-16call-body-benchmark.json`。
+- 这可作“该 Builder 候选在其修改的 prepare-overlap scheduler workload 上的 causal-workload 改善”结论；仍不可称 Actor 整体性能提升。剩余：mixed exclusive、abort/failure-draining 的 raw timing，以及同一真实 Actor raw-frame workload 的重复 baseline/installed 对照。
 
 ### 2026-08-19 actor 通用 runtime 迁移：config compiler 底座（进行中）
 

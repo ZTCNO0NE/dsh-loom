@@ -1,0 +1,16 @@
+digraph G {
+  graph [rankdir=TB, bgcolor="transparent", pad=0.2, nodesep=0.35, ranksep=0.55];
+  node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=16, margin="0.18,0.12", color="#3274a8", fillcolor="#eaf4ff", fontcolor="#123333"];
+  edge [fontname="Noto Sans CJK SC", fontsize=13, color="#54717d", arrowsize=0.8];
+  S [label="skill\n方法与边界：先检查什么、如何复盘、何时停止", fillcolor="#eaf4ff"];
+  A [label="模型选择动作", fillcolor="#eaf4ff"];
+  D [label="tools 声明\n名称 + 参数 schema + 权限范围", fillcolor="#eef8ee", color="#39804b"];
+  P [label="MCP server\n把外部 tools / resources / prompts 接入目录", fillcolor="#eef8ee", color="#39804b"];
+  C [label="tool call\nname + arguments", fillcolor="#eef8ee", color="#39804b"];
+  X [label="执行器预检", shape=diamond, fillcolor="#eef8ee", color="#39804b"];
+  F [label="结构化失败\n未发生外部变化", fillcolor="#fff3d6", color="#b47d19"];
+  E [label="真实执行\n文件 / 命令 / 服务", fillcolor="#eef8ee", color="#39804b"];
+  O [label="function_call_output\nstdout / stderr / exit code / error", fillcolor="#fff3d6", color="#b47d19"];
+  N [label="下一轮 input[]", fillcolor="#fff3d6", color="#b47d19"];
+  S -> A; D -> A; P -> D; A -> C; C -> X; X -> F [label="拒绝"]; X -> E [label="通过"]; E -> O; F -> O; O -> N;
+}

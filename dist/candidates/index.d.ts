@@ -104,8 +104,16 @@ export declare function candidatePaths(root: string): {
     base: string;
     registry: string;
     install: (id: string) => string;
+    rollback: (id: string) => string;
 };
 export declare function hashDirectory(directory: string): string;
+/**
+ * Freeze the publish/runtime face of a built loop package. Build workspaces
+ * are allowed to contain dependency links; Loader artifacts are not. The
+ * explicit allowlist prevents build-time node_modules and unrelated source
+ * files from becoming part of an installable candidate.
+ */
+export declare function materializeRuntimeArtifact(sourcePackage: string, destination: string): void;
 /**
  * Persistent candidate registry. Builder may create staging/pending records;
  * only verifier/gate callers may advance the record beyond pending.
@@ -118,6 +126,12 @@ export declare class CandidateRegistry {
     stage(manifest: CandidateManifest): CandidateRecord;
     transition(id: string, state: CandidateState, reason?: string, evidence?: ContractEvidence): CandidateRecord;
     recordInstall(report: LoopInstallReport): void;
+    /**
+     * A successful cold install remains reversible.  Keep its install receipt
+     * immutable and write the later removal as a separate Gate-owned receipt;
+     * overwriting the install report would erase the before/after evidence.
+     */
+    recordRollback(report: LoopInstallReport): void;
     private write;
 }
 export interface CandidateAcquisitionRequest {

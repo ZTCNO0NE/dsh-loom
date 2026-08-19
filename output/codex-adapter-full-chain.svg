@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500" role="img" aria-labelledby="t d">
+<title id="t">Codex 客户端、adapter 与上游模型服务的完整通信链路</title><desc id="d">三层纵向架构图，主请求向下，返回在右侧，本地工具仅在客户端内执行。</desc>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#3f6574"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#2f8151"/></marker><style>text{font-family:"Noto Sans CJK SC","Source Han Sans SC",Arial,sans-serif;fill:#173441}.title{font-size:30px;font-weight:700}.sub{font-size:16px;fill:#5a7480}.layer{font-size:20px;font-weight:700}.bt{font-size:18px;font-weight:700}.body{font-size:15px;fill:#46616d}.label{font-size:14px;font-weight:700;fill:#315664}.num{font-size:15px;font-weight:700;fill:#fff}.note{font-size:14px;fill:#647d87}.group{stroke-width:2}.box{stroke-width:2}.line{stroke:#3f6574;stroke-width:3;fill:none;marker-end:url(#a)}.green{stroke:#2f8151;stroke-width:3;fill:none;marker-end:url(#g)}</style></defs>
+<rect width="1200" height="1500" fill="#f8fbfc"/><text class="title" x="70" y="55">一次 Agent 请求如何完整绕一圈</text><text class="sub" x="70" y="85">主请求沿中线向下；模型响应走右侧专用通道；本地工具不在 adapter 内执行</text>
+
+<!-- Layer 1 -->
+<rect class="group" x="55" y="120" width="1090" height="330" rx="22" fill="#edf7fb" stroke="#78a9b8"/><text class="layer" x="85" y="158">① 你的电脑：Codex 客户端</text><text class="note" x="85" y="184">收集任务、发出请求、执行本地工具，并把工具结果带到下一轮</text>
+<rect class="box" x="90" y="220" width="225" height="125" rx="14" fill="#fff" stroke="#5c95ab"/><text class="bt" x="112" y="255">用户任务</text><text class="body" x="112" y="285">“修复并验证 bug”</text><text class="body" x="112" y="310">或继续上一轮任务</text>
+<rect class="box" x="420" y="210" width="360" height="145" rx="14" fill="#fff" stroke="#5c95ab"/><text class="bt" x="445" y="246">组装本轮请求</text><text class="body" x="445" y="276">当前消息 + 适用规则 + 工具说明</text><text class="body" x="445" y="302">+ 已知工具结果 + 运行选项</text><text class="body" x="445" y="328">形成 input / instructions / tools</text>
+<rect class="box" x="885" y="220" width="220" height="125" rx="14" fill="#f1fbf3" stroke="#4c8b5d"/><text class="bt" x="907" y="255">本地工具执行器</text><text class="body" x="907" y="285">读文件、跑命令</text><text class="body" x="907" y="310">修改工作区</text>
+<path class="line" d="M315 282H420"/><text class="label" x="337" y="266">任务进入</text><path class="green" d="M780 240H885"/><text class="label" x="793" y="226">收到工具请求时</text><path class="green" d="M885 370H790"/><text class="label" x="795" y="400">工具结果回到客户端</text>
+
+<!-- Layer 2 -->
+<rect class="group" x="55" y="510" width="1090" height="300" rx="22" fill="#fff8e8" stroke="#d39a48"/><text class="layer" x="85" y="548">② 适配服务：接续会话、翻译协议</text><text class="note" x="85" y="574">不读取你的工作区、不运行本地命令；它只处理请求和响应的数据外形</text>
+<rect class="box" x="90" y="615" width="250" height="125" rx="14" fill="#fff" stroke="#c48735"/><text class="bt" x="112" y="650">接收请求</text><text class="body" x="112" y="680">接收客户端发来的</text><text class="body" x="112" y="705">Responses 格式数据</text>
+<rect class="box" x="470" y="605" width="270" height="145" rx="14" fill="#fff" stroke="#c48735"/><text class="bt" x="492" y="640">接续上一轮</text><text class="body" x="492" y="670">按 previous_response_id</text><text class="body" x="492" y="695">找回旧 input / output</text><text class="body" x="492" y="720">按原顺序补回</text>
+<rect class="box" x="870" y="615" width="235" height="125" rx="14" fill="#fff" stroke="#c48735"/><text class="bt" x="892" y="650">转换格式</text><text class="body" x="892" y="680">变为上游服务需要的</text><text class="body" x="892" y="705">messages / tools</text>
+<path class="line" d="M340 678H470"/><path class="line" d="M740 678H870"/>
+
+<!-- Layer 3 -->
+<rect class="group" x="55" y="870" width="1090" height="270" rx="22" fill="#f4f1fb" stroke="#998abe"/><text class="layer" x="85" y="908">③ 上游模型服务：选择模型、生成文本或工具请求</text><text class="note" x="85" y="934">adapter 发来转换后的请求；模型不直接接触你的本地文件系统</text>
+<rect class="box" x="250" y="980" width="280" height="115" rx="14" fill="#fff" stroke="#7f72a8"/><text class="bt" x="273" y="1017">调度 / 网关</text><text class="body" x="273" y="1047">选择可用的模型服务</text><text class="body" x="273" y="1072">并转发请求</text>
+<rect class="box" x="665" y="980" width="280" height="115" rx="14" fill="#fff" stroke="#7f72a8"/><text class="bt" x="688" y="1017">语言模型</text><text class="body" x="688" y="1047">返回普通文本，或</text><text class="body" x="688" y="1072">tool_call{name, arguments}</text><path class="line" d="M530 1038H665"/>
+
+<!-- Fixed gutters: down centre, return right -->
+<circle cx="600" cy="390" r="15" fill="#3f6574"/><text class="num" x="595" y="396">1</text><path class="line" d="M600 355V510"/><text class="label" x="620" y="440">HTTP：请求字段</text>
+<circle cx="600" cy="840" r="15" fill="#3f6574"/><text class="num" x="595" y="846">2</text><path class="line" d="M600 750V870"/><text class="label" x="620" y="822">HTTP：转换后的消息与工具</text>
+<path class="line" d="M945 1038H1080V780H1105"/><text class="label" x="970" y="900">3 模型响应</text><path class="line" d="M1105 680H1125V355H1105"/><text class="label" x="945" y="490">4 返回文本或工具请求</text><path class="green" d="M780 370V470H1080V510"/><text class="label" x="802" y="458">5 下一轮附上 function_call_output + call_id</text>
+
+<rect x="70" y="1180" width="1060" height="150" rx="16" fill="#fff8e8" stroke="#d39a48"/><text class="bt" x="95" y="1215">扩展分支（中央主线之外）</text><text class="body" x="95" y="1245">直接文本：模型 → adapter → 客户端 → 用户，工具回路在这里结束。</text><text class="body" x="95" y="1270">拒绝 / 报错：预检或工具失败 → 带原 call_id 的结构化错误 → 下一轮 input。</text><text class="body" x="95" y="1295">流式：响应拆成多段事件后再累积；并行：同一轮多个 call_id，各自执行、各自回传。</text>
+<rect x="70" y="1360" width="1060" height="105" rx="16" fill="#fff" stroke="#c7d8de"/><text class="bt" x="95" y="1395">读图要点</text><text class="body" x="95" y="1425">Responses：客户端和 adapter 之间的通用数据外形。Chat：上游模型服务常用的消息列表外形。</text><text class="body" x="95" y="1450">previous_response_id：指向上一轮记录的编号；call_id：把一次工具结果配回对应工具请求的编号。</text>
+</svg>

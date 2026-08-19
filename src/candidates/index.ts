@@ -112,6 +112,7 @@ export function candidatePaths(root: string) {
     base,
     registry: join(base, 'registry.json'),
     install: (id: string) => join(base, 'installations', `${id}.json`),
+    rollback: (id: string) => join(base, 'installations', `${id}.rollback.json`),
   }
 }
 
@@ -136,6 +137,42 @@ export function hashDirectory(directory: string): string {
   }
   visit(root)
   return digest.digest('hex')
+}
+
+/**
+ * Freeze the publish/runtime face of a built loop package. Build workspaces
+ * are allowed to contain dependency links; Loader artifacts are not. The
+ * explicit allowlist prevents build-time node_modules and unrelated source
+ * files from becoming part of an installable candidate.
+ */
+export function materializeRuntimeArtifact(sourcePackage: string, destination: string): void {
+  if (existsSync(destination)) throw new Error(`candidate runtime artifact already exists: ${destination}`)
+  const source = resolve(sourcePackage)
+  const selected = ['package.json', 'lib']
+  try {
+    for (const name of selected) {
+      const from = join(source, name)
+      if (!existsSync(from)) throw new Error(`candidate runtime artifact requires ${name}`)
+      copyRegularTree(from, join(destination, name), source)
+    }
+  } catch (error) {
+    rmSync(destination, { recursive: true, force: true })
+    throw error
+  }
+}
+
+function copyRegularTree(source: string, destination: string, packageRoot: string): void {
+  const stat = lstatSync(source)
+  const rel = relative(packageRoot, source).split(sep).join('/') || '.'
+  if (stat.isSymbolicLink()) throw new Error(`candidate runtime artifact contains symlink: ${rel}`)
+  if (stat.isFile()) {
+    mkdirSync(dirname(destination), { recursive: true })
+    cpSync(source, destination, { dereference: false })
+    return
+  }
+  if (!stat.isDirectory()) throw new Error(`candidate runtime artifact has unsupported entry: ${rel}`)
+  mkdirSync(destination, { recursive: true })
+  for (const name of readdirSync(source)) copyRegularTree(join(source, name), join(destination, name), packageRoot)
 }
 
 function emptyRegistry(): CandidateRegistryFile {
@@ -204,6 +241,26 @@ export class CandidateRegistry {
       if (record.evidence) record.evidence.installReport = candidatePaths(this.root).install(report.candidateId)
       this.write(registry)
     }
+  }
+
+  /**
+   * A successful cold install remains reversible.  Keep its install receipt
+   * immutable and write the later removal as a separate Gate-owned receipt;
+   * overwriting the install report would erase the before/after evidence.
+   */
+  recordRollback(report: LoopInstallReport): void {
+    const registry = this.list()
+    const record = registry.candidates[report.candidateId]
+    if (!record) throw new Error(`unknown candidate: ${report.candidateId}`)
+    if (record.state !== 'installed') throw new Error(`candidate must be installed before rollback: ${record.state}`)
+    if (report.state !== 'rolled_back' || report.rollback?.succeeded !== true) {
+      throw new Error('rollback receipt must describe a successful rollback')
+    }
+    atomicWriteJson(candidatePaths(this.root).rollback(report.candidateId), report)
+    record.state = 'approved'
+    record.updatedAt = report.createdAt
+    record.reason = 'gate-owned installed candidate rollback completed'
+    this.write(registry)
   }
 
   private write(registry: CandidateRegistryFile): void {
@@ -337,10 +394,13 @@ export class CandidateImporter {
         rmSync(archive, { force: true })
       }
       const generatedEdits = applyBuilderGeneratedEdits(target, generatedSource)
-      const artifactPath = resolve(target, GENERATED_PACKAGE_PATH)
-      if (!existsSync(join(artifactPath, 'package.json'))) throw new Error('candidate packagePath has no package.json')
-      const build = this.buildArtifact(target, artifactPath, request)
-      if (!existsSync(join(artifactPath, request.entry))) throw new Error(`candidate build did not produce entry: ${request.entry}`)
+      const buildPackagePath = resolve(target, GENERATED_PACKAGE_PATH)
+      if (!existsSync(join(buildPackagePath, 'package.json'))) throw new Error('candidate packagePath has no package.json')
+      const build = this.buildArtifact(target, buildPackagePath, request)
+      if (!existsSync(join(buildPackagePath, request.entry))) throw new Error(`candidate build did not produce entry: ${request.entry}`)
+      const artifactPath = join(candidatePaths(this.options.root).base, 'artifacts', request.id)
+      mkdirSync(join(candidatePaths(this.options.root).base, 'artifacts'), { recursive: true })
+      materializeRuntimeArtifact(buildPackagePath, artifactPath)
       const manifest: CandidateManifest = {
         schemaVersion: 1,
         id: request.id,
@@ -373,6 +433,7 @@ export class CandidateImporter {
       return manifest
     } catch (error) {
       rmSync(target, { recursive: true, force: true })
+      rmSync(join(candidatePaths(this.options.root).base, 'artifacts', request.id), { recursive: true, force: true })
       throw error
     }
   }

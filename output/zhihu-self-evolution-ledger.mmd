@@ -1,0 +1,11 @@
+flowchart TB
+    fact["事实\n失败、测试、用户纠正"] --> hypothesis["假设\n解释为何失败"]
+    hypothesis --> candidate["候选\nconfig / tool / skill / loop"]
+    candidate --> verifier["独立 Verifier\n回归、契约、冷探针"]
+    verifier -->|approved| gate["Gate\n快照、原子安装、冒烟"]
+    verifier -->|rejected| rejection["拒绝记录\n保留原因与证据"]
+    gate --> result["应用后的真实结果"]
+    gate -->|失败| rollback["rollback\n恢复 before snapshot"]
+    result --> fact
+    rollback --> fact
+    rejection --> hypothesis

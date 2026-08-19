@@ -1,10 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { join, relative, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { appendJsonl, atomicWriteJson, readJson, readJsonl, sha256, workspaceDir } from '../protocol/index.js';
+import { appendJsonl, atomicWriteJson, paths as protocolPaths, readJson, readJsonl, sha256, workspaceDir } from '../protocol/index.js';
 import { BuilderCapabilityRuntimeRegistry } from './capabilities.js';
 import { addObservedArtifact, createBuilderProvenance, inspectBuilderFile, searchBuilderText, traceBuilderArtifact, } from './provenance.js';
+/** SHA-256 of exact file bytes, matching CandidateImporter's beforeHash check. */
+function fileContentHash(content) {
+    return createHash('sha256').update(content, 'utf8').digest('hex');
+}
 export function builderRunPaths(root, sessionId, id) {
     const base = join(workspaceDir(root, sessionId), 'builder-runs', id);
     return {
@@ -25,6 +30,7 @@ export function builderRunPaths(root, sessionId, id) {
         promptVisible: join(base, 'state', 'prompt-visible.jsonl'),
         events: join(base, 'state', 'events.jsonl'),
         snapshots: join(base, 'state', 'snapshots.jsonl'),
+        workspaceBaseline: join(base, 'state', 'workspace-baseline'),
         workspace: join(base, 'workspace'),
         staging: join(base, 'staging'),
         preflight: join(base, 'preflight'),
@@ -46,7 +52,11 @@ export class BuilderKernel {
         this.options = options;
     }
     create(input) {
-        const id = `builder-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        const id = input.id ?? `builder-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        if (!/^builder-[0-9]+-[a-f0-9]{8}$/.test(id))
+            throw new Error(`invalid builder run id: ${id}`);
+        if (existsSync(builderRunPaths(this.root, this.sessionId, id).record))
+            throw new Error(`builder run already exists: ${id}`);
         const now = new Date().toISOString();
         const inputHash = sha256(input);
         const record = {
@@ -91,6 +101,21 @@ export class BuilderKernel {
         this.append(id, 'state', 'create', { state: 'created', inputHash });
         this.emit(id, 'run_created', { runId: id, state: 'created', mode: record.mode });
         return record;
+    }
+    /** Host/runtime adapter captures an immutable source baseline after it has
+     * materialized a workspace, before an external coding runtime can edit it. */
+    captureWorkspaceBaseline(id, sourceRoot = 'packages/core/agent-loop/src') {
+        const paths = builderRunPaths(this.root, this.sessionId, id);
+        const source = this.workspacePath(paths.workspace, sourceRoot);
+        if (!existsSync(source) || (!statSync(source).isDirectory() && !statSync(source).isFile()))
+            throw new Error(`workspace baseline source is unavailable: ${sourceRoot}`);
+        const target = resolve(paths.workspaceBaseline, sourceRoot);
+        if (existsSync(target))
+            return { path: sourceRoot, captured: false };
+        mkdirSync(resolve(target, '..'), { recursive: true });
+        cpSync(source, target, { recursive: true, dereference: false });
+        this.snapshot(id, `workspace-baseline/${sourceRoot.replaceAll('/', '_')}.json`, { sourceRoot, capturedAt: new Date().toISOString() });
+        return { path: sourceRoot, captured: true };
     }
     load(id) {
         const record = readJson(builderRunPaths(this.root, this.sessionId, id).record);
@@ -307,6 +332,23 @@ export class BuilderKernel {
         this.append(id, 'state', `control:${action}`, { from: run.state, to: nextState });
         return this.transition(id, nextState);
     }
+    /** Make a missing proposal draft an explicit, durable next-step obligation. */
+    requireSubmissionDraft(id) {
+        return this.updateProgress(id, {
+            progressRequirement: 'write_submission',
+            nextIntent: 'write_submission with the concrete verified candidate proposal before attempting submit',
+            lastAction: 'guard:missing_submission_draft',
+        });
+    }
+    /** After a candidate edit, require one fresh executable observation before
+     * the model can continue editing or hand off the proposal. */
+    requireEvidence(id) {
+        return this.updateProgress(id, {
+            progressRequirement: 'produce_evidence',
+            nextIntent: 'run the relevant oracle or simulation against the edited candidate before editing again',
+            lastAction: 'guard:candidate_requires_evidence',
+        });
+    }
     proposal(id) {
         return readJson(builderRunPaths(this.root, this.sessionId, id).proposal);
     }
@@ -337,6 +379,10 @@ export class BuilderKernel {
         if (decision.kind === 'submit') {
             if (run.mode === 'diagnosis')
                 throw new Error('diagnosis pass cannot submit; write a diagnosis report and await user direction');
+            const progress = this.progressState(id);
+            if (progress.progressRequirement === 'write_submission') {
+                throw new Error('builder submission requires write_submission before submit');
+            }
             const draft = this.submissionDraft(id);
             if (!draft)
                 throw new Error('builder submission requires a proposal draft');
@@ -408,7 +454,9 @@ export class BuilderKernel {
                     && this.progressState(id).unchangedReadStreak >= Math.max(0, repeatReadThreshold - 1)) {
                     const progress = this.progressState(id);
                     const requirement = this.options.enforceProgressCheckpoints
-                        ? progress.progressRequirement === 'none' ? 'declare_direction' : progress.progressRequirement
+                        ? progress.progressRequirement === 'none'
+                            ? (progress.hypothesis?.trim() ? 'produce_evidence' : 'declare_direction')
+                            : progress.progressRequirement
                         : progress.progressRequirement;
                     const reason = `unchanged read rejected at streak ${progress.unchangedReadStreak + 1}: ${decision.action.name}`;
                     this.append(id, 'error', decision.action.name, {
@@ -519,18 +567,18 @@ export class BuilderKernel {
             return { written: 'diagnosis_report', path: paths.diagnosisReport, hash: sha256(action.report), waitingFor: 'user_direction' };
         }
         if (action.name === 'read_file') {
-            const file = resolve(action.path);
+            const file = this.readablePath(paths.workspace, action.path);
             if (!existsSync(file) || !statSync(file).isFile())
-                throw new Error('file is unavailable');
+                throw new Error(`file is unavailable: ${file}`);
             const content = readFileSync(file, 'utf8');
             const result = this.annotateReadFeedback(id, action.name, file, { path: file, content: content.slice(0, 64_000), truncated: content.length > 64_000 });
             this.observeArtifact(id, 'source', file, 'Source file read during Builder exploration.');
             return result;
         }
         if (action.name === 'list_directory') {
-            const directory = resolve(action.path);
+            const directory = this.readablePath(paths.workspace, action.path);
             if (!existsSync(directory) || !statSync(directory).isDirectory())
-                throw new Error('directory is unavailable');
+                throw new Error(`directory is unavailable: ${directory}`);
             const entries = readdirSync(directory, { withFileTypes: true }).slice(0, 500).map(entry => ({
                 name: entry.name,
                 type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
@@ -538,7 +586,12 @@ export class BuilderKernel {
             return this.annotateReadFeedback(id, action.name, directory, { path: directory, entries, truncated: readdirSync(directory).length > entries.length });
         }
         if (action.name === 'search_text') {
-            const roots = action.roots?.length ? action.roots : [process.cwd(), paths.workspace];
+            // Match read/list semantics: a Builder's relative source root belongs to
+            // its immutable workspace, while an explicitly absolute root stays a
+            // global read-only location.
+            const roots = action.roots?.length
+                ? action.roots.map((root) => this.readablePath(paths.workspace, root))
+                : [paths.workspace, process.cwd()];
             const result = searchBuilderText(action.query, roots, action.maxResults);
             for (const match of Array.isArray(result.matches) ? result.matches : []) {
                 if (match && typeof match === 'object' && typeof match.path === 'string') {
@@ -559,11 +612,31 @@ export class BuilderKernel {
         if (action.name === 'write_workspace_file') {
             const file = this.workspacePath(paths.workspace, action.path);
             const relativePath = relative(paths.workspace, file);
+            this.captureWorkspaceBaselineFile(paths.workspaceBaseline, paths.workspace, file);
             mkdirSync(resolve(file, '..'), { recursive: true });
             writeFileSync(file, action.content, 'utf8');
             this.snapshot(id, `workspace/${relativePath}`, action.content);
             this.setPhase(id, 'exploring');
             return { path: relativePath, bytes: Buffer.byteLength(action.content, 'utf8'), hash: sha256(action.content) };
+        }
+        if (action.name === 'apply_workspace_patch') {
+            for (const relativePath of unifiedPatchFiles(action.patch)) {
+                this.captureWorkspaceBaselineFile(paths.workspaceBaseline, paths.workspace, this.workspacePath(paths.workspace, relativePath));
+            }
+            const check = spawnSync('git', ['apply', '--check', '--whitespace=nowarn', '-'], {
+                cwd: paths.workspace, encoding: 'utf8', input: action.patch, maxBuffer: 256 * 1024,
+            });
+            if (check.status !== 0)
+                throw new Error(`workspace patch rejected: ${(check.stderr || check.stdout || 'git apply check failed').trim()}`);
+            const applied = spawnSync('git', ['apply', '--whitespace=nowarn', '-'], {
+                cwd: paths.workspace, encoding: 'utf8', input: action.patch, maxBuffer: 256 * 1024,
+            });
+            if (applied.status !== 0)
+                throw new Error(`workspace patch failed: ${(applied.stderr || applied.stdout || 'git apply failed').trim()}`);
+            const hash = sha256(action.patch);
+            this.snapshot(id, `workspace/patches/${hash}.diff`, action.patch);
+            this.setPhase(id, 'exploring');
+            return { applied: true, hash, bytes: Buffer.byteLength(action.patch, 'utf8'), files: unifiedPatchFiles(action.patch) };
         }
         if (action.name === 'read_workspace_file') {
             const file = this.workspacePath(paths.workspace, action.path);
@@ -661,6 +734,53 @@ export class BuilderKernel {
             this.emit(id, 'proposal_drafted', { proposalHash: manifest.proposalHash, manifestHash: sha256(manifest), keys: Object.keys(action.proposal).slice(0, 20) });
             this.setPhase(id, 'ready_to_submit');
             return { written: 'submission_draft', hash: manifest.proposalHash, manifestHash: sha256(manifest) };
+        }
+        if (action.name === 'compile_loop_submission') {
+            if (this.load(id).kind !== 'loop_candidate')
+                throw new Error('workspace loop compilation is only available to loop_candidate runs');
+            const proposal = this.compileLoopWorkspaceProposal(id, action.rationale, action.expectedOutcome);
+            atomicWriteJson(paths.submissionDraft, proposal);
+            this.snapshot(id, 'submission/draft.json', proposal);
+            const manifest = this.freezeSubmissionManifest(id, proposal);
+            atomicWriteJson(paths.submissionManifest, manifest);
+            this.snapshot(id, 'submission/manifest.json', manifest);
+            this.emit(id, 'proposal_drafted', { proposalHash: manifest.proposalHash, manifestHash: sha256(manifest), keys: Object.keys(proposal) });
+            this.setPhase(id, 'ready_to_submit');
+            return { written: 'compiled_loop_submission', edits: proposal.payload.source.edits.length, hash: manifest.proposalHash, manifestHash: sha256(manifest) };
+        }
+        if (action.name === 'compile_config_submission') {
+            const proposal = this.compileConfigWorkspaceProposal(id, action.rationale, action.expectedOutcome);
+            atomicWriteJson(paths.submissionDraft, proposal);
+            this.snapshot(id, 'submission/draft.json', proposal);
+            const manifest = this.freezeSubmissionManifest(id, proposal);
+            atomicWriteJson(paths.submissionManifest, manifest);
+            this.snapshot(id, 'submission/manifest.json', manifest);
+            this.emit(id, 'proposal_drafted', { proposalHash: manifest.proposalHash, manifestHash: sha256(manifest), keys: Object.keys(proposal) });
+            this.setPhase(id, 'ready_to_submit');
+            return { written: 'compiled_config_submission', targetId: proposal.payload.targetId, hash: manifest.proposalHash, manifestHash: sha256(manifest) };
+        }
+        if (action.name === 'compile_module_submission') {
+            const proposal = this.compileModuleWorkspaceProposal(id, action.rationale, action.expectedOutcome);
+            // Validator load/probe checks deliberately read a host-owned staging
+            // area, never the runtime workspace. Copy the compiler's frozen bundle
+            // there before any verifier can observe the envelope.
+            const payload = proposal.payload;
+            const staging = protocolPaths.staging(this.root, this.sessionId, payload.id);
+            for (const file of payload.module.files) {
+                const target = resolve(staging, file.path);
+                if (relative(staging, target).startsWith('..'))
+                    throw new Error(`compiled module staging path escapes root: ${file.path}`);
+                mkdirSync(join(target, '..'), { recursive: true });
+                writeFileSync(target, file.content, 'utf8');
+            }
+            atomicWriteJson(paths.submissionDraft, proposal);
+            this.snapshot(id, 'submission/draft.json', proposal);
+            const manifest = this.freezeSubmissionManifest(id, proposal);
+            atomicWriteJson(paths.submissionManifest, manifest);
+            this.snapshot(id, 'submission/manifest.json', manifest);
+            this.emit(id, 'proposal_drafted', { proposalHash: manifest.proposalHash, manifestHash: sha256(manifest), keys: Object.keys(proposal) });
+            this.setPhase(id, 'ready_to_submit');
+            return { written: 'compiled_module_submission', targetId: proposal.payload.targetId, hash: manifest.proposalHash, manifestHash: sha256(manifest) };
         }
         if (action.name === 'write_candidate_draft') {
             if (!action.proposal || Array.isArray(action.proposal))
@@ -862,6 +982,186 @@ export class BuilderKernel {
             createdAt: new Date().toISOString(),
         };
     }
+    /** Preserve original bytes on the first workspace mutation only. */
+    captureWorkspaceBaselineFile(baselineRoot, workspace, file) {
+        if (!file.startsWith(`${resolve(workspace)}/`) || !existsSync(file) || !statSync(file).isFile())
+            return;
+        const relativePath = relative(workspace, file);
+        const destination = resolve(baselineRoot, relativePath);
+        if (existsSync(destination))
+            return;
+        mkdirSync(resolve(destination, '..'), { recursive: true });
+        writeFileSync(destination, readFileSync(file));
+    }
+    /**
+     * Turn captured workspace bytes into the audited builder-generated envelope.
+     * The model supplies only intent; exact hashes and replacement text come from
+     * Kernel-owned before/after files and remain independently revalidated by
+     * CandidateImporter.
+     */
+    compileLoopWorkspaceProposal(id, rationale, expectedOutcome) {
+        if (!rationale.trim())
+            throw new Error('compiled loop submission requires a rationale');
+        const paths = builderRunPaths(this.root, this.sessionId, id);
+        const target = readJson(paths.targetBefore) ?? {};
+        const ref = typeof target.baselineCommit === 'string' ? target.baselineCommit : '';
+        if (!/^[0-9a-f]{40}$/i.test(ref))
+            throw new Error('compiled loop submission requires targetBefore.baselineCommit');
+        const edits = [];
+        const visit = (directory) => {
+            for (const entry of readdirSync(directory, { withFileTypes: true })) {
+                const file = join(directory, entry.name);
+                if (entry.isDirectory())
+                    visit(file);
+                else if (entry.isFile()) {
+                    const relativePath = relative(paths.workspaceBaseline, file);
+                    if (!relativePath.startsWith('packages/core/agent-loop/src/') || !/\.tsx?$/.test(relativePath))
+                        continue;
+                    const current = resolve(paths.workspace, relativePath);
+                    if (!existsSync(current) || !statSync(current).isFile())
+                        throw new Error(`compiled loop edit is unavailable: ${relativePath}`);
+                    const before = readFileSync(file, 'utf8');
+                    const after = readFileSync(current, 'utf8');
+                    // CandidateImporter validates a builder-generated beforeHash against
+                    // the original file bytes.  `sha256()` is the protocol JSON-value
+                    // digest (and intentionally quotes strings), so it must not be used
+                    // for this cross-boundary file-content contract.
+                    if (before !== after)
+                        edits.push({ path: relativePath, beforeHash: fileContentHash(before), after });
+                }
+            }
+        };
+        if (existsSync(paths.workspaceBaseline))
+            visit(paths.workspaceBaseline);
+        if (edits.length === 0)
+            throw new Error('compiled loop submission requires at least one captured agent-loop source edit');
+        if (edits.length > 4)
+            throw new Error('compiled loop submission exceeds the four-file edit limit');
+        const candidateId = `builder-${id.slice('builder-'.length)}`;
+        return {
+            capability: 'loop-evolution',
+            payload: {
+                id: candidateId,
+                displayName: `Builder workspace candidate ${id}`,
+                source: { kind: 'builder-generated', baseline: { uri: 'https://github.com/deepseek-ai/deepseek-harness.git', ref }, edits },
+                packageName: '@deepseek-ai/dsh-agent-loop',
+                packagePath: 'packages/core/agent-loop',
+                entry: 'lib/index.js',
+                config: {},
+                expectedOutcome: expectedOutcome?.trim() || 'Builder-tested workspace change',
+                capabilities: [],
+            },
+            rationale: rationale.trim(),
+        };
+    }
+    /**
+     * Compile a single host-materialized config target. The external runtime
+     * edits only actor-config.json; target identity, action and frozen envelope
+     * remain Kernel-owned and feed the existing patch-evolution verifier/gate.
+     */
+    compileConfigWorkspaceProposal(id, rationale, expectedOutcome) {
+        if (!rationale.trim())
+            throw new Error('compiled config submission requires a rationale');
+        const paths = builderRunPaths(this.root, this.sessionId, id);
+        const target = readJson(paths.targetBefore) ?? {};
+        const targetId = typeof target.targetId === 'string' ? target.targetId : '';
+        if (!targetId)
+            throw new Error('compiled config submission requires targetBefore.targetId');
+        if (target.targetKind !== 'config')
+            throw new Error('compiled config submission requires targetBefore.targetKind=config');
+        const baseline = join(paths.workspaceBaseline, 'actor-config.json');
+        const current = join(paths.workspace, 'actor-config.json');
+        if (!existsSync(baseline) || !existsSync(current))
+            throw new Error('compiled config submission requires captured actor-config.json');
+        const before = readJson(baseline);
+        const after = readJson(current);
+        if (!before || !after || Array.isArray(before) || Array.isArray(after))
+            throw new Error('compiled config submission requires object config snapshots');
+        if (sha256(before) === sha256(after))
+            throw new Error('compiled config submission requires a config change');
+        const expectedTrajectory = target.expectedTrajectory;
+        if (expectedTrajectory !== undefined && (typeof expectedTrajectory !== 'object' || expectedTrajectory === null || Array.isArray(expectedTrajectory))) {
+            throw new Error('compiled config submission expectedTrajectory must be an object');
+        }
+        const candidateId = `builder-${id.slice('builder-'.length)}`;
+        return {
+            capability: 'patch-evolution',
+            payload: {
+                id: candidateId,
+                action: 'update',
+                targetId,
+                targetKind: 'config',
+                config: after,
+                dependencies: [],
+                rationale: rationale.trim(),
+                expectedOutcome: expectedOutcome?.trim() || 'Builder-tested config update',
+                ...(expectedTrajectory ? { expectedTrajectory } : {}),
+                version: 1,
+                createdAt: new Date().toISOString(),
+            },
+            rationale: rationale.trim(),
+        };
+    }
+    /** Compile an insert bundle while keeping identity and allowed target kind
+     * out of the external runtime's control. */
+    compileModuleWorkspaceProposal(id, rationale, expectedOutcome) {
+        if (!rationale.trim())
+            throw new Error('compiled module submission requires a rationale');
+        const paths = builderRunPaths(this.root, this.sessionId, id);
+        const target = readJson(paths.targetBefore) ?? {};
+        const targetId = typeof target.targetId === 'string' ? target.targetId : '';
+        const targetName = typeof target.targetName === 'string' ? target.targetName : undefined;
+        const targetKind = target.targetKind;
+        const entry = typeof target.moduleEntry === 'string' ? target.moduleEntry : '';
+        if (!targetId || (targetKind !== 'tool' && targetKind !== 'skill') || !entry)
+            throw new Error('compiled module submission requires tool/skill target metadata and moduleEntry');
+        const root = join(paths.workspace, 'actor-module');
+        if (!existsSync(root) || !statSync(root).isDirectory())
+            throw new Error('compiled module submission requires actor-module directory');
+        const files = [];
+        const visit = (directory) => {
+            for (const item of readdirSync(directory, { withFileTypes: true })) {
+                const file = join(directory, item.name);
+                if (item.isDirectory())
+                    visit(file);
+                else if (item.isFile()) {
+                    const path = relative(root, file).split('\\').join('/');
+                    const content = readFileSync(file, 'utf8');
+                    if (!path || path.startsWith('../') || content.length === 0 || Buffer.byteLength(content, 'utf8') > 256 * 1024)
+                        throw new Error(`compiled module file is invalid: ${path}`);
+                    files.push({ path, content });
+                }
+            }
+        };
+        visit(root);
+        files.sort((left, right) => left.path.localeCompare(right.path));
+        if (files.length === 0 || files.length > 16 || !files.some((file) => file.path === entry))
+            throw new Error('compiled module submission requires a bounded bundle containing its declared entry');
+        const expectedTrajectory = target.expectedTrajectory;
+        if (expectedTrajectory !== undefined && (typeof expectedTrajectory !== 'object' || expectedTrajectory === null || Array.isArray(expectedTrajectory))) {
+            throw new Error('compiled module submission expectedTrajectory must be an object');
+        }
+        const candidateId = `builder-${id.slice('builder-'.length)}`;
+        return {
+            capability: 'patch-evolution',
+            payload: {
+                id: candidateId,
+                action: 'insert',
+                targetId,
+                ...(targetName ? { targetName } : {}),
+                targetKind,
+                config: {},
+                module: { files, entry },
+                dependencies: [],
+                rationale: rationale.trim(),
+                expectedOutcome: expectedOutcome?.trim() || 'Builder-tested module insert',
+                ...(expectedTrajectory ? { expectedTrajectory } : {}),
+                version: 1,
+                createdAt: new Date().toISOString(),
+            },
+            rationale: rationale.trim(),
+        };
+    }
     /** Create a hash-bound, read-only reference for a fresh immutable attempt. */
     previousRunReference(id) {
         const paths = builderRunPaths(this.root, this.sessionId, id);
@@ -924,6 +1224,16 @@ export class BuilderKernel {
             throw new Error('workspace path escapes builder workspace');
         }
         return path;
+    }
+    /** Relative read paths are Builder-workspace paths; absolute paths retain the
+     * Builder's global read capability.  This matches command cwd and prevents
+     * a model's normal package-relative path from accidentally resolving to the
+     * host process checkout. */
+    readablePath(workspace, requestedPath) {
+        const normalized = requestedPath === 'workspace' || requestedPath.startsWith('workspace/')
+            ? requestedPath.slice('workspace'.length).replace(/^\/+/, '')
+            : requestedPath;
+        return isAbsolute(normalized) ? resolve(normalized) : resolve(workspace, normalized);
     }
     /**
      * A read/write addressed at a prior run's workspace (absolute path from a
@@ -1008,12 +1318,14 @@ function normalizeStringList(value) {
         : [];
 }
 function isProgressRequirement(value) {
-    return value === 'none' || value === 'declare_direction' || value === 'produce_evidence';
+    return value === 'none' || value === 'declare_direction' || value === 'produce_evidence' || value === 'write_submission';
 }
 function progressRequirementIntent(requirement) {
-    return requirement === 'declare_direction'
-        ? 'write a falsifiable hypothesis/world model or plan before reading again'
-        : 'produce fresh evidence with simulation, a workspace command/edit, a question, submission, or abort';
+    return requirement === 'write_submission'
+        ? 'write_submission with the concrete verified candidate proposal; submit only after the draft exists'
+        : requirement === 'declare_direction'
+            ? 'write a falsifiable hypothesis/world model or plan before reading again'
+            : 'produce fresh evidence with simulation, a workspace command/edit, a question, submission, or abort';
 }
 /**
  * Keep the checkpoint intentionally small. It does not prescribe the
@@ -1036,6 +1348,8 @@ function satisfiesProgressRequirement(requirement, action) {
             || action === 'request_input'
             || action === 'write_submission';
     }
+    if (requirement === 'write_submission')
+        return action === 'write_submission';
     return action === 'invoke_capability'
         || action === 'run_workspace_command'
         || action === 'write_workspace_file'
@@ -1224,6 +1538,13 @@ function buildContextIndex(paths, input, runId) {
         { id: 'submission', path: paths.submissionDraft, summary: 'Frozen proposal draft; only verifier/gate can approve or install it.' },
     ];
     return { schemaVersion: 1, runId, path: paths.contextIndex, generatedAt: new Date().toISOString(), instructions: 'This index is an address map, not a replacement for source evidence. Read only the entries needed for the next action.', entries };
+}
+/** Report only ordinary git diff targets; git apply remains the authority that
+ * rejects unsafe paths and malformed hunks before any workspace mutation. */
+function unifiedPatchFiles(patch) {
+    return [...new Set(patch.split('\n')
+            .filter(line => line.startsWith('+++ b/'))
+            .map(line => line.slice('+++ b/'.length)))];
 }
 /**
  * Count only consecutive repetitions whose tool feedback is byte-for-byte

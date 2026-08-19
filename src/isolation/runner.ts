@@ -39,6 +39,12 @@ export function childEnv(): Record<string, string> {
     ) continue
     env[key] = value
   }
+  // Every DSH invocation owned by Loom is non-interactive (contract checks,
+  // cold Loader smoke, and replay).  pnpm otherwise asks whether it may
+  // repair a modules directory and aborts under a pipe, turning a healthy
+  // profile into a false C0/Gate failure.  This is execution plumbing only:
+  // it neither relaxes verifier checks nor changes the candidate artifact.
+  env.CI = 'true'
   return env
 }
 

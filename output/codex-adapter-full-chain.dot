@@ -1,0 +1,39 @@
+digraph G {
+  graph [rankdir=TB, bgcolor="white", pad=0.32, nodesep=0.32, ranksep=0.48, splines=polyline];
+  node [shape=box, style="rounded,filled", fontname="Noto Sans CJK SC", fontsize=14, margin="0.16,0.1", color="#3e6473", fillcolor="#eef6f8", fontcolor="#102d3a"];
+  edge [fontname="Noto Sans CJK SC", fontsize=12, color="#557783", arrowsize=0.75];
+
+  subgraph cluster_client {
+    label="你的电脑：Codex 客户端"; color="#78a9b8"; fontname="Noto Sans CJK SC"; fontsize=16;
+    U [label="用户输入\n例如：修复并验证 bug", fillcolor="#eaf4ff"];
+    C [label="组装本轮请求\n消息 + 规则 + 允许的工具 + 已知结果", fillcolor="#eaf4ff"];
+    X [label="本地工具执行器\n读文件、跑命令、修改工作区", fillcolor="#e8f5ec", color="#4c8b5d"];
+    U -> C;
+    C -> X [label="收到工具请求时"];
+    X -> C [label="工具结果"];
+  }
+
+  subgraph cluster_adapter {
+    label="适配服务：翻译与会话接续，不替你运行本地工具"; color="#d39a48"; fontname="Noto Sans CJK SC"; fontsize=16;
+    A [label="接收 Responses 格式请求\n一种包含消息、工具说明和选项的通用请求格式", fillcolor="#fff6de", color="#b17b26"];
+    S [label="会话状态存储\n按上一轮编号找回旧输入与旧输出", fillcolor="#fff6de", color="#b17b26"];
+    T [label="协议转换\n把 Responses 的 input / tools\n改写成上游模型服务需要的 messages / tools", fillcolor="#fff6de", color="#b17b26"];
+    A -> S [label="有上一轮编号时"];
+    S -> T [label="补回历史项目"];
+    A -> T [label="当前项目"];
+  }
+
+  subgraph cluster_upstream {
+    label="上游模型服务"; color="#9d8ec5"; fontname="Noto Sans CJK SC"; fontsize=16;
+    G [label="调度/网关\n选择可用模型服务并转发请求", fillcolor="#f1effa", color="#786aa5"];
+    M [label="语言模型\n生成文本，或请求一次工具调用", fillcolor="#f1effa", color="#786aa5"];
+    G -> M;
+  }
+
+  C -> A [label="① HTTP 请求：input、instructions、tools、选项"];
+  T -> G [label="② HTTP 请求：messages、tools、模型参数"];
+  M -> G [label="③ 文本或 tool_call{name, arguments}"];
+  G -> A [label="④ 模型响应"];
+  A -> C [label="⑤ Responses 格式返回：文本或工具请求"];
+  C -> A [label="⑥ 下一轮：function_call_output + call_id", color="#4c8b5d", fontcolor="#286039", constraint=false];
+}

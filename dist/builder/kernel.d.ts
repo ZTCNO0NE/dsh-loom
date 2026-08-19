@@ -12,7 +12,7 @@ export type BuilderRunMode = 'diagnosis' | 'implementation';
 export type BuilderJournalKind = 'model' | 'tool' | 'error' | 'snapshot' | 'state';
 export type BuilderEventKind = 'run_created' | 'state_changed' | 'actor_message_received' | 'tool_completed' | 'tool_failed' | 'message_ack' | 'builder_update' | 'needs_input' | 'proposal_drafted' | 'diagnosis_report';
 /** A public checkpoint owed after the Builder has stopped producing evidence. */
-export type BuilderProgressRequirement = 'none' | 'declare_direction' | 'produce_evidence';
+export type BuilderProgressRequirement = 'none' | 'declare_direction' | 'produce_evidence' | 'write_submission';
 /** Actor-provided context is open natural language; only its transport is structured. */
 export interface BuilderMessageInput {
     rawUserText: string;
@@ -22,6 +22,8 @@ export interface BuilderMessageInput {
     idempotencyKey?: string;
 }
 export interface BuilderRunInput {
+    /** Host-assigned id for a pre-materialized immutable workspace. Never model supplied. */
+    id?: string;
     kind?: BuilderRunKind;
     mode?: BuilderRunMode;
     actor: Record<string, unknown>;
@@ -231,6 +233,11 @@ export type BuilderToolAction = {
     name: 'write_workspace_file';
     path: string;
     content: string;
+}
+/** Apply a standard unified diff within the Builder workspace. */
+ | {
+    name: 'apply_workspace_patch';
+    patch: string;
 } | {
     name: 'read_workspace_file';
     path: string;
@@ -285,6 +292,24 @@ export type BuilderToolAction = {
     name: 'write_submission';
     proposal: Record<string, unknown>;
 }
+/** Compile a loop proposal from Kernel-captured workspace edits. */
+ | {
+    name: 'compile_loop_submission';
+    rationale: string;
+    expectedOutcome?: string;
+}
+/** Compile one host-materialized config update from its workspace diff. */
+ | {
+    name: 'compile_config_submission';
+    rationale: string;
+    expectedOutcome?: string;
+}
+/** Compile a host-materialized tool or skill bundle from actor-module/. */
+ | {
+    name: 'compile_module_submission';
+    rationale: string;
+    expectedOutcome?: string;
+}
 /** Typed draft write; this is deliberately not a general filesystem tool. */
  | {
     name: 'write_candidate_draft';
@@ -314,6 +339,7 @@ export declare function builderRunPaths(root: string, sessionId: string, id: str
     promptVisible: string;
     events: string;
     snapshots: string;
+    workspaceBaseline: string;
     workspace: string;
     staging: string;
     preflight: string;
@@ -329,6 +355,12 @@ export declare class BuilderKernel {
     private readonly options;
     constructor(root: string, sessionId: string, capabilityRuntimes?: BuilderCapabilityRuntimeRegistry, options?: BuilderKernelOptions);
     create(input: BuilderRunInput): BuilderRunRecord;
+    /** Host/runtime adapter captures an immutable source baseline after it has
+     * materialized a workspace, before an external coding runtime can edit it. */
+    captureWorkspaceBaseline(id: string, sourceRoot?: string): {
+        path: string;
+        captured: boolean;
+    };
     load(id: string): BuilderRunRecord;
     transition(id: string, state: BuilderRunState): BuilderRunRecord;
     append(id: string, kind: BuilderJournalKind, action: string, result?: Record<string, unknown>, error?: unknown): BuilderJournalEntry;
@@ -369,6 +401,11 @@ export declare class BuilderKernel {
     receiveActorMessage(id: string, input: string | BuilderMessageInput): BuilderMessage;
     /** Kernel-owned lifecycle boundary. A paused/cancelled run never submits. */
     control(id: string, action: 'pause' | 'cancel'): BuilderRunRecord;
+    /** Make a missing proposal draft an explicit, durable next-step obligation. */
+    requireSubmissionDraft(id: string): BuilderProgressState;
+    /** After a candidate edit, require one fresh executable observation before
+     * the model can continue editing or hand off the proposal. */
+    requireEvidence(id: string): BuilderProgressState;
     proposal(id: string): Record<string, unknown> | null;
     /** Execute exactly one allowlisted builder action and durably return its feedback. */
     decide(id: string, decision: BuilderDecision): Record<string, unknown>;
@@ -385,11 +422,34 @@ export declare class BuilderKernel {
     private updateProgress;
     private unacknowledgedMessageIds;
     private freezeSubmissionManifest;
+    /** Preserve original bytes on the first workspace mutation only. */
+    private captureWorkspaceBaselineFile;
+    /**
+     * Turn captured workspace bytes into the audited builder-generated envelope.
+     * The model supplies only intent; exact hashes and replacement text come from
+     * Kernel-owned before/after files and remain independently revalidated by
+     * CandidateImporter.
+     */
+    private compileLoopWorkspaceProposal;
+    /**
+     * Compile a single host-materialized config target. The external runtime
+     * edits only actor-config.json; target identity, action and frozen envelope
+     * remain Kernel-owned and feed the existing patch-evolution verifier/gate.
+     */
+    private compileConfigWorkspaceProposal;
+    /** Compile an insert bundle while keeping identity and allowed target kind
+     * out of the external runtime's control. */
+    private compileModuleWorkspaceProposal;
     /** Create a hash-bound, read-only reference for a fresh immutable attempt. */
     previousRunReference(id: string): BuilderPreviousRunRef;
     private emit;
     private submissionDraft;
     private workspacePath;
+    /** Relative read paths are Builder-workspace paths; absolute paths retain the
+     * Builder's global read capability.  This matches command cwd and prevents
+     * a model's normal package-relative path from accidentally resolving to the
+     * host process checkout. */
+    private readablePath;
     /**
      * A read/write addressed at a prior run's workspace (absolute path from a
      * rejection) means the same relative file in this run's workspace during a

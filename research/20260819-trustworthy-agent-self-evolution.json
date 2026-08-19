@@ -1,0 +1,109 @@
+{
+  "topic": "可信 Agent 自进化：Loom 的世界模型式工程路线与 v1.2 案例",
+  "topic_type": "open-source",
+  "research_date": "2026-08-19",
+  "mode": "brief_first_verify_mode",
+  "freshness_policy": { "max_age_days": 30, "blocking": true },
+  "tier_1_candidates": [
+    {
+      "field": "项目版本",
+      "candidate_text": "仓库 package.json 与 HEAD tag 均为 v1.2.0",
+      "source": "package.json + git tag",
+      "verification_status": "verified"
+    },
+    {
+      "field": "mini-SWE loop runtime 案例",
+      "candidate_text": "一个真实 scheduler 任务完成 diagnose、edit、test、repair 与 Submitted，并通过 22/22 测试",
+      "source": "CURRENT.md + run-log + evidence audit",
+      "verification_status": "verified"
+    },
+    {
+      "field": "refine skill 案例",
+      "candidate_text": "mini-SWE 生成的 refine skill 经独立验证、冷加载和 Gate rollback 验收",
+      "source": "CURRENT.md + run-log",
+      "verification_status": "verified"
+    },
+    {
+      "field": "prepare-overlap 性能案例",
+      "candidate_text": "2/4/8 calls 的 prepare span 中位数从 102.1/304.5/707.2ms 到 0.55/0.76/1.41ms",
+      "source": "evidence audit + run-log",
+      "verification_status": "verified"
+    }
+  ],
+  "discrepancies": [],
+  "sources": [
+    {
+      "tier": 1,
+      "title": "dsh-loom CURRENT.md",
+      "url": "repo://CURRENT.md",
+      "source_date": "2026-08-19"
+    },
+    {
+      "tier": 1,
+      "title": "mini-SWE Builder Runtime Evidence Audit",
+      "url": "repo://docs/research/2026-08-19-mini-swe-runtime-evidence-audit.md",
+      "source_date": "2026-08-19"
+    },
+    {
+      "tier": 1,
+      "title": "dsh-loom experiment run log",
+      "url": "repo://docs/research/run-log.md",
+      "source_date": "2026-08-19"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "c001",
+      "claim_text": "在一个真实 DSH scheduler 任务中，mini-SWE runtime 完成了自主 diagnose、源码编辑、定向回归、回归修复和 Submitted；两份 scheduler 测试共 22/22 通过。",
+      "tier": 1,
+      "source_url": "repo://docs/research/2026-08-19-mini-swe-runtime-evidence-audit.md",
+      "source_date": "2026-08-19",
+      "evidence_quote": "已证明（一个真实任务）；22/22 pass。",
+      "status": "supported"
+    },
+    {
+      "claim_id": "c002",
+      "claim_text": "该 loop 候选的控制面未被 runtime 绕过，并在一个候选、一个 smoke workload 上完成了 cold install、actor replay 和 rollback 闭环。",
+      "tier": 1,
+      "source_url": "repo://docs/research/2026-08-19-mini-swe-runtime-evidence-audit.md",
+      "source_date": "2026-08-19",
+      "evidence_quote": "已证明（这一候选）；已证明（一个候选、一个 smoke workload）。",
+      "status": "supported"
+    },
+    {
+      "claim_id": "c003",
+      "claim_text": "在固定 100ms prepare、零 body delay 的受控测量中，2/4/8 个 parallel calls 的 prepare span 中位数由 102.1/304.5/707.2ms 降至 0.55/0.76/1.41ms。",
+      "tier": 1,
+      "source_url": "repo://docs/research/2026-08-19-mini-swe-runtime-evidence-audit.md",
+      "source_date": "2026-08-19",
+      "evidence_quote": "candidate 同时进入 prepare；不泛化为全部 actor 工作负载提升。",
+      "status": "supported"
+    },
+    {
+      "claim_id": "c004",
+      "claim_text": "一个 fresh mini-SWE pass 自主生成 refine skill artifact；其经真实 DSH catalog/load 验证、Gate 安装、独立 cold Loader 调用和 rollback 验收。",
+      "tier": 1,
+      "source_url": "repo://docs/research/run-log.md",
+      "source_date": "2026-08-19",
+      "evidence_quote": "before skill-body-missing；after Gate apply skill-body-loaded；rollback 后恢复 missing。",
+      "status": "supported"
+    },
+    {
+      "claim_id": "c005",
+      "claim_text": "Loom 目前没有证明通用世界模型、全部 Agent 工作负载性能提升、任意模型遵循 refine skill，或 actor 一切可改。",
+      "tier": 1,
+      "source_url": "repo://CURRENT.md",
+      "source_date": "2026-08-19",
+      "evidence_quote": "多个边界在 CURRENT.md 与 evidence audit 中被明确标为未证明或当前不成立。",
+      "status": "supported"
+    }
+  ],
+  "quality_check": {
+    "citation_coverage": "100%",
+    "unsupported_claim_count": 0,
+    "contradiction_count": 0,
+    "discrepancy_count": 0,
+    "stale_source_count": 0,
+    "passed": true
+  }
+}

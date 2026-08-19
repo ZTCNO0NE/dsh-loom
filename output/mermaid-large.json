@@ -1,0 +1,27 @@
+{
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Noto Sans CJK SC, Source Han Sans SC, Arial, sans-serif",
+    "fontSize": "26px",
+    "primaryColor": "#eef8ee",
+    "primaryBorderColor": "#39804b",
+    "lineColor": "#54717d",
+    "textColor": "#173441"
+  },
+  "flowchart": {
+    "htmlLabels": false,
+    "nodeSpacing": 70,
+    "rankSpacing": 90,
+    "padding": 24,
+    "curve": "basis"
+  },
+  "sequence": {
+    "useMaxWidth": false,
+    "wrap": true,
+    "diagramMarginX": 40,
+    "diagramMarginY": 30,
+    "actorMargin": 70,
+    "width": 260,
+    "height": 80
+  }
+}

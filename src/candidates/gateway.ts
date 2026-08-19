@@ -26,7 +26,11 @@ export interface LoopCandidateGatewayOptions {
   builderKernelOptions?: BuilderKernelOptions
   onUsage?: (usage: { prompt: number; completion: number }) => void
   capabilityRuntimes?: BuilderCapabilityRuntimeRegistry
-  /** Loom-native keeps the JSON/tool micro-loop; mini-SWE is an explicit coding-runtime adapter. */
+  /**
+   * v1.2 implementation runtime. Loom-native remains available only for
+   * durable diagnosis/clarification when a run is explicitly in diagnosis
+   * mode; it is not the production complex-source implementation path.
+   */
   executionRuntime?: 'loom-native' | 'mini-swe'
   miniSwe?: Omit<MiniSweRuntimeOptions, 'model'>
 }
@@ -166,11 +170,12 @@ export class LoopCandidateGateway {
     const passMode: BuilderRunMode = priorMode === 'diagnosis'
       ? 'implementation'
       : requestedMode ?? (this.options.diagnosisFirst ? 'diagnosis' : 'implementation')
-    if (this.options.executionRuntime === 'mini-swe' && passMode === 'diagnosis') {
-      throw new Error('mini-SWE runtime does not implement diagnosis-first conversation; use loom-native for that pass')
-    }
-    const mini = this.options.executionRuntime === 'mini-swe' ? this.options.miniSwe : undefined
-    if (this.options.executionRuntime === 'mini-swe' && !mini) throw new Error('mini-SWE runtime is selected but not configured')
+    // A diagnosis is Loom-native by design; mini-SWE is only materialized for
+    // the concrete implementation pass created after the actor/user selects a
+    // direction. This keeps dialogue and coding separate without reviving the
+    // old native JSON loop as an implementation executor.
+    const mini = this.options.executionRuntime === 'mini-swe' && passMode === 'implementation' ? this.options.miniSwe : undefined
+    if (this.options.executionRuntime === 'mini-swe' && passMode === 'implementation' && !mini) throw new Error('mini-SWE runtime is selected but not configured')
     if (mini && (!mini.executable || !mini.configPath || !mini.baselineRoot || !mini.dependencySnapshot || mini.stepLimit < 1 || mini.timeoutMs < 1)) {
       throw new Error('mini-SWE runtime requires executable, configPath, baselineRoot, dependencySnapshot, positive stepLimit, and positive timeoutMs')
     }
@@ -227,10 +232,9 @@ export class LoopCandidateGateway {
     const context = initial.context && typeof initial.context === 'object' && !Array.isArray(initial.context)
       ? initial.context as Record<string, unknown>
       : {}
-    if (this.options.executionRuntime === 'mini-swe') {
+    if (this.options.executionRuntime === 'mini-swe' && runContext.run.mode === 'implementation') {
       const mini = this.options.miniSwe
       if (!mini) throw new Error('mini-SWE runtime is selected but not configured')
-      if (runContext.run.mode !== 'implementation') throw new Error('mini-SWE only supports implementation passes')
       const paths = builderRunPaths(this.options.root, `${this.options.sessionId}:loop-exploration`, runId)
       const execution = await runMiniSwe({
         ...mini,

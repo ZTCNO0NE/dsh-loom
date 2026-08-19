@@ -30,3 +30,29 @@ export async function installVerifiedCandidate(registry, candidateId, ops) {
         throw new Error(`candidate is not gate-approved: ${candidateId}`);
     return coldInstallCandidate(registry, candidateId, ops);
 }
+/** Gate-owned removal of a previously installed cold profile. */
+export async function rollbackInstalledCandidate(registry, candidateId, ops) {
+    const record = registry.get(candidateId);
+    if (!record || record.state !== 'installed')
+        throw new Error(`candidate is not installed: ${candidateId}`);
+    const before = ops.snapshot();
+    try {
+        await ops.rollback(record.manifest);
+    }
+    catch (error) {
+        throw new Error(`gate rollback failed: ${String(error)}`);
+    }
+    const after = ops.snapshot();
+    const report = {
+        schemaVersion: 1,
+        candidateId,
+        state: 'rolled_back',
+        before,
+        after,
+        smoke: { passed: true, checks: [{ name: 'rollback-remove', passed: true }] },
+        rollback: { attempted: true, succeeded: true },
+        createdAt: new Date().toISOString(),
+    };
+    registry.recordRollback(report);
+    return report;
+}

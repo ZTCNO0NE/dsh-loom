@@ -60,8 +60,11 @@ fixture repair、人工修改或单次 actor replay 外推为产品结论。
 `delayed-prepare-regression` 与原 `tool-calls` suite 共 22/22 pass。
 
 这足以说“Builder 自主候选修复了真实 scheduler 中 prepare 串行瓶颈，并在该
-受控调度路径上有可重复时延改善”。它仍不是用户任务端到端 benchmark：没有
-16 calls、body latency、exclusive/abort/failure 压力和 actor raw frames，故不能
+受控调度路径上有可重复时延改善”。后续 16-call/body 对照已记录于
+`/chenzute/dsh-src/eval/run-records/2026-08-19-mini-swe-prepare-16call-body-benchmark.json`：
+body=0/50ms 两档各五次，wall 中位数为 baseline 1645/1695ms、candidate
+133/180ms。它仍不是用户任务端到端 benchmark：没有 exclusive/abort/failure
+压力和 actor raw frames，故不能
 说“actor 整体性能提升”。
 
 ## 运行时决策

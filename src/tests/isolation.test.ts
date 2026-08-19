@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCandidateOverlay,
+  childEnv,
   findChangedRows,
   parseDump,
   runIsolation,
@@ -37,6 +38,10 @@ function patch(overrides: Partial<MetaPatch> = {}): MetaPatch {
 }
 
 describe('isolation runner', () => {
+  it('marks verifier-owned DSH subprocesses as non-interactive', () => {
+    expect(childEnv().CI).toBe('true')
+  })
+
   it('parses dump rows and strips comments', () => {
     const rows = parseDump(BASE)
     expect(rows.map((row) => row.id)).toEqual(['row-a', 'row-b'])

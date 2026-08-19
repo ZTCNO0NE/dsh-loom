@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "mini-swe-agent",
+  "version": "2.4.6",
+  "source": "https://github.com/SWE-agent/mini-swe-agent",
+  "commit": "25941c89cfbc91eb40b3f8756348c91d9977d57e",
+  "license": "MIT",
+  "installation": "dsh-loom setup installs the vendored mini-swe-agent-2.4.6.tar.gz into a user-owned Python venv; the venv is not shipped inside the npm tarball."
+}

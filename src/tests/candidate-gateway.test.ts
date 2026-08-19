@@ -98,7 +98,9 @@ function importerFixture(root: string) {
   mkdirSync(join(dependencies, 'node_modules', '.bin'), { recursive: true }); mkdirSync(join(dependencies, 'vendor'), { recursive: true })
   for (const tool of ['tsc', 'tsdown']) {
     const script = join(dependencies, 'node_modules', '.bin', tool)
-    writeFileSync(script, '#!/bin/sh\nexit 0\n'); chmodSync(script, 0o755)
+    writeFileSync(script, tool === 'tsc'
+      ? '#!/bin/sh\nmkdir -p packages/core/agent-loop/lib\nprintf \'export const candidate = true\\n\' > packages/core/agent-loop/lib/tool-calls.js\n'
+      : '#!/bin/sh\nexit 0\n'); chmodSync(script, 0o755)
   }
   writeFileSync(executable, '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do\n  if [ "$1" = "-o" ]; then out="$2"; shift 2; continue; fi\n  if [ "$1" = "-c" ] && case "$2" in environment.cwd=*) true;; *) false;; esac; then work="${2#environment.cwd=}"; shift 2; continue; fi\n  shift\ndone\nprintf \'export const candidate = true\\n\' > "$work/packages/core/agent-loop/src/tool-calls.ts"\nprintf \'runtime scratch\' > "$work/outside.txt"\nprintf \'{"messages":[{"role":"assistant","tool_calls":[{}]},{"role":"exit","extra":{"exit_status":"Submitted"}}]}\' > "$out"\n', 'utf8')
   chmodSync(executable, 0o755)
@@ -106,6 +108,20 @@ function importerFixture(root: string) {
 }
 
 describe('loop candidate gateway', () => {
+  it('uses Loom-native only for a diagnosis pass when mini-SWE is selected for implementation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-mini-diagnosis-'))
+    const fixture = miniRuntimeFixture(root, '#!/bin/sh\nexit 1\n')
+    const gateway = new LoopCandidateGateway({
+      enabled: true, root, sessionId: 's', provider: 'test', model: 'test', maxTokens: 128,
+      llm: diagnosisThenImplementationLlm(), executionRuntime: 'mini-swe', diagnosisFirst: true,
+      miniSwe: { executable: fixture.executable, configPath: 'ignored', baselineRoot: fixture.baseline, dependencySnapshot: fixture.snapshot, stepLimit: 3, timeoutMs: 5_000 },
+    })
+    const started = gateway.startExploration('先诊断再实现', { evidencePack: { manifestPath: 'evidence/manifest.json' } })
+    if (!started.accepted) throw new Error('test requires an enabled exploration')
+    expect(started.passMode).toBe('diagnosis')
+    await expect(gateway.runExploration(started.runId)).resolves.toMatchObject({ state: 'waiting_for_input', passMode: 'diagnosis' })
+  })
+
   it('keeps an adversarial runtime outside write out of the archive→Importer candidate artifact', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-adversarial-importer-'))
     const fixture = importerFixture(root)
@@ -122,8 +138,9 @@ describe('loop candidate gateway', () => {
       id: 'adversarial-loop', displayName: 'adversarial fixture', source: loop.source, packageName: loop.packageName, packagePath: loop.packagePath,
       entry: loop.entry, build: { method: 'sandboxed-dsh-workspace' }, config: loop.config, expectedOutcome: loop.expectedOutcome, capabilities: loop.capabilities,
     })
-    expect(readFileSync(join(manifest.artifactPath, 'src', 'tool-calls.ts'), 'utf8')).toContain('candidate = true')
-    expect(existsSync(join(manifest.artifactPath, '..', '..', '..', 'outside.txt'))).toBe(false)
+    expect(readFileSync(join(manifest.artifactPath, 'lib', 'tool-calls.js'), 'utf8')).toContain('candidate = true')
+    expect(existsSync(join(manifest.artifactPath, 'node_modules'))).toBe(false)
+    expect(existsSync(join(manifest.artifactPath, '..', '..', 'staging', 'adversarial-loop', 'outside.txt'))).toBe(false)
     expect(existsSync(join(builderRunPaths(root, 's:loop-exploration', started.runId).workspace, 'outside.txt'))).toBe(true)
   })
 

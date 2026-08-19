@@ -1,0 +1,54 @@
+{
+  "article_path": "output/20260819-agent-self-evolution-from-codex-request.md",
+  "output_dir": "images/20260820-agent-self-evolution-from-codex-request",
+  "items": [
+    {
+      "unit_id": "section-01",
+      "section_title": "一、先别谈自进化，看看一次 Agent 请求里装了什么",
+      "core_claim": "模型处理的是任务、规则、工具与状态共同组成的工作包。",
+      "keywords": ["请求", "规则", "工具", "状态", "上下文"],
+      "diagram_type": "layered_architecture",
+      "svg_style": "tech_dark",
+      "platform": "wechat_article",
+      "visual_brief": "机制示意：左侧四张信息卡片分别代表当前任务、稳定规则、工具目录和状态与结果，经由汇聚箭头进入右侧的模型工作包；不展示真实产品界面，不出现英文协议字段。",
+      "labels": ["当前任务", "稳定规则", "工具目录", "状态与结果", "模型工作包"],
+      "output_path": "images/20260820-agent-self-evolution-from-codex-request/01-request-work-package.svg"
+    },
+    {
+      "unit_id": "section-02",
+      "section_title": "二、今天常见的 Agent，已经解决了哪些问题",
+      "core_claim": "常见机制能延长单次任务，却不足以治理长期、自我修改的工程变更。",
+      "keywords": ["ReAct", "记忆", "重试", "refine", "治理"],
+      "diagram_type": "comparison",
+      "svg_style": "minimal_clean",
+      "platform": "wechat_article",
+      "visual_brief": "机制示意：左侧为单次任务循环，表现观察、行动、记忆和重试；右侧为长期变更治理，表现候选、验证、安装与回滚；突出二者处理对象不同。",
+      "labels": ["单次任务", "观察行动", "记忆重试", "长期变更", "验证回滚"],
+      "output_path": "images/20260820-agent-self-evolution-from-codex-request/02-agent-capability-boundary.svg"
+    },
+    {
+      "unit_id": "section-03",
+      "section_title": "三、我理解的世界模型式自进化，先得有一套能落地的账本",
+      "core_claim": "失败需要经过事实、假设、候选、验证和反馈的链路，才能成为可复用的经验。",
+      "keywords": ["事实", "假设", "候选", "验证", "反馈"],
+      "diagram_type": "flowchart",
+      "svg_style": "tech_dark",
+      "platform": "wechat_article",
+      "visual_brief": "机制示意：横向五步流程，从外部失败到事实记录、可证伪假设、受限候选、独立验证和反馈；验证失败以回路回到假设，验证通过才进入可复用经验。",
+      "labels": ["外部失败", "事实记录", "可证伪假设", "受限候选", "独立验证", "反馈"],
+      "output_path": "images/20260820-agent-self-evolution-from-codex-request/03-evolution-evidence-loop.svg"
+    },
+    {
+      "unit_id": "section-04",
+      "section_title": "四、什么样的自进化，才配得上“通用”两个字",
+      "core_claim": "工具、技能、配置等能力可以替换；验证、Gate、回归集和权限边界必须保持独立。",
+      "keywords": ["工具", "技能", "配置", "验证器", "Gate"],
+      "diagram_type": "layered_architecture",
+      "svg_style": "tech_dark",
+      "platform": "wechat_article",
+      "visual_brief": "机制示意：上层是可替换能力积木，包含工具、技能、配置和执行运行时；下层是不可变的信任根，包含验证器、安装 Gate、回归集和权限边界。候选只能由上向下申请，不能修改下层。",
+      "labels": ["可替换能力", "工具", "技能", "配置", "信任根", "验证与回滚"],
+      "output_path": "images/20260820-agent-self-evolution-from-codex-request/04-replaceable-capabilities-and-tcb.svg"
+    }
+  ]
+}

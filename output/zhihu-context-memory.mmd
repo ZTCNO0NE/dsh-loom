@@ -1,0 +1,10 @@
+flowchart TB
+    previous["上一轮编号\nprevious_response_id"] --> store["adapter 会话状态\n按顺序取回旧 input 与 output"]
+    user["当前用户消息"] --> context["客户端本轮上下文\n本次实际放入请求的材料"]
+    rules["规则与工具说明"] --> context
+    store --> context
+    context --> body["构造 input[]"]
+    body --> model["模型响应"]
+    model -->|请求工具| executor["客户端本地执行工具"]
+    executor --> output["function_call_output\n结果带 call_id"]
+    output --> body

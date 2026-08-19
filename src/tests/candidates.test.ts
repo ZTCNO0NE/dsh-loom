@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +7,8 @@ import {
   CandidateRegistry,
   applyBuilderGeneratedEdits,
   coldInstallCandidate,
+  hashDirectory,
+  materializeRuntimeArtifact,
   type CandidateManifest,
 } from '../candidates/index.js'
 import {
@@ -16,7 +18,7 @@ import {
   replaceBaseLoopEntry,
 } from '../candidates/profile.js'
 import { profileGateOps } from '../candidates/profile-gate.js'
-import { installVerifiedCandidate, recordCandidateVerification } from '../candidates/lifecycle.js'
+import { installVerifiedCandidate, recordCandidateVerification, rollbackInstalledCandidate } from '../candidates/lifecycle.js'
 
 function manifest(): CandidateManifest {
   return {
@@ -49,6 +51,22 @@ function approved(root: string): CandidateRegistry {
 }
 
 describe('loop candidate registry', () => {
+  it('freezes only regular package runtime bytes, excluding build-time dependency links', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-runtime-artifact-'))
+    const source = join(root, 'workspace-package')
+    const artifact = join(root, 'artifact')
+    mkdirSync(join(source, 'lib'), { recursive: true })
+    mkdirSync(join(root, 'dependency'), { recursive: true })
+    writeFileSync(join(source, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-agent-loop' }))
+    writeFileSync(join(source, 'lib', 'index.js'), 'export const name = "candidate"\n')
+    symlinkSync(join(root, 'dependency'), join(source, 'node_modules'), 'dir')
+    materializeRuntimeArtifact(source, artifact)
+    expect(existsSync(join(artifact, 'package.json'))).toBe(true)
+    expect(existsSync(join(artifact, 'lib', 'index.js'))).toBe(true)
+    expect(existsSync(join(artifact, 'node_modules'))).toBe(false)
+    expect(hashDirectory(artifact)).toMatch(/^[0-9a-f]{64}$/)
+  })
+
   it('keeps builder staging separate from verifier approval and gate installation', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-candidate-'))
     const registry = new CandidateRegistry(root)
@@ -94,6 +112,24 @@ describe('loop candidate registry', () => {
     expect(result.state).toBe('rolled_back')
     expect(live).toBe('base')
     expect(registry.get('serial-loop')?.state).toBe('approved')
+  })
+
+  it('records a separate gate-owned receipt when removing an installed candidate', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-candidate-'))
+    const registry = approved(root)
+    let live = 'base'
+    await coldInstallCandidate(registry, 'serial-loop', {
+      snapshot: () => ({ loop: live }), install: () => { live = 'candidate' },
+      smoke: () => ({ passed: true, checks: [{ name: 'boot', passed: true }] }), rollback: () => { live = 'base' },
+    })
+    const receipt = await rollbackInstalledCandidate(registry, 'serial-loop', {
+      snapshot: () => ({ loop: live }), rollback: () => { live = 'base' },
+    })
+    expect(receipt.state).toBe('rolled_back')
+    expect(receipt.before).toEqual({ loop: 'candidate' })
+    expect(receipt.after).toEqual({ loop: 'base' })
+    expect(registry.get('serial-loop')?.state).toBe('approved')
+    expect(existsSync(join(root, 'candidates', 'installations', 'serial-loop.rollback.json'))).toBe(true)
   })
 
   it('does not allow builder staging to bypass verifier/gate transitions', () => {

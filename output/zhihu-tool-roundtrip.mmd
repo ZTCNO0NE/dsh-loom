@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant M as 模型
+    participant R as 执行器
+    participant W as 外部世界
+    M->>R: tool_call name, arguments
+    R->>R: 参数、权限、schema 预检
+    alt 预检失败
+        R-->>M: function_call_output rejected
+    else 预检通过
+        R->>W: 读取文件、执行命令或访问服务
+        W-->>R: stdout、stderr、exit code
+        R-->>M: function_call_output completed
+    end
+    Note over M: 下一轮只能依据回灌事实继续行动

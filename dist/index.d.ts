@@ -74,6 +74,24 @@ export interface MetaValidateConfig {
         builderMaxModelTurns: number;
         builderMaxToolSteps: number;
         builderMaxWallTimeMs: number;
+        diagnosisFirst: boolean;
+        repeatReadRejectAfter: number;
+        enforceProgressCheckpoints: boolean;
+        executionRuntime: 'loom-native' | 'mini-swe';
+        miniSweExecutable: string;
+        miniSweConfigPath: string;
+        miniSweDependencySnapshot: string;
+        miniSweStepLimit: number;
+    };
+    /** Explicit user-facing Config/Skill execution runtime. Disabled by default. */
+    activeEvolution: {
+        enabled: boolean;
+        /** Optional user-owned bootstrap cache; default lives below the Loom meta root. */
+        runtimeRoot: string;
+        miniSweExecutable: string;
+        miniSweConfigPath: string;
+        miniSweStepLimit: number;
+        timeoutMs: number;
     };
     lockedTargets: LockedTargetPolicy;
 }

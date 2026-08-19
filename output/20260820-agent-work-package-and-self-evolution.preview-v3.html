@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang xml:lang>
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>别把 Agent 神化</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <style type="text/css">@page { size: A4; margin: 18mm 16mm 20mm; }
+html { background: #eef2f6; }
+body {
+max-width: 760px;
+margin: 32px auto;
+padding: 56px 64px 72px;
+background: #ffffff;
+color: #172033;
+font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", serif;
+font-size: 17px;
+line-height: 1.86;
+}
+h1, h2, h3, h4 { color: #102a43; font-family: "Noto Sans CJK SC", "Source Han Sans SC", sans-serif; line-height: 1.34; }
+h1 { font-size: 34px; margin: 0 0 24px; letter-spacing: -0.6px; }
+h2 { font-size: 25px; margin: 56px 0 22px; padding-bottom: 10px; border-bottom: 2px solid #d8e3ef; }
+h3 { font-size: 20px; margin: 34px 0 12px; }
+h4 { font-size: 17px; margin: 22px 0 6px; color: #246b89; }
+p { margin: 0 0 16px; }
+strong { color: #0b4f6c; }
+img { display: block; max-width: 100%; height: auto; margin: 22px auto 30px; border: 1px solid #d8e3ef; border-radius: 10px; background: #f7fafc; }
+pre { overflow-x: auto; padding: 16px 18px; background: #122b3e; border-radius: 8px; color: #edf6f9; line-height: 1.55; }
+code { font-family: "JetBrains Mono", "Noto Sans Mono CJK SC", monospace; font-size: 0.88em; }
+a { color: #087e8b; text-decoration: none; border-bottom: 1px solid #9ed1d7; }
+@media print {
+html { background: #fff; }
+body { max-width: none; margin: 0; padding: 0; font-size: 12pt; }
+h2 { break-before: auto; }
+img, pre { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">别把 Agent 神化</h1>
+</header>
+<h1 id="别把-agent-神化一次请求一次工具调用与自我进化的真实边界">别把 Agent 神化：一次请求、一次工具调用与“自我进化”的真实边界</h1>
+<p>很多 Agent 的演示都从一句话开始：你说“修这个 bug”，它读文件、跑命令、改代码，再告诉你完成了。过程足够像一个会工作的同事，人很容易接着相信：它已经理解了项目，也许还能从失败里自己变强。</p>
+<p>这两个判断之间，隔着不少工程部件。一次请求如何被组装？历史怎样进入本轮？skill、tool、MCP 各做什么？工具结果怎样回到模型？如果 Agent 要改自己的能力，谁来判断改动可信？把这些关系拆开，Agent 就不再像一个神秘黑箱。</p>
+<p>本文以我本机核查过的 Codex 客户端与 adapter 链路作例子。不同客户端、服务端与模型的字段细节会不同；有一件事却很稳定：模型每一轮处理的都是一份被组装、更新和裁剪的工作包。</p>
+<h2 id="一用户消息只是工作包的一部分">一、用户消息只是工作包的一部分</h2>
+<h3 id="context-不是一段聊天记录">1. context 不是一段聊天记录</h3>
+<h4 id="本轮工作包从多种来源拼出来">① 本轮工作包从多种来源拼出来</h4>
+<p>在我核查的本机链路中，当前任务以结构化 <code>input</code> 进入请求；稳定的 <code>instructions</code>、工具声明、推理设置和并行工具设置分开携带。<strong>用户消息</strong>只是输入源之一。</p>
+<p>把任务交给一位新同事时，你不只会说“修 bug”。你还会给他项目规则、可用工具、上次做到哪里、刚刚一条命令返回了什么。少了规则，他可能越过边界；少了结果，他可能重复已经失败的尝试。</p>
+<pre class="text"><code>当前任务 + 稳定规则 + 能力目录 + 相关状态 + 工具结果
+                         = 本轮工作包</code></pre>
+<h4 id="context-是工作台memory-是材料库">② context 是工作台，memory 是材料库</h4>
+<p><strong>context</strong> 是模型这一轮实际看得见的工作台。任务、最近对话、工具输出和被注入的规则都在这里，但它受预算和编排策略限制。</p>
+<p><strong>memory</strong> 更像材料库。会话历史、项目文件、用户偏好、摘要和实验记录都可能被保存，却不会因为“保存过”就自动进入下一轮。系统仍要选择：检索哪段、给多少预算、是否压缩、压缩后怎样回到原始来源。</p>
+<pre class="mermaid"><code>flowchart LR
+    U[用户消息\n修复并验证 bug] --&gt; O[编排器 / adapter]
+    M[(memory_store\n历史摘要、项目约定、旧轨迹)] --&gt; R{检索与筛选}
+    R --&gt;|相关性 / 来源 / 新鲜度 / 预算| C[本轮 context]
+    U --&gt; C
+    T[上一轮 tool_result\nTypeError: run is not a function] --&gt; C
+    I[稳定 instructions\n边界、项目规则、输出约束] --&gt; C
+    C --&gt; B[构造本轮 input[]]
+    B --&gt; L[模型生成下一步动作]
+    L --&gt; E[执行器调用 tool]
+    E --&gt; T2[新的 tool_result]
+    T2 --&gt; C
+    T2 -.成功或失败事实.-&gt; M
+
+    classDef fact fill:#e8f5f8,stroke:#197a8c,color:#123;
+    classDef store fill:#fff6d9,stroke:#b48720,color:#432;
+    class U,T,T2,I,C,B,L,E fact;
+    class M,R store;</code></pre>
+<p>对应的伪代码是：</p>
+<pre class="text"><code>memory_candidates = memory.search(query=current_task)
+selected = rank(memory_candidates,
+                by=[relevance, source, freshness],
+                within=token_budget)
+context = [user_message, instructions, selected, recent_tool_results]
+input_body = {&quot;input&quot;: context, &quot;tools&quot;: tool_catalog}
+response = model.generate(input_body)
+tool_result = executor.run(response.tool_call)
+context.append(tool_result)</code></pre>
+<p>这张图读法很简单：<code>memory_store</code> 只提供候选材料，<code>context</code> 才是模型此刻的工作台；工具结果先回到 context，是否沉淀进 memory 是另一件事。</p>
+<p>最常见的误解是“有历史，所以已经学会”。历史只说明材料还在；没有筛选、来源和验证，一段旧摘要也可能只是反复注入的旧猜测。</p>
+<h3 id="input-body-让不同材料各归其位">2. input body 让不同材料各归其位</h3>
+<h4 id="请求体不是一段很长的-prompt">① 请求体不是一段很长的 prompt</h4>
+<p>把所有机制都叫作 prompt 很省事，却抹掉了边界。<code>input</code> 更接近这一轮发生了什么；<code>instructions</code> 放稳定行为约束；<code>tools</code> 描述可调用能力及参数形状；推理和执行设置影响模型怎样使用这些能力。它们的职责和更新节奏不同。</p>
+<p>一个便于理解的请求体可以写成下面这样。字段名是教学化的简化表示，不是对所有客户端 wire contract 的硬编码：</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a><span class="fu">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a>  <span class="dt">&quot;instructions&quot;</span><span class="fu">:</span> <span class="st">&quot;遵守项目规则；先读取 CURRENT.md；不要越过验证边界&quot;</span><span class="fu">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true"></a>  <span class="dt">&quot;input&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true"></a>    <span class="fu">{</span><span class="dt">&quot;role&quot;</span><span class="fu">:</span> <span class="st">&quot;user&quot;</span><span class="fu">,</span> <span class="dt">&quot;content&quot;</span><span class="fu">:</span> <span class="st">&quot;修复并验证 bug&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true"></a>    <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;context&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;相关项目规则&quot;</span><span class="fu">,</span> <span class="dt">&quot;content&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true"></a>    <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;function_call_output&quot;</span><span class="fu">,</span> <span class="dt">&quot;call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;call_17&quot;</span><span class="fu">,</span> <span class="dt">&quot;content&quot;</span><span class="fu">:</span> <span class="st">&quot;TypeError: run is not a function&quot;</span><span class="fu">}</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true"></a>  <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true"></a>    <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;function&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;read_file&quot;</span><span class="fu">,</span> <span class="dt">&quot;parameters&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">}}</span><span class="ot">,</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true"></a>    <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;function&quot;</span><span class="fu">,</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;run_command&quot;</span><span class="fu">,</span> <span class="dt">&quot;parameters&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;command&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">}}</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true"></a>  <span class="dt">&quot;reasoning&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;effort&quot;</span><span class="fu">:</span> <span class="st">&quot;medium&quot;</span><span class="fu">},</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true"></a>  <span class="dt">&quot;parallel_tool_calls&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true"></a>  <span class="dt">&quot;previous_response_id&quot;</span><span class="fu">:</span> <span class="st">&quot;resp_previous&quot;</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true"></a><span class="fu">}</span></span></code></pre></div>
+<p>字段装配的伪代码：</p>
+<pre class="text"><code>body.instructions = stable_rules
+body.input = [user_message, context_items, previous_tool_outputs]
+body.tools = expose_allowed_tools(tool_policy)
+body.reasoning = runtime_options.reasoning
+body.parallel_tool_calls = runtime_options.parallel
+body.previous_response_id = session.previous_response_id</code></pre>
+<p>字段关系：<code>input</code> 描述本轮发生了什么；<code>instructions</code> 描述必须遵守什么；<code>tools</code> 描述允许请求哪些动作及其参数形状；<code>function_call_output</code> 是执行器回传的事实；<code>previous_response_id</code> 只负责接续状态，不能代替事实筛选。</p>
+<h4 id="状态展开只负责接续">② 状态展开只负责接续</h4>
+<p>adapter 可以依据 <code>previous_response_id</code> 或会话链展开此前 input，再转换成上游模型需要的 body。<strong>状态展开</strong>解决“这轮怎样接上上一轮”，并不自动完成“什么是事实”“哪段仍相关”“一次成功如何变成长期规则”。</p>
+<h2 id="二skilltoolmcp-不在同一个位置">二、skill、tool、MCP 不在同一个位置</h2>
+<pre class="mermaid"><code>flowchart TB
+    S[skill\n方法与边界：先检查什么、如何复盘、何时停止] --&gt; A[模型选择动作]
+    D[tools 声明\n名称 + 参数 schema + 权限范围] --&gt; A
+    P[MCP server\n把外部 tools / resources / prompts 接入目录] --&gt; D
+    A --&gt; C[tool call\nname + arguments]
+    C --&gt; X{执行器预检}
+    X --&gt;|拒绝| F[结构化失败\n未发生外部变化]
+    X --&gt;|通过| E[真实执行\n文件 / 命令 / 服务]
+    E --&gt; O[function_call_output\nstdout / stderr / exit code / error]
+    F --&gt; O
+    O --&gt; N[下一轮 input[]]
+
+    classDef method fill:#eaf4ff,stroke:#3274a8,color:#123;
+    classDef interface fill:#eef8ee,stroke:#39804b,color:#132;
+    classDef fact fill:#fff3d6,stroke:#b47d19,color:#432;
+    class S,A method;
+    class D,P,C,X,E interface;
+    class F,O,N fact;</code></pre>
+<p>把三者放进一次调用，可以写成：</p>
+<pre class="text"><code>skill = load_skill(&quot;refine&quot;)
+tool_catalog = mcp_server.list_tools() + host_tools
+decision = model.plan(skill, tool_catalog, context)
+call = decision.tool_call
+if not schema.validate(call.arguments):
+    return tool_result(status=&quot;rejected&quot;, reason=&quot;invalid arguments&quot;)
+return executor.invoke(call.name, call.arguments)</code></pre>
+<h3 id="skill-讲方法tool-提供动作">1. skill 讲方法，tool 提供动作</h3>
+<h4 id="skill-不会替模型执行命令">① skill 不会替模型执行命令</h4>
+<p><strong>skill</strong> 更像可复用的操作手册：面对什么信号，先做哪些检查，哪些边界不能越过，结果如何报告。它影响模型怎样组织行动，但它自己不读文件、不改配置、不发请求。</p>
+<h4 id="tool-是受约束的外部接口">② tool 是受约束的外部接口</h4>
+<p><strong>tool</strong> 才是模型伸向外部世界的接口卡。模型提出工具名和参数，执行器决定是否真的执行；成功、超时和异常输出再以结构化结果回到下一轮。模型发出工具调用，不等于动作已经发生。</p>
+<h3 id="mcp-是接入层不是万能工具">2. MCP 是接入层，不是万能工具</h3>
+<h4 id="它负责把外部能力接入目录">① 它负责把外部能力接入目录</h4>
+<p><strong>MCP</strong> 可以把外部提供者的 tools、resources 或 prompts 接进能力目录。它像接驳总线，不负责替模型规划任务，也不等于某一个工具的执行结果。</p>
+<p>这三者可以这样记：skill 告诉模型“通常怎样做”；tool 规定“允许做什么动作”；MCP 处理“怎样接入一批外部能力”。接上 MCP 不等于权限已经放开；写好 skill 也不能绕过 tool 的参数与权限边界。</p>
+<h2 id="三工具调用为什么必须有回程">三、工具调用为什么必须有回程</h2>
+<pre class="mermaid"><code>sequenceDiagram
+    participant M as 模型
+    participant R as 执行器
+    participant W as 外部世界
+    M-&gt;&gt;R: tool_call{name, arguments}
+    R-&gt;&gt;R: 参数 / 权限 / schema 预检
+    alt 预检失败
+        R--&gt;&gt;M: function_call_output{status:&quot;rejected&quot;, reason:&quot;...&quot;}
+    else 预检通过
+        R-&gt;&gt;W: 读取文件、执行命令或访问服务
+        W--&gt;&gt;R: stdout / stderr / exit code
+        R--&gt;&gt;M: function_call_output{status:&quot;completed&quot;, result:&quot;...&quot;}
+    end
+    Note over M: 下一轮只能依据回灌事实继续行动</code></pre>
+<p>工具回程的伪代码：</p>
+<pre class="text"><code>call = model.next_action()
+check = preflight(call.name, call.arguments, policy, schema)
+if not check.ok:
+    output = {&quot;status&quot;: &quot;rejected&quot;, &quot;reason&quot;: check.reason}
+else:
+    result = world.execute(call.name, call.arguments)
+    output = {&quot;status&quot;: &quot;completed&quot;, &quot;stdout&quot;: result.stdout,
+              &quot;stderr&quot;: result.stderr, &quot;exit_code&quot;: result.exit_code}
+return model.next_turn(input=[call, output])</code></pre>
+<h3 id="模型提出动作执行器决定是否让动作发生">1. 模型提出动作，执行器决定是否让动作发生</h3>
+<h4 id="预检失败时外部世界没有变化">① 预检失败时，外部世界没有变化</h4>
+<p>模型输出工具调用后，参数、兼容性和权限仍可被预检拒绝。此时应把“没有执行”的原因返回模型。预检能拦住确定性错误，却不能证明任务已经解决。</p>
+<h3 id="结果回灌让下一轮能面对现实">2. 结果回灌让下一轮能面对现实</h3>
+<h4 id="执行结果必须成为下一轮事实">① 执行结果必须成为下一轮事实</h4>
+<p>预检通过后，执行器才真正访问文件、命令行或远端服务。结果不论成功还是失败，都应回灌为结构化输出。没有这条回程，模型只能继续猜；把结果压缩成一句“成功”，模型也很难定位下一步。</p>
+<h2 id="四为什么-react记忆和-refine-还不等于自进化">四、为什么 ReAct、记忆和 refine 还不等于自进化</h2>
+<h3 id="它们已经让-agent-能把任务跑得更长">1. 它们已经让 Agent 能把任务跑得更长</h3>
+<h4 id="单次任务里的适应很有价值">① 单次任务里的适应很有价值</h4>
+<p>观察、行动、再观察的循环，让 Agent 能根据工具结果调整下一步。记忆能保留偏好和项目约定；规划、重试能处理更多失败路径。这些机制让 Agent 从一次性文本生成，变成能与外部环境往返的执行系统。</p>
+<h4 id="轨迹不天然等于经验">② 轨迹不天然等于经验</h4>
+<p>一次 retry 成功可能是偶然；一段复盘写得通顺，也可能没有改变下一次行动。<strong>轨迹</strong>记录发生过什么，却不自动说明应该修改哪里、这条修改对哪些任务仍成立。</p>
+<h3 id="refine-把问题推进到工程变更">2. refine 把问题推进到工程变更</h3>
+<h4 id="候选更新需要治理">① 候选更新需要治理</h4>
+<p>refine 类机制会在任务后读取轨迹，对提示词、记忆、skill 或运行状态提出小步修改。价值不在“又调用一次模型”，而在把临时反思变成候选更新。</p>
+<p>候选不是结论。谁冻结修改前状态？谁验证？谁安装？失败后回到哪个版本？一旦改动涉及 skill、tool、配置、模型路由或 runtime，这些问题就比生成一段建议更重要。</p>
+<h4 id="自评能探索不能单独终审">② 自评能探索，不能单独终审</h4>
+<p>同一个模型发现问题、提出改动、评价改动并决定上线，速度很快，风险也集中在同一处。模型自评可以提供方向，却不应独自拥有最终裁决权。</p>
+<h2 id="五可信自进化先是一套可反驳的账本">五、可信自进化先是一套可反驳的账本</h2>
+<pre class="mermaid"><code>flowchart LR
+    F[事实\n失败、测试、用户纠正] --&gt; H[假设\n解释为何失败]
+    H --&gt; C[候选\nconfig / tool / skill / loop]
+    C --&gt; V[独立 Verifier\n回归、契约、冷探针]
+    V --&gt;|approved| G[Gate\n快照、原子安装、冒烟]
+    V --&gt;|rejected| J[拒绝记录\n保留原因与证据]
+    G --&gt; P[应用后的真实结果]
+    G --&gt;|失败| RB[rollback\n恢复 before snapshot]
+    P --&gt; F
+    RB --&gt; F
+    J --&gt; H
+
+    classDef evidence fill:#e8f5f8,stroke:#197a8c,color:#123;
+    classDef change fill:#fff4d8,stroke:#b48720,color:#432;
+    classDef guard fill:#edf7ed,stroke:#39804b,color:#132;
+    class F,H,J,P,RB evidence;
+    class C change;
+    class V,G guard;</code></pre>
+<p>自进化控制面的伪代码：</p>
+<pre class="text"><code>fact = observe(actor_run)
+hypothesis = builder.explain(fact)
+candidate = builder.propose(hypothesis, target_before=snapshot())
+report = verifier.check(candidate, regression_suite, contract)
+if report.approved:
+    gate.apply_atomically(candidate)
+    if not smoke_test(candidate):
+        gate.rollback()
+else:
+    ledger.record_rejection(candidate, report)</code></pre>
+<p>这里的关键不是“模型能不能提出修改”，而是候选是否经过独立验证、是否有安装前快照，以及失败后能否回到已知状态。</p>
+<h3 id="分清事实假设与候选">1. 分清事实、假设与候选</h3>
+<h4 id="失败首先只是观察">① 失败首先只是观察</h4>
+<p>工具报错、测试失败、用户纠正和任务停滞都是<strong>事实</strong>，却不会自动说明怎么修。系统要把解释写成可被推翻的假设，再用最小测试或受控对照检验它。</p>
+<h4 id="候选改动是一场受限实验">② 候选改动是一场受限实验</h4>
+<p>候选应说明修改范围、预期结果、验证入口与回滚对象。验证失败时，失败要能定位到这一次实验，而不是混进后续一连串操作。被拒绝的候选同样应留下来，成为下一轮的证据。</p>
+<h3 id="可替换能力需要不可替换的边界">2. 可替换能力需要不可替换的边界</h3>
+<h4 id="学习不该只锁在-prompt-里">① 学习不该只锁在 prompt 里</h4>
+<p>工具、skill、配置、模型路由和执行 runtime 都会改变 Agent 行为。不同失败需要不同修复入口：读不到文件可能缺工具，格式总错可能缺 skill，超时可能是配置问题。</p>
+<h4 id="验证链必须保持独立">② 验证链必须保持独立</h4>
+<p>Verifier、Gate、回归集和权限边界构成信任根。正在被评估的候选可以被它们检查，却不能先改掉检查规则再宣布通过。</p>
+<p>这也是 Loom 想补的控制面：把失败、假设、候选、独立验证、冷应用和回滚放到 Actor 外部。它目前不是通用世界模型，也没有证明任意 Agent 都能稳定改好复杂代码；局部 scheduler 实验更不能外推为整体性能。下一篇将只用 refine skill 冷加载/回滚和 scheduler 案例，逐条说明证据能支持什么。</p>
+<h2 id="写在最后">写在最后</h2>
+<p>今天的 Agent 已经很会行动。让它可靠成长，难点却不只是模型更聪明，而是让一次行动留下能被检查、复跑、拒绝和撤回的状态。</p>
+<p>自进化并不神秘：把失败保留为事实，把解释写成假设，把改动限制为候选，把通过权交给独立验证器。能力可以继续变，现实世界仍然保留最后的否决权。</p>
+<p>扩展阅读：</p>
+<ul>
+<li><a href="https://github.com/openai/codex/blob/main/codex-rs/core/src/client.rs">Codex 开源客户端的请求组装</a></li>
+<li><a href="https://modelcontextprotocol.io/">Model Context Protocol</a></li>
+<li><a href="https://github.com/ZTCNO0NE/dsh-loom/tree/main/docs/research">Loom 的实验记录与审计范围</a></li>
+</ul>
+</body>
+</html>

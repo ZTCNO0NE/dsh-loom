@@ -16,8 +16,14 @@ import { Validator } from './validate/index.js';
 import { appendJsonl, atomicWriteJson, ensureWorkspace, metaRoot, paths, PROTOCOL_VERSION, readJson, readJsonl, sha256, } from './protocol/index.js';
 import { runIsolation } from './isolation/runner.js';
 import { childEnv } from './isolation/runner.js';
-import { officialDeepSeekLlm } from './llm/official.js';
+import { officialDeepSeekLlm, terraLlm } from './llm/official.js';
 import { LoopCandidateGateway } from './candidates/gateway.js';
+import { miniSweChildEnv } from './builder/mini-swe-env.js';
+import { bundledMiniSwePaths } from './builder/bundled-mini-swe.js';
+import { ActorEvolutionGateway } from './candidates/actor-gateway.js';
+import { UserEvolutionController } from './evolution/controller.js';
+import { userEvolutionTaskCard } from './evolution/presentation.js';
+import { EvolutionTaskSessionStore } from './evolution/task-session.js';
 import { CandidateImporter, CandidateRegistry } from './candidates/index.js';
 import { profileGateOps } from './candidates/profile-gate.js';
 import { createCandidateProfile } from './candidates/profile.js';
@@ -100,6 +106,27 @@ export const Config = Schema.object({
         builderMaxModelTurns: Schema.number().default(24),
         builderMaxToolSteps: Schema.number().default(48),
         builderMaxWallTimeMs: Schema.number().default(600000),
+        // Builder remains free to decide whether evidence is insufficient and ask
+        // the Actor. Controllers may explicitly opt into a diagnosis-only pass,
+        // but a broad request must not be converted into a mandatory form flow.
+        diagnosisFirst: Schema.boolean().default(false),
+        repeatReadRejectAfter: Schema.number().default(0),
+        enforceProgressCheckpoints: Schema.boolean().default(false),
+        // v1.2: Loom-native is a diagnosis/clarification kernel, not the Loop
+        // implementation runtime. Real source changes run through mini-SWE.
+        executionRuntime: Schema.union(['loom-native', 'mini-swe']).default('mini-swe'),
+        miniSweExecutable: Schema.string().default(''),
+        miniSweConfigPath: Schema.string().default(''),
+        miniSweDependencySnapshot: Schema.string().default(''),
+        miniSweStepLimit: Schema.number().default(30),
+    }),
+    activeEvolution: Schema.object({
+        enabled: Schema.boolean().default(false),
+        runtimeRoot: Schema.string().default(''),
+        miniSweExecutable: Schema.string().default(''),
+        miniSweConfigPath: Schema.string().default(''),
+        miniSweStepLimit: Schema.number().default(30),
+        timeoutMs: Schema.number().default(600000),
     }),
     lockedTargets: Schema.object({
         ids: Schema.array(Schema.string()).default(DEFAULT_LOCKED_TARGETS.ids),
@@ -167,6 +194,19 @@ export function apply(ctx, config) {
                 status: 'interrupted',
                 error: 'Builder job interrupted by host reload before its worker completed',
             });
+            if (job.request?.kind === 'user-evolution' && typeof job.request.planId === 'string') {
+                const planPath = join(root, 'user-evolution', config.sessionId, `${job.request.planId}.json`);
+                const plan = readJson(planPath);
+                if (plan && (plan.state === 'queued' || plan.state === 'executing' || plan.state === 'verifying')) {
+                    plan.state = 'interrupted';
+                    plan.result = {
+                        runId: plan.execution?.runId ?? 'interrupted', targetKind: plan.target.kind, targetId: plan.target.plan.targetId,
+                        verdict: 'aborted', applied: false, summary: '宿主重载中断了本轮；原任务与证据已保留',
+                        limitations: ['本轮不会自动续跑；请根据原任务创建新的 immutable plan。'],
+                    };
+                    atomicWriteJson(planPath, plan);
+                }
+            }
         }
     };
     recoverInterruptedJobs();
@@ -211,12 +251,16 @@ export function apply(ctx, config) {
         void (async () => {
             if (config.notify.start) {
                 const isLoopExploration = job.request.kind === 'loop-exploration';
+                const evolutionPlanId = job.request.kind === 'user-evolution' && typeof job.request.planId === 'string' ? job.request.planId : undefined;
+                const evolutionPlan = evolutionPlanId ? readJson(join(root, 'user-evolution', config.sessionId, `${evolutionPlanId}.json`)) : undefined;
                 const reason = typeof job.request.requirements === 'string' && job.request.requirements.trim()
                     ? String(job.request.requirements).slice(0, 100)
                     : `检测到改进需求（${String(job.request.tool ?? 'refine')}）`;
                 injectNotice(isLoopExploration
                     ? `Builder 正在后台探索 loop：${reason}。你可以继续当前对话，也可查询或补充该 run。`
-                    : `正在后台优化：${reason}。完成会通知你，不影响当前对话。`, isLoopExploration ? 'Builder 开始探索' : '开始后台优化');
+                    : evolutionPlan
+                        ? `演进已开始：${evolutionPlan.target.summary}。现在在隔离环境实现，尚未生效；Verifier/Gate 会决定是否放行。`
+                        : `正在后台优化：${reason}。完成会通知你，不影响当前对话。`, isLoopExploration ? 'Builder 开始探索' : evolutionPlan ? '用户演进已开始' : '开始后台优化');
             }
             updateJob(job.id, { status: 'running', request: job.request });
             try {
@@ -225,14 +269,38 @@ export function apply(ctx, config) {
                 updateJob(job.id, { status: persistedStatus, request: job.request, summary: outcome.summary });
                 if (config.notify.completion && persistedStatus === 'finished') {
                     const isLoopExploration = job.request.kind === 'loop-exploration';
+                    const evolutionPlanId = job.request.kind === 'user-evolution' && typeof job.request.planId === 'string' ? job.request.planId : undefined;
+                    const evolutionPlan = evolutionPlanId ? readJson(join(root, 'user-evolution', config.sessionId, `${evolutionPlanId}.json`)) : undefined;
+                    const evolutionCard = evolutionPlan ? userEvolutionTaskCard(evolutionPlan, persistedStatus) : undefined;
                     injectNotice(isLoopExploration
                         ? `Builder 探索结束：${outcome.summary}`
-                        : `优化完成：${outcome.summary}。reload 后生效。`, isLoopExploration ? 'Builder 探索结束' : '优化完成');
+                        : evolutionCard
+                            ? `演进完成：${evolutionCard.result?.outcome ?? evolutionCard.phase}。${evolutionCard.result?.summary ?? evolutionCard.progress.current}`
+                            : `优化完成：${outcome.summary}。reload 后生效。`, isLoopExploration ? 'Builder 探索结束' : evolutionCard ? '用户演进完成' : '优化完成');
                 }
             }
             catch (error) {
                 updateJob(job.id, { status: 'failed', request: job.request, error: String(error) });
-                injectNotice(`改进失败：${String(error).slice(0, 300)}`, '改进失败');
+                const evolutionPlanId = job.request.kind === 'user-evolution' && typeof job.request.planId === 'string' ? job.request.planId : undefined;
+                if (evolutionPlanId) {
+                    const planPath = join(root, 'user-evolution', config.sessionId, `${evolutionPlanId}.json`);
+                    const plan = readJson(planPath);
+                    if (plan && (plan.state === 'queued' || plan.state === 'executing' || plan.state === 'verifying')) {
+                        plan.state = 'aborted';
+                        plan.result = {
+                            runId: plan.execution?.runId ?? 'unavailable', targetKind: plan.target.kind, targetId: plan.target.plan.targetId,
+                            verdict: 'aborted', applied: false, summary: '隔离实现未完成，未产生可安装结果',
+                            limitations: ['详细诊断保留在受控审计记录中；本轮不会自动重试。'],
+                        };
+                        atomicWriteJson(planPath, plan);
+                        new EvolutionTaskSessionStore(root, config.sessionId).finish(evolutionPlanId, 'aborted');
+                        const card = userEvolutionTaskCard(plan, 'failed');
+                        injectNotice(`演进未完成：${card.progress.current}。${card.progress.next}`, '用户演进未完成');
+                    }
+                }
+                else {
+                    injectNotice(`改进失败：${String(error).slice(0, 300)}`, '改进失败');
+                }
             }
             finally {
                 if (progressTimer)
@@ -260,6 +328,15 @@ export function apply(ctx, config) {
         queueMicrotask(startNextJob);
         return id;
     };
+    /** Only jobs still owned by the in-memory queue are cancellable. */
+    const cancelQueuedJob = (jobId) => {
+        const index = jobQueue.findIndex((job) => job.id === jobId);
+        if (index < 0)
+            return false;
+        jobQueue.splice(index, 1);
+        updateJob(jobId, { status: 'cancelled' });
+        return true;
+    };
     const observer = new Observer(ctx, {
         root,
         sessionId: config.sessionId,
@@ -278,7 +355,9 @@ export function apply(ctx, config) {
     };
     // Independent meta-layer model: builder + review gate use the official
     // DeepSeek API (V4 Flash by default), while the actor keeps its own route.
-    const metaLlm = config.llm.provider === 'deepseek-official' ? officialDeepSeekLlm() : undefined;
+    const metaLlm = config.llm.provider === 'deepseek-official'
+        ? officialDeepSeekLlm()
+        : config.llm.provider === 'gpt-5.6-terra' ? terraLlm() : undefined;
     const loopCandidateGateway = new LoopCandidateGateway({
         enabled: config.allowLoopCandidates.enabled,
         root: config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime'),
@@ -291,7 +370,24 @@ export function apply(ctx, config) {
         builderMaxModelTurns: config.allowLoopCandidates.builderMaxModelTurns,
         builderMaxToolSteps: config.allowLoopCandidates.builderMaxToolSteps,
         builderMaxWallTimeMs: config.allowLoopCandidates.builderMaxWallTimeMs,
+        diagnosisFirst: config.allowLoopCandidates.diagnosisFirst,
+        builderKernelOptions: {
+            ...(config.allowLoopCandidates.repeatReadRejectAfter > 0 ? { repeatReadRejectAfter: config.allowLoopCandidates.repeatReadRejectAfter } : {}),
+            ...(config.allowLoopCandidates.enforceProgressCheckpoints ? { enforceProgressCheckpoints: true } : {}),
+        },
         onUsage: recordUsage('builder-loop-candidate'),
+        executionRuntime: config.allowLoopCandidates.executionRuntime,
+        ...(config.allowLoopCandidates.executionRuntime === 'mini-swe' ? {
+            miniSwe: {
+                executable: config.allowLoopCandidates.miniSweExecutable,
+                configPath: config.allowLoopCandidates.miniSweConfigPath,
+                baselineRoot: config.allowLoopCandidates.baselineRoot,
+                dependencySnapshot: config.allowLoopCandidates.miniSweDependencySnapshot,
+                stepLimit: config.allowLoopCandidates.miniSweStepLimit,
+                timeoutMs: config.allowLoopCandidates.builderMaxWallTimeMs,
+                env: miniSweChildEnv(config.llm.provider),
+            },
+        } : {}),
     });
     const loopJobRunners = new Map();
     const loopRunHolders = new Map();
@@ -645,6 +741,11 @@ export function apply(ctx, config) {
             render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
         },
         async execute() {
+            const builderCredentialConfigured = config.llm.provider === 'deepseek-official'
+                ? Boolean(process.env.DSH_META_API_KEY ?? process.env.DEEPSEEK_API_KEY)
+                : config.llm.provider === 'gpt-5.6-terra'
+                    ? Boolean(process.env.LOOM_TERRA_API_KEY ?? process.env.DSH_TERRA_API_KEY)
+                    : false;
             const jobsDir = join(root, 'workspace', config.sessionId, 'jobs');
             const jobFiles = existsSync(jobsDir) ? readdirSync(jobsDir).sort().reverse() : [];
             const latestJob = jobFiles.length > 0
@@ -653,6 +754,12 @@ export function apply(ctx, config) {
             return {
                 mode: config.mode,
                 sessionId: config.sessionId,
+                builder: {
+                    provider: config.llm.provider,
+                    model: config.llm.model,
+                    credentialConfigured: builderCredentialConfigured,
+                    error: builderCredentialConfigured ? null : 'Builder API key is missing from the DSH process environment',
+                },
                 workspaceRoot: root,
                 thresholds: config.thresholds,
                 maxIterations: config.maxIterations,
@@ -780,12 +887,81 @@ export function apply(ctx, config) {
         },
     }));
     ctx.tools.register(defineTool({
+        name: 'meta_evolution_status',
+        description: '查询用户主动 Config/Skill 演进的易懂状态。只读取 immutable plan 与后台 job；不会唤起 Builder、修改目标或安装任何候选。',
+        parameters: {
+            jobId: { type: 'string', description: '内部关联字段；普通对话无需提供。' },
+            planId: { type: 'string', description: '内部关联字段；普通对话无需提供。' },
+        },
+        output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+        async execute(args) {
+            const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
+            const jobId = typeof args.jobId === 'string' ? args.jobId : taskSession.read().active?.jobId;
+            const job = jobId ? readJson(jobPathFor(jobId)) : undefined;
+            const planId = typeof args.planId === 'string' ? args.planId : typeof job?.request?.planId === 'string' ? job.request.planId : taskSession.currentPlanId();
+            if (!planId)
+                return { accepted: false, error: '当前会话没有演进任务' };
+            const plan = readJson(join(root, 'user-evolution', config.sessionId, `${planId}.json`));
+            if (!plan)
+                return { accepted: false, planId, error: 'unknown evolution plan' };
+            return cleanToolResult({
+                accepted: true,
+                task: userEvolutionTaskCard(plan, job?.status),
+                note: plan.state === 'planned'
+                    ? '等待用户确认；尚未启动执行。'
+                    : plan.state === 'queued' || plan.state === 'executing'
+                        ? '正在隔离 workspace 中执行；未通过 Verifier/Gate 前不会生效。'
+                        : plan.state === 'completed'
+                            ? '已通过独立裁决并生效；报告包含限制与回滚边界。'
+                            : '未生效；请查看报告原因，不会静默重试或绕过裁决。',
+            });
+        },
+    }));
+    ctx.tools.register(defineTool({
+        name: 'meta_evolution_control',
+        description: 'Actor 对话任务卡的自然语言控制协议。用户只需说“查看进度”或“取消”；本工具不会暴露 planId、路径、快照或隐藏推理。确认与重做由 Actor 依据当前卡片调用 meta_auto 的受控 Plan/Execute 链。',
+        parameters: {
+            action: { type: 'string', description: 'status 或 cancel_queued。Actor 根据用户自然语言选择。' },
+        },
+        output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+        async execute(args) {
+            const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
+            const session = taskSession.read();
+            const planId = session.pending?.planId ?? session.active?.planId ?? session.recent?.planId;
+            if (!planId)
+                return cleanToolResult({ accepted: false, error: '当前会话没有演进任务' });
+            const planPath = join(root, 'user-evolution', config.sessionId, `${planId}.json`);
+            const plan = readJson(planPath);
+            if (!plan)
+                return cleanToolResult({ accepted: false, error: '当前任务记录不可用' });
+            if (args.action === 'cancel_queued') {
+                if (!session.active || session.active.planId !== planId || session.active.cursor !== 'queued') {
+                    return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: plan.state === 'executing' || plan.state === 'verifying' ? '本轮已经开始实现或裁决，不能强制中断；它会保留完整审计记录。' : '只有已排队、尚未开始的任务可以取消。' });
+                }
+                if (!cancelQueuedJob(session.active.jobId)) {
+                    return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: '任务已被 worker 接手，不能安全取消；请查看当前状态。' });
+                }
+                plan.state = 'cancelled';
+                plan.result = { runId: 'not-started', targetKind: plan.target.kind, targetId: plan.target.plan.targetId, verdict: 'aborted', applied: false, summary: '用户在隔离实现开始前取消了此任务', limitations: ['取消不会删除原计划或证据；重做会创建新的 immutable plan。'] };
+                atomicWriteJson(planPath, plan);
+                taskSession.finish(planId, 'cancelled');
+                return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan), note: '已取消排队任务；未启动 Builder，未修改任何内容。' });
+            }
+            return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan, session.active?.jobId ? readJson(jobPathFor(session.active.jobId))?.status : undefined) });
+        },
+    }));
+    ctx.tools.register(defineTool({
         name: 'meta_auto',
         description: '用户主动委托入口：exploreLoop=true 时冻结三层证据包，后台 Builder 自由探索并提交 proposal，随后经 verifier/gate 裁决；无被动触发。',
         parameters: {
             turn: { type: 'number', description: '当前回合号（宿主回合边界传入）' },
             requirements: { type: 'string', description: '用户需求原文（可选）' },
             actorAssessment: { type: 'string', description: 'actor 对当前会话问题的自然语言观察、怀疑和上下文；不是结构化 JSON 约束（可选）' },
+            evolutionMode: { type: 'string', description: '用户主动 Config/Skill 演进：plan 冻结证据与宿主目标并展示风险；execute 确认当前会话的待确认任务。' },
+            targetKind: { type: 'string', description: 'plan 时必填：config 或 skill。' },
+            targetId: { type: 'string', description: 'plan 时的用户意图提示。Config 必须是现有宿主行；Skill 仅允许 kebab-case id，入口由宿主生成。' },
+            redo: { type: 'boolean', description: '仅对上一条未生效/未完成/已取消任务：用原目标和原用户意图创建一条新的 immutable plan。' },
+            planId: { type: 'string', description: '内部兼容字段；Actor 确认当前任务时无需提供。' },
             exploreLoop: { type: 'boolean', description: '仅当 allowLoopCandidates 开启时，让独立 builder 阅读三层证据包并自由探索/演进 config/tool/skill/loop；proposal 经 verifier/gate 裁决后才应用。' },
             resumeJobId: { type: 'string', description: '可选：恢复一个被宿主重载中断的 Builder job。会创建新 immutable run，并只读继承旧 run 的 journal/workspace/artifacts。' },
             resumeRunId: { type: 'string', description: '可选：直接指定要恢复的 Builder run（与 resumeJobId 二选一）。' },
@@ -815,7 +991,141 @@ export function apply(ctx, config) {
                 observer.persistTrigger('user', 'meta_auto');
                 observer.ingest({ kind: 'user-message', turn: 0, text: requirements });
             }
+            const evolutionMode = args.evolutionMode === 'plan' || args.evolutionMode === 'execute'
+                ? args.evolutionMode : undefined;
+            if (evolutionMode) {
+                const bundledRuntime = bundledMiniSwePaths({
+                    metaRoot: root, packageRoot: PLUGIN_ROOT, runtimeRoot: config.activeEvolution.runtimeRoot,
+                    executable: config.activeEvolution.miniSweExecutable, configPath: config.activeEvolution.miniSweConfigPath,
+                });
+                if (!config.activeEvolution.enabled || !bundledRuntime.ready) {
+                    return cleanToolResult({ accepted: false, mode: evolutionMode, error: config.activeEvolution.enabled ? 'mini-SWE runtime is not installed; run dsh-loom setup in the same DSH_META_VALIDATE_ROOT, then restart DSH' : 'activeEvolution is disabled' });
+                }
+                const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
+                const redoSourceId = args.redo === true ? taskSession.read().recent?.planId : undefined;
+                const redoSource = redoSourceId ? readJson(join(root, 'user-evolution', config.sessionId, `${redoSourceId}.json`)) : undefined;
+                if (args.redo === true && (!redoSource || !['rejected', 'aborted', 'cancelled', 'interrupted'].includes(redoSource.state))) {
+                    return cleanToolResult({ accepted: false, mode: evolutionMode, error: '只有未生效、未完成或已取消的最近任务可以重做。' });
+                }
+                const evolutionRequirements = requirements ?? redoSource?.requirements;
+                const targetKind = args.targetKind === 'config' || args.targetKind === 'skill'
+                    ? args.targetKind : redoSource?.target.kind;
+                const requestedTargetId = typeof args.targetId === 'string' ? args.targetId : redoSource?.target.plan.targetId;
+                const currentConfig = currentConfigOf(ctx, baseline);
+                const signals = observer.collect(config.thresholds);
+                const evidencePack = createActorEvidencePack({
+                    root, sessionId: config.sessionId, observer, currentConfig, signals,
+                    state: readJson(paths.autopilotState(root, config.sessionId)) ?? {
+                        schemaVersion: PROTOCOL_VERSION, epoch: 0, iterationsThisEpoch: 0, lastIterationTurn: 0, lastApplyTurn: 0,
+                    },
+                    requirements: evolutionRequirements ?? '', actorAssessment,
+                });
+                const events = evidenceEventsOf(evidencePack);
+                const evolutionGateway = new ActorEvolutionGateway({
+                    root, sessionId: config.sessionId, model: config.llm.model,
+                    miniSwe: {
+                        executable: bundledRuntime.executable,
+                        configPath: bundledRuntime.configPath,
+                        stepLimit: config.activeEvolution.miniSweStepLimit,
+                        timeoutMs: config.activeEvolution.timeoutMs,
+                        env: miniSweChildEnv(config.llm.provider),
+                    },
+                });
+                const controller = new UserEvolutionController({
+                    root, sessionId: config.sessionId, gateway: evolutionGateway,
+                    resolveTarget: (_request, kind) => {
+                        if (events.length === 0)
+                            throw new Error('cannot create an executable plan without frozen actor events');
+                        const expectedTrajectory = {
+                            schemaVersion: 1, patchId: `host-evidence-${evidencePack.id}`, events,
+                            coverage: { claimedBehaviors: [] },
+                        };
+                        if (kind === 'config') {
+                            if (!requestedTargetId || !Object.hasOwn(currentConfig, requestedTargetId))
+                                throw new Error('config plan requires targetId of an existing host config row');
+                            const row = currentConfig[requestedTargetId];
+                            if (!row || typeof row !== 'object' || !('config' in row) || !row.config || typeof row.config !== 'object' || Array.isArray(row.config))
+                                throw new Error('host config row is not editable');
+                            if (Object.keys(row.config).some((key) => /(api[_-]?key|token|secret|password|authorization)/i.test(key)))
+                                throw new Error('config rows with credentials are not eligible for Builder execution');
+                            return {
+                                kind, plan: { capability: 'config-evolution', targetId: requestedTargetId, before: structuredClone(row.config), expectedTrajectory },
+                                summary: `修改宿主已存在的 config 行 ${requestedTargetId}`, verification: '固定 Validator、Gate、cold replay 与 rollback', risks: ['配置修改可能要求宿主 reload'],
+                            };
+                        }
+                        if (!requestedTargetId || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(requestedTargetId))
+                            throw new Error('skill plan requires a kebab-case targetId');
+                        return {
+                            kind, plan: { capability: 'skill-evolution', targetId: requestedTargetId, targetKind: 'skill', entry: `${requestedTargetId}/SKILL.md`, expectedTrajectory },
+                            summary: `生成隔离 skill bundle ${requestedTargetId}`, verification: 'catalog/load verifier、Gate install、cold Actor load/use 与 rollback', risks: ['技能内容不保证所有模型都遵循'],
+                        };
+                    },
+                    evidenceFor: () => ({ refs: [evidencePack.manifestPath, ...evidencePack.rawRefs.map((ref) => ref.snapshotPath ?? ref.path)], summary: `frozen evidence pack ${evidencePack.id}` }),
+                    adjudicate: async (proposal, frozenPlan) => {
+                        const classified = classifyBuilderProposal(proposal);
+                        if (classified.kind !== 'known' || classified.proposal.capability !== 'patch-evolution')
+                            throw new Error('only known patch-evolution proposals can enter product adjudication');
+                        const cases = await validator.loadRegressionCases();
+                        const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline);
+                        const frozenPack = readActorEvidencePack(frozenPlan.evidence.refs[0] ?? '');
+                        if (!frozenPack)
+                            throw new Error('immutable plan evidence pack is unavailable');
+                        return adjudicatePatch(classified.proposal, {
+                            root, sessionId: config.sessionId, validator, gate, applyOps: ops, evidenceEvents: evidenceEventsOf(frozenPack),
+                            collectFrames: (patch, base) => collectFramesForPatch(patch, base, {
+                                enabled: config.isolation.enabled, dshCommand: config.isolation.dshCommand, cwd: config.isolation.cwd,
+                                profile: config.isolation.profile, baseOverlays: config.isolation.baseOverlays, probe: config.isolation.probe,
+                                probeTimeoutMs: config.isolation.probeTimeoutMs, stagingRootFor: (patchId) => paths.staging(root, config.sessionId, patchId), skillProbe: (patch) => validator.probeSkillForFrames(patch),
+                            }),
+                        });
+                    },
+                });
+                try {
+                    if (evolutionMode === 'plan') {
+                        if (!evolutionRequirements || !targetKind)
+                            return cleanToolResult({ accepted: false, mode: 'plan', error: 'plan requires requirements and targetKind' });
+                        const existing = taskSession.read().pending;
+                        if (existing) {
+                            const prior = controller.read(existing.planId);
+                            return cleanToolResult({ accepted: false, mode: 'plan', task: userEvolutionTaskCard(prior), error: '该会话已有等待确认的任务；请保留、取消后替换，或先查看状态' });
+                        }
+                        const plan = controller.plan(evolutionRequirements, targetKind);
+                        taskSession.beginPending({
+                            planId: plan.id, userRequest: evolutionRequirements, actorExplanation: actorAssessment ?? plan.target.summary,
+                            suggestions: [{ key: 'selected', title: plan.target.summary, summary: plan.target.verification, target: { kind: plan.target.kind, id: plan.target.plan.targetId } }],
+                        });
+                        return cleanToolResult({ accepted: true, mode: 'plan', task: userEvolutionTaskCard(plan, undefined, {
+                                suggestions: [{ key: 'selected', title: plan.target.summary, summary: plan.target.verification }],
+                                confirmation: '我已根据当前会话证据冻结这个候选。是否开始隔离实现，并交给独立 Verifier/Gate 裁决？',
+                            }), note: '方案已冻结但尚未执行。请向用户解释目标、风险和验收方式，等待明确确认。' });
+                    }
+                    const planId = typeof args.planId === 'string' ? args.planId : taskSession.read().pending?.planId ?? '';
+                    if (!planId)
+                        return cleanToolResult({ accepted: false, mode: 'execute', error: '当前会话没有等待确认的任务；execute 不会猜测或创建旁路。' });
+                    const queued = controller.queue(planId);
+                    const jobId = scheduleRefine({ tool: 'meta_auto', kind: 'user-evolution', planId }, async () => {
+                        taskSession.setCursor(planId, 'implementing');
+                        const complete = await controller.execute(planId);
+                        taskSession.finish(planId, complete.state === 'completed' ? 'completed' : complete.state === 'rejected' ? 'rejected' : 'aborted');
+                        const report = complete.result;
+                        return {
+                            summary: `用户委托 ${complete.target.kind}/${complete.target.plan.targetId}：${report?.applied ? '已生效' : complete.state}${report?.summary ? `；${report.summary}` : ''}`,
+                        };
+                    });
+                    taskSession.beginActive(planId, jobId);
+                    return cleanToolResult({ accepted: true, mode: 'execute', task: userEvolutionTaskCard(queued, 'scheduled'), note: '已后台开始执行，不阻塞当前 Actor。可用任务状态卡解释进度。' });
+                }
+                catch (caught) {
+                    return cleanToolResult({ accepted: false, mode: evolutionMode, error: String(caught) });
+                }
+            }
             if (args.exploreLoop === true) {
+                if (config.allowLoopCandidates.executionRuntime !== 'mini-swe') {
+                    return cleanToolResult({
+                        mode: 'loop-exploration', enabled: config.allowLoopCandidates.enabled,
+                        error: 'v1.2 Loop implementation requires executionRuntime=mini-swe; Loom-native is diagnosis/clarification only and cannot be delegated as a source editor.',
+                    });
+                }
                 const currentConfig = currentConfigOf(ctx, baseline);
                 const signals = observer.collect(config.thresholds);
                 const evidencePack = createActorEvidencePack({

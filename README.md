@@ -1,36 +1,56 @@
 # dsh-loom（Loom · 织机）
 
-**让正在运行的 agent 自己变强：工具、技能、配置、甚至模型，都由一个更上层的改进模型自动设计和安装，独立的核验器把关，执行器冷替换——全程不需要你写代码。**
+**让 agent 的演进先经过独立验证，再决定是否冷应用。v1.2 的产品承诺是“用户可委托的 Config / Skill 演进”；Loop 则以公开成功率和失败轨迹的研究方式继续推进。**
 
 [ZTCNO0NE/dsh-loom](https://github.com/ZTCNO0NE/dsh-loom)（对外品牌 **Loom · 织机**：把你的使用、纠正与失败"织"进 agent 的能力里）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的插件。你可以把它理解为**给你的 agent 配了一个"外部教练团队"**：
 
-- **监督员**：一直看着你的 agent 怎么干活（快不快、错不错、卡没卡），判断"该不该改进"；
-- **改进模型**：当需要改进时，它看全量信息，设计出具体修改方案（加工具、改技能、调配置、换模型）；
+- **Actor / 编排层**：接住用户需求、整理会话证据、提出候选并解释进度；
+- **实现器**：确认后在隔离 workspace 实现候选；v1.2 的复杂实现 runtime 是 mini-SWE；
 - **核验器**：把方案放进隔离环境真实跑一遍，和预期结果逐项核对，不通过就退回重做，**绝不让模型自己给自己当裁判**；
 - **执行器**：只负责安装和回滚，改错了自动还原；
-- **你的 agent**：什么都不用改，只需要继续干活，然后发现自己越来越能干。
+- **你的 agent**：在当前产品轨里由用户主动委托演进；长期自治仍在实验。
 
 ![架构总览：外部教练团队](docs/figures/fig-architecture.png)
 
+> **v1.2 更新说明（2026-08）**
+>
+> 这份 README 保留 v1.0–v1.1 的图文、案例和历史实验。它们不是 v1.2 对“自动自治”的默认承诺。当前产品轨由用户主动发起：Actor 提出候选、用户确认、mini-SWE 在隔离 workspace 实现，独立 Verifier/Gate 决定是否生效。自动触发、长期自治、通用复杂源码重构与 Actor 整体性能仍在研究。
+
+## v1.2：用户委托，不把内部过程扔给用户
+
+![v1.2 用户主动演进任务卡](docs/figures/fig-v12-dialogue-task-card.svg)
+
+用户只需描述想改善什么。Actor 基于当前会话的真实证据提出候选、风险与验收方式；确认前不会改动。确认后后台执行，不阻塞当前对话；用户只会看到关键节点：等待确认、开始隔离实现、独立裁决完成。
+
+| 用户说的话 | Actor 任务卡会做什么 | v1.2 边界 |
+| --- | --- | --- |
+| “把这个配置调得更稳定” | 提出 Config 候选、风险与 cold replay/rollback 验收 | 只能改宿主已有且不含凭据的配置行 |
+| “给我加一个复盘失败的技能” | 提出 Skill 候选，确认后生成隔离 bundle | entry 由宿主固定；加载、使用、回滚均需独立验证 |
+| “确认执行” | 只确认当前会话的待确认任务 | 用户不需要 `planId`、路径、before snapshot 或隐藏推理 |
+| “先取消” | 取消仍在排队、尚未获得 workspace 的任务 | 已运行的 mini-SWE pass 不强杀，避免破坏审计边界 |
+| “按刚才的任务重做” | 用原意图建立新的 immutable plan | 不重开旧 workspace，不修改旧记录 |
+
+当前实现的完整交互状态是：`等待确认 → 排队 → 隔离实现 → 独立裁决 → 已生效 / 未生效 / 未完成 / 已取消`。默认关闭主动演进；运行一次 `dsh-loom setup` 会在用户状态目录安装固定 mini-SWE runtime 并生成受控 patch，系统不会退化为直接改配置或直接安装。
+
 ## 它能帮你的 agent 做到什么（30 秒看懂）
 
-| 你遇到的情况 | 插件会做什么 |
-| --- | --- |
-| agent 连写文件都不会 | 从零给它长出工具和技能，直到任务全过（0/3 → 5/5） |
-| agent 缺某个能力 | 自动补工具（文件读写、执行命令、搜索……） |
-| agent 行为习惯不对（改完文件不验证） | 自动给它加"行为技能"，下次主动验证 |
-| 某个配置不合理（命令总被 500ms 超时杀掉） | 自动诊断并调整配置（改进模型自己选值） |
-| 模型不匹配 / 太慢 / 太贵 | 自动换模型或重新调度；你说"节约成本"它就按省钱的方式调度 |
-| agent 空转/死循环 | 监督员主动暂停它，再唤起改进 |
-| 你说一句话要改运行时 | 不需要 agent 自觉，监督员自动理解并唤起改进 |
-| 改进过程会不会卡住对话 | 可预约：后台静默跑完，完成时通知你"reload 后生效" |
-| 你说"给它加个 refine 能力" | 它自己设计并装上这个能力 |
-| 你什么都不说，一直用 | 越用越懂你，越用越贴合你的垂直方向 |
-| 同一个错反复犯 / 旧能力退化 | 自动修复并沉淀成免疫记忆，不再犯第二次 |
-| 复杂任务某环节卡进度 | 检测到"超预算 + 进度小"就主动唤起迭代进化 |
-| 新领域不会 / 工具老报错 | 自动补领域技能或补工具，错误率降下来 |
-| 时延 / token / 成本超预算 | 自动调度：换模型、限输出、减重试 |
-| 要改 agent 自己的循环（loop） | v1 锁定，后续版本放开（runtime/loop 层是进化方向之一） |
+| 你遇到的情况 | v1.0–v1.1 历史案例 / 设计方向 | **v1.2 标记** |
+| --- | --- | --- |
+| agent 连写文件都不会 | 从零成长实验：工具/技能由验证链安装，0/3 → 5/5 | 历史受控任务集，不等于通用自主成长率 |
+| agent 缺某个能力 | 自动补工具、搜索、命令等 | 工具自动演进不在 v1.2 产品轨范围 |
+| agent 行为习惯不对 | 生成行为技能，例如编辑后验证 | Skill 是产品轨；模型遵循率仍需后续评测 |
+| 某个配置不合理 | 自动诊断、改超时等 | Config 是产品轨；需用户主动委托和确认 |
+| 模型不匹配 / 太慢 / 太贵 | 历史模型替换案例 | 不是 v1.2 默认产品能力 |
+| agent 空转/死循环 | 监督员自动唤起改进 | 自动触发是后续路线 |
+| 你说一句话要改运行时 | 历史自动消化消息实验 | 现改为 Actor 给候选、用户确认 |
+| 改进过程会不会卡住对话 | 后台预约与通知 | 已保留：任务卡只通知关键节点 |
+| 你说“给它加个 refine 能力” | 生成 refine skill 的历史与真实 Loader 证据 | bundle 可生成/加载/回滚；不证明任意模型必遵循 |
+| 你什么都不说，一直用 | 个性化与偏好沉淀方向 | 长期自治，暂不作产品承诺 |
+| 同一个错反复犯 / 旧能力退化 | 回归保护与免疫记忆方向 | 研究/历史能力，不作为当前默认自动动作 |
+| 复杂任务某环节卡进度 | 主动接手、补能力的设想 | 自动触发与复杂实现均未发布 |
+| 新领域不会 / 工具老报错 | 泛化 skill 实验 | 产品范围当前只为明确委托的 Config / Skill |
+| 时延 / token / 成本超预算 | 自动调度方向 | 不作当前产品能力或整体性能主张 |
+| 要改 agent 自己的循环（loop） | 一切皆插件的长期方向 | 研究轨：mini-SWE 实现、Loom 编排，受矩阵门槛限制 |
 
 ## 它不是 dsh 极简模式
 
@@ -38,14 +58,14 @@ dsh 自带的"极简模式"（minimal agent preset）是**出厂配置**：预�
 
 dsh-loom 是**运行中的治理回路**：它把 dsh 的一切——工具、技能、配置、模型，甚至 **Agent Loop / 运行时内核**——都当作**可替换的插件对象**。谁观察、谁决定该改、谁验证、谁安装、改错谁兜底，都由治理回路决定。v1 出于安全先锁 loop 层，但这是**策略开关，不是架构限制**；把内核也当插件来换，正是后续要做深的方向。
 
-| 维度 | 极简模式 | dsh-loom |
-| --- | --- | --- |
-| 本质 | 静态预设（配置态） | 动态进化回路（治理态） |
-| 加工具/技能 | 能自己动手，但无独立验证/无外部兜底 | 自动长出 + 隔离验证 + 失败回滚 |
-| 内核 / Agent Loop | 架构上是插件，但没有"改它"的回路 | 当作可替换插件（治理回路决定换不换；v1 先锁） |
-| 自己换模型 | 能改配置，但无评估、无验证 | 自动评估并安装（qwen3.6-27b → v4-flash → deepseek-chat） |
-| 一句话改运行时 | 手动改配置 | 自动消化并执行 |
-| 跨会话成长 | 无 | 技能/偏好/台账落盘，下次继续 |
+| 维度 | 极简模式 | dsh-loom 的架构方向 | **v1.2 当前标记** |
+| --- | --- | --- | --- |
+| 本质 | 静态预设（配置态） | 动态进化回路（治理态） | 用户主动委托的受控演进 |
+| 加工具/技能 | 能自己动手，但无独立验证/无外部兜底 | 自动长出 + 隔离验证 + 失败回滚 | Skill 已进入产品轨；工具自动演进暂不发布 |
+| 内核 / Agent Loop | 架构上是插件，但没有“改它”的回路 | 可替换插件，治理回路决定换不换 | 研究轨，mini-SWE 实现，未达稳定发布阈值 |
+| 自己换模型 | 能改配置，但无评估、无验证 | 自动评估并安装的历史案例 | 当前不开放为默认产品能力 |
+| 一句话改运行时 | 手动改配置 | 自动消化并执行的历史案例 | Actor 先给候选，用户确认后才执行 |
+| 跨会话成长 | 无 | 技能/偏好/台账落盘 | 任务状态与 immutable plan 可持久化；长期自治未承诺 |
 
 ![极简模式 vs dsh-loom 对比](docs/figures/table-minimal-compare.png)
 
@@ -65,7 +85,7 @@ dsh-loom 是**运行中的治理回路**：它把 dsh 的一切——工具、�
 
 然后是第二个任务、第三个任务…… 工具一个个长出来，行为习惯（改完必须验证）也长出来。到最后，你甚至可以告诉它"模型太慢了，换一个"——**它会自己去换，而不是等你手动改配置**。
 
-## 案例库
+## 案例库（v1.0–v1.1 历史实验 + v1.2 新增）
 
 ### 案例 1：从零养大一个 agent
 
@@ -127,6 +147,14 @@ npm run refine-skill-demo
 ```
 
 > 留档说明：refine 演示当前为产物证据留档；脚本退出问题已修复，正式快照可随时低成本补跑。
+
+### 案例 4A：v1.2 中，用户把“想改什么”交给 Actor
+
+v1.2 不要求用户记住内部工具参数，也不把候选 workspace 或推理过程展示出来。用户说“给我加一个复盘失败的技能”后，Actor 先给出一张任务卡：目标、风险、证据数量、验收方式，以及“是否执行”的问题。
+
+确认后，mini-SWE 才在隔离 workspace 生成 bundle；Verifier 再检查 catalog/load，Gate 冷安装并回滚。真实 refine skill 的独立证据已经覆盖：**Builder 生成 bundle → Verifier approved → Gate applied → cold Loader 读到 skill 正文 → Gate rollback 后正文不可再加载**。这证明的是 artifact 交付链，不是“任何模型都会照着 skill 做”的承诺。
+
+产品入口的 Config、Skill 各一条“Actor 自然语言请求 → 任务卡确认 → mini-SWE → Verifier/Gate → cold replay/rollback”真机 E2E 仍是发布门槛；在这两条记录补齐前，v1.2 只把该流程称为已实现控制面，不称为已发布体验。
 
 ### 案例 5：什么都不说，越用越懂你
 
@@ -260,6 +288,18 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 ![严格同任务集对照](docs/figures/evidence-compare.png)
 ![从零成长 L1-L5](docs/figures/evidence-growth.png)
 
+### v1.2 新增证据：把“测试绿”与“能力已发布”分开
+
+| 证据项 | 当前可复核结果 | 可以说什么 | 不能说什么 |
+| --- | --- | --- | --- |
+| 工程回归 | **231/231** 全绿 | 双轨控制面、任务卡与 runtime adapter 有持续回归保护 | 不能替代真实模型成功率 |
+| refine skill artifact | mini-SWE 生成 → verifier/gate → cold Loader → rollback 已跑通 | 隔离 skill bundle 的交付链可用 | 不证明任意 LLM 都会遵循该 skill |
+| scheduler prepare-overlap | 真实 Builder 候选在 2/4/8/16 calls 的受控路径中缩短 prepare span | 该 scheduler 改动的因果 workload 有改善 | 不等于 Actor 整体性能提升 |
+| Loop 复杂实现 | mini-SWE 有一条真实 source edit→tests→submit→gate→rollback 闭环 | mini-SWE 是已验证的实现 runtime 候选 | 不等于复杂源码重构已稳定可用 |
+| 产品主入口 E2E | Config、Skill 各一条仍待补 | 任务卡/Plan/Execute 控制面已实现 | 未完成前不宣称用户可用发布 |
+
+![版本迭代与证据轨迹](docs/figures/fig-version-evidence-trajectory.svg)
+
 其他可查记录：
 
 - 真实模型回炉：改进模型（V4 Flash）2 轮迭代后通过并安装；
@@ -269,41 +309,137 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 - 一句话 refine 复刻 prime-agent 核心语义：产物证据两次独立复现（`/tmp/refine-skill-demo.txt` = `refine-skill-ok`），留档 `eval/run-records/refine-skill-demo.json`；
 - 偏好沉淀闭环：pass=true，偏好 2 条落盘、ledger 2 条、headless 下 `meta_growth` 可见，留档 `eval/run-records/preferences-demo.json`。
 
-## 快速开始
+## 快速开始：从零启动 DSH，到第一次任务卡
 
-三步上手，不需要懂任何内部概念：
+这是一条**用户主动委托**链：安装 → 检查插件 → 安装实现 runtime → 启动对话 → 用户确认 → 独立验证。不要跳步骤，也不需要手填 executable、config path 或内部 ID。
 
-**1. 安装**
+### 先选你的安装方式
+
+| 你的情况 | 直接前往 | 使用的命令入口 |
+| --- | --- | --- |
+| Windows，正在从 DeepSeek Harness 源码目录运行 `pnpm dsh` | [Windows](#windows--powershell) | PowerShell wrapper |
+| macOS，正在从 DeepSeek Harness 源码目录运行 `pnpm dsh` | [macOS](#macos--terminal) | Unix shell wrapper |
+| Linux，正在从 DeepSeek Harness 源码目录运行 `pnpm dsh` | [Linux](#linux--shell) | Unix shell wrapper |
+| 已将 `dsh` 与 `dsh-loom` 都装入系统 `PATH` | [全局 CLI](#全局-cli) | `dsh-loom` |
+
+本页默认前三种“DSH 源码 checkout”用法。每个系统块都是一段完整、可从上到下执行的路径。
+
+### 所有系统的前置条件
+
+- Node `^22.19` 或 `>=24`，以及 pnpm；
+- Python **>= 3.10**；
+- 首次安装能访问 Python 依赖源（企业镜像、官方 PyPI 或 wheelhouse 均可）；
+- 已按 DSH 文档配置一个可回复的 Actor 模型 provider。
+
+> **重要：Builder 需要独立的模型凭据。** Loom 不会让 Actor 代替 Builder 工作。默认 Builder/Review Gate 使用 `deepseek-official` 的 `deepseek-v4-flash`，启动 DSH 的同一个终端必须设置 `DSH_META_API_KEY`（也兼容 `DEEPSEEK_API_KEY`）。如果改用 Terra，设置 `LOOM_TERRA_API_KEY` 和 `LOOM_TERRA_BASE_URL`，并将 Loom 的 `llm.provider` 配置为 `gpt-5.6-terra`。没有 Builder key 时，Web 仍可启动、状态工具仍可用，但 `meta_auto` 不会产生真实 proposal。密钥只放环境变量或 DSH 的本地凭据配置，不要写入 README、patch、workspace 或提交记录。
+
+Windows PowerShell 示例（请替换为你自己的 key，不要把真实 key 提交）：
+
+```powershell
+$env:DSH_META_API_KEY = "<你的 Builder DeepSeek key>"
+```
+
+mini-SWE 2.4.6 本体已经随 Loom npm 包提供，不要求你的镜像存在 `mini-swe-agent`。`setup` 会先检查 Python 版本，再创建隔离 venv；不会改 DSH checkout、生产 profile 或凭据。
+
+### Windows · PowerShell
+
+在 **DeepSeek Harness 源码根目录** 打开 PowerShell。先确认 DSH 本身能启动；Loom 不负责修复 DSH checkout 的构建或 `tsx/esm` 环境问题：
+
+```powershell
+pnpm dsh web
+```
+
+确认 DSH 可用后，按顺序执行：
+
+```powershell
+# 1. 安装 Loom 到独立 profile。
+pnpm dsh plugin --profile loom add dsh-loom@1.2.15
+
+# 2. 检查插件确已加载；输出中必须有 meta-validate。
+pnpm dsh --profile loom --dump-config
+
+# 3. 安装 mini-SWE runtime；显式指定目录，后面的 patch 路径与 setup 输出完全一致。
+$runtimeRoot = Join-Path $env:USERPROFILE ".dsh\meta-validate\runtime\mini-swe-agent-2.4.6"
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\loom\node_modules\dsh-loom\bin\setup-windows.ps1" --runtime-root $runtimeRoot
+
+# 4. 使用同一个绝对 patch 路径启动；不要改成相对 .meta-validate 路径。
+$patch = Join-Path $runtimeRoot "loom-active-evolution.patch.yml"
+pnpm dsh --profile loom --patch $patch
+```
+
+此路径专门处理 Windows 的 `Scripts\\python.exe` / `Scripts\\mini.exe` 和 profile bin 不进入 PowerShell `PATH` 的差异。若 `python --version` 小于 3.10 或找不到命令，安装 Python 3.10+ 并勾选 **Add Python to PATH**；conda/pyenv 用户可先设置 `$env:PYTHON` 为所需解释器。
+
+如果你是在 DSH **源码 checkout** 中运行这段命令，`setup-windows.ps1` 会自动扫描 CLI 的完整宿主依赖闭包（包括开发依赖和 peer），并修复缺失的 `%USERPROFILE%\\.dsh\\profiles\\node_modules` 链接，不需要逐个处理 `dsh-tools` 或 `directory-picker-native`。若源码包缺少 `lib`，setup 会自动依次运行 DSH 根目录的 `pnpm run build:lib:host` 和 `pnpm run build:lib:client`；构建失败会在 setup 阶段明确退出，不会生成无效 patch。不会覆盖真实目录或删除用户文件。
+
+### macOS · Terminal
+
+在 **DeepSeek Harness 源码根目录** 打开 Terminal，先确认 `pnpm dsh web` 能启动，再按顺序执行：
 
 ```bash
-# 方式一：npm 包
-dsh plugin --profile headless add dsh-loom@1.0.2
+# 1. 安装 Loom 并检查 profile。
+pnpm dsh plugin --profile loom add dsh-loom@1.2.15
+pnpm dsh --profile loom --dump-config
 
-# 方式二：GitHub 仓库
-dsh plugin --profile headless add "github:ZTCNO0NE/dsh-loom#main"
+# 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
+runtime_root="$HOME/.dsh/meta-validate/runtime/mini-swe-agent-2.4.6"
+sh "$HOME/.dsh/profiles/loom/node_modules/dsh-loom/bin/setup-unix.sh" --runtime-root "$runtime_root"
 
-dsh --profile headless --dump-config   # 确认组合树
+# 3. 启动 Web 对话。
+pnpm dsh --profile loom --patch "$runtime_root/loom-active-evolution.patch.yml"
 ```
 
-想从源码构建？`npm install && npm run build`，然后 `dsh plugin add ./dsh-loom`（或 tarball：`dsh plugin add ./dsh-loom-1.0.2.tgz`）。
+需要 `python3 --version` 为 3.10 或更高；没有时可使用 `brew install python`。Apple Silicon 与 Intel 均使用这一段命令。
 
-**2. 开一个开关**（后台优化，不卡对话）
+### Linux · shell
 
-```yaml
-config:
-  mode: apply
-  scheduled: true
-  notify:
-    start: true
-    progress: true
-    completion: true
+在 **DeepSeek Harness 源码根目录** 打开 shell，先确认 `pnpm dsh web` 能启动，再按顺序执行：
+
+```bash
+# 1. 安装 Loom 并检查 profile。
+pnpm dsh plugin --profile loom add dsh-loom@1.2.15
+pnpm dsh --profile loom --dump-config
+
+# 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
+runtime_root="$HOME/.dsh/meta-validate/runtime/mini-swe-agent-2.4.6"
+sh "$HOME/.dsh/profiles/loom/node_modules/dsh-loom/bin/setup-unix.sh" --runtime-root "$runtime_root"
+
+# 3. 启动 Web 对话。
+pnpm dsh --profile loom --patch "$runtime_root/loom-active-evolution.patch.yml"
 ```
 
-**3. 正常用，然后问它**
+需要 `python3 >= 3.10` 和 venv 支持；Debian/Ubuntu 常用 `sudo apt install python3-venv`。若内部镜像缺少某个依赖，可临时切换官方 PyPI 或配置 wheelhouse。
 
-- 什么都不用做：它失败多了、卡住了、或你纠正过它，它自己会变强；
-- 想知道进度：直接问它"优化进度怎么样？"；
-- 优化完成：它告诉你"reload 后生效"，重启/刷新会话即可用上。
+### 全局 CLI
+
+仅当 `dsh` 和 `dsh-loom` 都已在系统 `PATH` 时使用这段：
+
+```bash
+dsh-loom setup
+dsh-loom start --profile loom web
+```
+
+从 GitHub 或 Loom 源码安装属于开发者路径；请改用 `pnpm dsh plugin --profile loom add "github:ZTCNO0NE/dsh-loom#main"` 或本地绝对路径，随后仍按你的系统块执行 setup 和启动。
+
+> **当前发布边界：** runtime bootstrap 已可分发；Config、Skill 两条 Actor 主入口真机 E2E 仍是产品发布门槛。在这两条记录补齐前，主动演进是可安装的预览控制面，不把它宣传为已发布体验。
+
+### 3. 第一次真实对话：从需求到任务卡
+
+进入 DSH 对话后，按这个顺序说：
+
+1. “给我加一个复盘失败的技能。”
+2. Actor 应展示候选、风险、验收方式和“是否执行”的任务卡；此时尚未改动。
+3. 你回复：“确认执行。”
+4. Actor 通知任务进入隔离实现；你可以继续对话。
+5. 你问：“演进进度怎么样？”只会看到关键状态。
+6. 裁决结束后，Actor 明确说明“已生效 / 未生效 / 未完成”；排队时可说“先取消”，终态后可说“按刚才的任务重做”。
+
+建议在本节预留三张真实截图：
+
+<!-- screenshot placeholder: 图 B — 用户提出 refine 请求，Actor 返回 waiting_for_confirmation 任务卡 -->
+<!-- screenshot placeholder: 图 C — 用户确认后，Actor 返回 implementing / verifying 的关键进度 -->
+<!-- screenshot placeholder: 图 D — Gate verdict、是否生效和回滚边界的最终任务卡 -->
+
+这三张图应遮掉 API key、绝对路径、workspace 内容和隐藏推理；保留用户原话、候选摘要、确认、阶段与最终 verdict 即可。
 
 > 改进模型 / 监督员默认走 DeepSeek V4 Flash（`DEEPSEEK_API_KEY`）；你的 agent 可以接本地模型（示例 qwen3.6-27b）。换模型类案例需要目标模型在 agent 的路由上可用。
 
@@ -323,8 +459,10 @@ config:
 
 ## 设计边界（诚实声明）
 
-- **v1 只允许改 `config | tool | skill`**，loop 层锁定（设计项，不是缺陷）；
+- **v1.2 产品轨只承诺用户主动委托的 `config | skill`**；tool、模型调度、自动触发与长期自治仍是路线图；
+- **Loop 是研究轨**：Loom 负责证据、澄清与编排，mini-SWE 负责目标明确的实现；复杂重构要在固定 3×3 immutable matrix 中公开成功和失败，达阈值前不写成可用能力；
 - 核验器是**准入门槛**，上线后真实运行 + 观察才是最终裁判；
+- 性能只限已测的 scheduler prepare-overlap workload；不能由此推导 Actor 整体加速；
 - 验证成本 = 一轮完整任务 token，用最小回归集控制；
 - 行为类技能（如"编辑后必须验证"）是"显著提高概率"而非确定性保证，验收用 2 次尝试兜底；
 - dsh v0.1 是 developer preview，接口会变；所有注入点收敛在 `src/index.ts`。

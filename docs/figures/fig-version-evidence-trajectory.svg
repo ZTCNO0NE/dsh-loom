@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="610" viewBox="0 0 1200 610" role="img" aria-labelledby="title desc">
+  <title id="title">dsh-loom 版本迭代与证据轨迹</title><desc id="desc">上图显示工程回归测试从 101 到 133 到 231；下图显示 Loop 研究主张因 Loom-native 未收敛而下调，再因 mini-SWE 完整真机链路而上升。下图不是性能评分。</desc>
+  <style>text{font-family:Inter,Arial,"Microsoft YaHei",sans-serif;fill:#172033}.h{font-size:27px;font-weight:700}.sub{font-size:15px;fill:#526074}.label{font-size:15px;font-weight:700}.note{font-size:13px;fill:#526074}.axis{stroke:#cbd5e1;stroke-width:2}.grid{stroke:#e2e8f0;stroke-width:1}.line{fill:none;stroke:#2563eb;stroke-width:4}.evidence{fill:none;stroke:#7c3aed;stroke-width:4}.point{fill:#fff;stroke-width:4}</style>
+  <rect width="1200" height="610" fill="#f8fafc"/><text x="55" y="53" class="h">版本迭代：测试回归与证据主张分开看</text><text x="55" y="80" class="sub">向下＝收回未被证据支撑的发布主张；向上＝新增独立、可复核的闭环证据。不是整体性能曲线。</text>
+  <text x="55" y="125" class="label">工程回归：全量测试数量</text><line x1="110" y1="250" x2="1120" y2="250" class="axis"/><line x1="110" y1="145" x2="110" y2="250" class="axis"/>
+  <line x1="110" y1="205" x2="1120" y2="205" class="grid"/><line x1="110" y1="165" x2="1120" y2="165" class="grid"/>
+  <path d="M230 203 L570 178 L930 148" class="line"/><circle cx="230" cy="203" r="7" class="point" stroke="#2563eb"/><circle cx="570" cy="178" r="7" class="point" stroke="#2563eb"/><circle cx="930" cy="148" r="7" class="point" stroke="#2563eb"/>
+  <text x="194" y="192" class="label">101</text><text x="534" y="167" class="label">133</text><text x="894" y="137" class="label">231</text><text x="184" y="274" class="note">v1.0 历史闭环</text><text x="502" y="274" class="note">v1.1 协议/回注</text><text x="858" y="274" class="note">v1.2 双轨控制面</text>
+  <text x="55" y="335" class="label">Loop 研究：可发布主张的证据强度（定性，不是性能分数）</text><line x1="110" y1="540" x2="1120" y2="540" class="axis"/><line x1="110" y1="360" x2="110" y2="540" class="axis"/><line x1="110" y1="450" x2="1120" y2="450" class="grid"/>
+  <path d="M210 430 L485 405 L720 500 L1010 390" class="evidence"/><circle cx="210" cy="430" r="7" class="point" stroke="#7c3aed"/><circle cx="485" cy="405" r="7" class="point" stroke="#7c3aed"/><circle cx="720" cy="500" r="7" class="point" stroke="#ef4444"/><circle cx="1010" cy="390" r="7" class="point" stroke="#16a34a"/>
+  <text x="150" y="462" class="note">v1.0：loop 锁定</text><text x="408" y="382" class="note">v1.1：契约/冷安装</text><text x="641" y="525" class="note">native 复杂重构未收敛</text><text x="927" y="368" class="note">mini-SWE：一条真机闭环</text>
+  <text x="150" y="579" class="sub">下一门槛：三类真实任务 × 3 个 immutable run；每层至少 1/3 完整闭环，且公开全部失败轨迹。</text>
+</svg>

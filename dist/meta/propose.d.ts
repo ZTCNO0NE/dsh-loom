@@ -18,6 +18,13 @@ export interface LlmCallOptions {
     temperature?: number;
     maxTokens?: number;
     sessionId?: string;
+    nativeTools?: LlmNativeTool[];
+}
+/** Provider-neutral OpenAI function declaration; execution remains Kernel-owned. */
+export interface LlmNativeTool {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
 }
 export interface LlmStreamLike {
     stream(options: LlmCallOptions): AsyncIterable<LlmChunk>;

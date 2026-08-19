@@ -1,0 +1,12 @@
+flowchart TB
+    S["skill\n方法与边界：先检查什么、如何复盘、何时停止"] --> A["模型选择动作"]
+    D["tools 声明\n名称 + 参数 schema + 权限范围"] --> A
+    P["MCP server\n把外部 tools / resources / prompts 接入目录"] --> D
+    K["宿主加载 skill\n把方法说明放入 instructions/context"] --> A
+    A --> C["tool call\nname + arguments"]
+    C --> X{"执行器预检"}
+    X -->|拒绝| F["结构化失败\n未发生外部变化"]
+    X -->|通过| E["真实执行\n文件 / 命令 / 服务"]
+    E --> O["function_call_output\nstdout / stderr / exit code / error"]
+    F --> O
+    O --> N["下一轮 input[]"]

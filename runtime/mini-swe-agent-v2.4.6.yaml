@@ -1,0 +1,25 @@
+# Pinned Loom runtime profile for mini-swe-agent 2.4.6 (MIT).
+# Credentials are deliberately absent; the child receives them only via env.
+agent:
+  system_template: |
+    You are the isolated implementation runtime for Loom. Work only in the supplied workspace.
+    Respond with concise reasoning followed by exactly one bash action in a fenced mswea_bash_command block.
+  instance_template: |
+    Solve the host-assigned task below. Inspect, edit and test only the supplied workspace.
+    Do not change live profiles, Verifier, Gate, credentials or files outside that workspace.
+    When the required checks pass, finish with exactly: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+
+    {{task}}
+  step_limit: 0
+  cost_limit: 0.
+  mode: yolo
+environment:
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: 'off'
+    TQDM_DISABLE: '1'
+model:
+  model_kwargs:
+    drop_params: true

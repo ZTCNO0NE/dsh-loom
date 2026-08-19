@@ -1,74 +1,44 @@
-# 使用指南（3 分钟上手）
+# 使用指南：v1.2 用户主动演进
 
-你只需要做三件事：**装插件 → 开一个开关 → 正常用你的 agent**。其他全自动。
+> 旧版“装上后什么都不用做，系统会自己变强”的说明已不适用。v1.2 首发是用户主动委托：Actor 提出候选，用户确认后才进入隔离实现与独立裁决。
 
-## 第 1 步：安装（一条命令）
+完整的从 DSH 启动、安装 Loom、加载 profile 到第一次任务卡对话的步骤在 [README 快速开始](../README.md#快速开始从零启动-dsh到第一次任务卡)。本文补充边界和排错原则。
 
-```bash
-cd dsh-meta-validate
-npm install && npm run build
-dsh plugin --profile demo add ./dsh-meta-validate
-```
+## 两个可用阶段
 
-## 第 2 步：开"后台优化"（一个开关）
+### Builder 凭据（与 Actor 分开）
 
-在插件配置里加一行 `scheduled: true`，其余用默认：
+Actor 的 provider 配置不等于 Builder 已配置。Loom 默认用独立的 DeepSeek V4 Flash 做 Builder/Review Gate；启动 DSH 的同一终端需要 `DSH_META_API_KEY`（兼容 `DEEPSEEK_API_KEY`）。Terra 使用 `LOOM_TERRA_API_KEY`/`LOOM_TERRA_BASE_URL` 并配置 provider 为 `gpt-5.6-terra`。缺少该凭据时，状态和历史查询仍可用，但 `meta_auto` 不会进入真实 Builder proposal。
 
-```yaml
-- insert:
-    - id: meta-validate
-      name: '/你的路径/dsh-meta-validate/dist/index.js'
-      config:
-        mode: apply
-        scheduled: true
-        notify:
-          start: true
-          progress: true
-          completion: true
-```
+| 阶段 | 你能做什么 | 不会发生什么 |
+| --- | --- | --- |
+| DSH + Loom 已安装 | 启动 DSH，检查 `meta-validate` bundle 是否在 `--dump-config` 中 | 不会自动修改配置、技能或模型 |
+| 宿主启用 `activeEvolution` | 对话中委托明确的 Config / Skill 演进 | 用户不接触内部 ID、路径、before snapshot；运行中的 pass 不强杀 |
 
-开了这个开关后，优化在后台静默进行，**不会卡住你和 agent 的对话**。
+`activeEvolution` 默认关闭。`dsh-loom setup` 会在用户自己的 Loom 状态目录安装固定版本 mini-SWE；mini-SWE 的 MIT 源码包已随 npm 包 vendored，不依赖你的 PyPI 镜像提供该项目本体。普通用户不需要填写 executable/config path。首次安装仍需要 **Python >= 3.10**、可访问的依赖包源和已配置的 DSH 模型 provider；CLI 会在创建 venv 前验证 Python 版本。高级部署仍可显式覆盖路径或使用 `--source`。
 
-## 第 3 步：正常用，然后问它
+bootstrap 会自动适配平台：Linux/macOS 使用 `python3` 与 `bin/mini`，Windows 使用 `python` 与 `Scripts\mini.exe`。包内提供 `bin/setup-windows.ps1` 和 `bin/setup-unix.sh`；快速开始已按 Windows、macOS、Linux 分块，避免要求用户猜测 PATH、shell 或 venv 布局。失败时 CLI 会打印具体的 Python/venv/pip 错误。
 
-- **什么都不用做**：agent 连续失败、卡住、或你纠正过它，它就会自己变强；
-- **想知道进度**：直接问它——“优化进度怎么样？”；
-- **想知道学了什么**：问它——“你最近学到了什么？”；
-- **优化完成时**：它告诉你“reload 后生效”——重启/刷新会话即可用上新能力。
+从 DSH 源码 checkout 使用 `pnpm dsh` 的用户，应先单独确认 DSH 自身可以启动，再执行 README 对应平台的 profile wrapper。请显式传入 `--runtime-root` 并把 setup 输出的绝对 patch 路径原样传给 `pnpm dsh --profile loom --patch ...`。不要写成 `pnpm dsh web --profile loom ...`：`web` 是固定的 `--profile web` 别名，不能与 Loom profile 叠加；也不要把 `%USERPROFILE%\\.dsh\\meta-validate` 误写成当前工作目录的相对 `.meta-validate`，更不要把 Loom 安装问题与 DSH 的 `tsx/esm` 或构建产物问题混为一谈。
 
-你不需要认识任何工具名、配置文件或内部术语。
+源码 checkout 还有一个宿主依赖差异：部分 DSH 运行时包位于 CLI 的开发依赖，旧版 profile fallback 不会自动链接它们。Loom setup 会在当前目录（或 `DSH_ROOT`）识别 DSH 源码，扫描完整依赖闭包并一次性建立安全的 host fallback；缺少 `lib` 时自动执行 DSH 根目录 `pnpm run build:lib:host` 与 `pnpm run build:lib:client`。已发布的 DSH CLI 不需要这一步。
 
-想 3 分钟亲历一遍"失败 → 看着它长 → 重试成功 → 成长报告"？跑 `npm run try`（仓库内体验脚本），跑完自动生成一份可分享的 HTML 成长报告。
+## 一次对话的正确预期
 
-装了 npm 包后在任何机器上：`dsh-loom try`（同样流程，自动生成报告）。
-
-## 你能看到什么
-
-| 时机 | 你会看到 |
-| --- | --- |
-| 优化开始时 | 一条轻提示：“正在后台优化…完成会通知你，不影响当前对话。” |
-| 优化超过 1 分钟 | “优化仍在进行…你可以继续。” |
-| 优化完成时 | “优化完成：改了什么。reload 后生效。” |
-| 任何时候 | 直接问 agent，它实时查状态回答你 |
-
-## 可选微调（不调也能用）
-
-```yaml
-notify:
-  start: true        # 开始优化时提示
-  progress: true     # 超时未完成时提示
-  progressAfterMs: 60000   # 超过 60 秒算"还在优化"
-  completion: true   # 完成时提示
-```
-
-不想被任何通知打扰？把三个都设 `false`，需要时问 agent 就行。
+1. 用户提出明确需求，例如“给我加一个复盘失败的技能”。
+2. Actor 返回候选、风险、验收方式与确认问题；此时没有改动。
+3. 用户确认后，mini-SWE 在隔离 workspace 实现候选。
+4. Verifier/Gate 独立决定已生效、未生效或未完成；Actor 只解释真实状态。
+5. queued 阶段可取消；running/verifying 不强杀；终态重做永远是新的 immutable plan。
 
 ## 常见问题
 
-- **优化会卡住我的对话吗？** 不会，后台跑。
-- **改坏了怎么办？** 自动回滚，每次改动都有 before/after 记录。
-- **换模型、改配置要我自己动手吗？** 不用，它自己设计并安装，你 reload 生效。
-- **我想关掉它？** 把插件从 profile 里移除即可。
-- **它会不会乱改？** 所有改动先经过独立核验器在隔离环境验证，不通过不会安装。
+- **为什么安装后没有自动进化？** 这是 v1.2 的安全边界。默认关闭、用户确认、独立验证，避免旧版“自动自治”叙事掩盖未完成的产品验证。
+- **为什么没有 `planId`？** 它是内部不可变记录；用户只通过任务卡确认、查看状态、取消或重做。
+- **为什么需要 mini-SWE runtime？** Loom 负责证据、会话与裁决编排；明确实现 pass 交给成熟 coding runtime。运行一次 `dsh-loom setup` 即可安装；没有 runtime 不会回退为直接修改宿主。
+- **成功是否表示 Agent 整体变强？** 不表示。已安装只表示该候选通过了本次独立验证。性能主张仅限已测 scheduler prepare-overlap workload。
+- **如何关闭？** 不启用 `activeEvolution`，或从 profile 移除 Loom bundle。不要删除已产生的审计记录来伪造不存在过的任务。
 
-> 想看它到底怎么工作的？跑 `npm run fromzero:all`、`npm run supervisor-swap-demo`、`npm run scheduled-notify-demo`，每个都是真实模型跑通并留档。
+## 截图发布清单
+
+发布真实 CLI / Web 对话截图时，只保留用户原话、任务卡、确认、关键阶段和最终 verdict。遮掉 API key、绝对路径、workspace 内容、before snapshot、内部 ID、模型隐藏推理和完整工具日志。

@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -23,6 +23,21 @@ describe('mini-SWE runtime adapter', () => {
       task: 'test',
     })
     expect(result).toMatchObject({ submitted: true, modelTurns: 1, toolSteps: 1 })
+  })
+
+  it('passes an explicit host-owned runtime environment without persisting it in the trajectory', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-mini-swe-env-'))
+    const executable = join(root, 'mini-fixture.sh')
+    const observed = join(root, 'observed.txt')
+    writeFileSync(executable, `#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = "-o" ]; then out="$2"; shift; fi; shift; done\nprintf '%s' "$MINI_SWE_HOST_ONLY" > ${JSON.stringify(observed)}\nprintf '{"messages":[{"role":"exit","extra":{"exit_status":"Submitted"}}]}' > "$out"\n`, 'utf8')
+    chmodSync(executable, 0o755)
+    const result = await runMiniSwe({
+      executable, configPath: 'ignored', baselineRoot: 'ignored', dependencySnapshot: 'ignored', model: 'test', stepLimit: 3, timeoutMs: 5_000,
+      workspace: root, trajectoryPath: join(root, 'trajectory.json'), task: 'test', env: { MINI_SWE_HOST_ONLY: 'host-value' },
+    })
+    expect(result.submitted).toBe(true)
+    expect(readFileSync(observed, 'utf8')).toBe('host-value')
+    expect(readFileSync(join(root, 'trajectory.json'), 'utf8')).not.toContain('host-value')
   })
 
   it('does not treat an incomplete durable trajectory as a submission', async () => {

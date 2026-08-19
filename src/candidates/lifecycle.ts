@@ -49,3 +49,37 @@ export async function installVerifiedCandidate(
   if (!record || record.state !== 'approved') throw new Error(`candidate is not gate-approved: ${candidateId}`)
   return coldInstallCandidate(registry, candidateId, ops)
 }
+
+export interface InstalledCandidateRollbackOps {
+  snapshot(): Record<string, unknown>
+  rollback(manifest: Parameters<LoopInstallOps['install']>[0]): void | Promise<void>
+}
+
+/** Gate-owned removal of a previously installed cold profile. */
+export async function rollbackInstalledCandidate(
+  registry: CandidateRegistry,
+  candidateId: string,
+  ops: InstalledCandidateRollbackOps,
+): Promise<LoopInstallReport> {
+  const record = registry.get(candidateId)
+  if (!record || record.state !== 'installed') throw new Error(`candidate is not installed: ${candidateId}`)
+  const before = ops.snapshot()
+  try {
+    await ops.rollback(record.manifest)
+  } catch (error) {
+    throw new Error(`gate rollback failed: ${String(error)}`)
+  }
+  const after = ops.snapshot()
+  const report: LoopInstallReport = {
+    schemaVersion: 1,
+    candidateId,
+    state: 'rolled_back',
+    before,
+    after,
+    smoke: { passed: true, checks: [{ name: 'rollback-remove', passed: true }] },
+    rollback: { attempted: true, succeeded: true },
+    createdAt: new Date().toISOString(),
+  }
+  registry.recordRollback(report)
+  return report
+}
