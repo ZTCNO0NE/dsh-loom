@@ -88,6 +88,8 @@ loop-evolution
 
 Builder → Actor 通过独立的 append-only event log 返回可审计摘要：生命周期、工具完成/失败、`message_ack`（对某条用户消息的理解、下一步或问题）、`builder_update`（阶段进度/追问）和 proposal 草案。事件不记录或展示隐藏思维链；Actor 负责将技术事件翻译为用户可理解的进度，并把用户答复以新的 inbox 消息送回 Builder。
 
+Builder 需要方向时可发出结构化 `request_input`：`kind=clarification|choice|verification`，并携带 options、whyNow、evidenceRefs 和 blocking。它不是固定命令白名单，而是把 Builder 的未决问题、证据和用户选择持久化；Actor 负责解释和转交，用户回复仍以 raw text 回传。只有在 Builder 已完成可行的 L0/L1 探索且无法由现有事实判定时，才应使用 `kind=verification` 请求高成本真实验证。
+
 生命周期控制也由 Kernel 持有：`pause` 在下一安全回合前阻断模型，`cancel` 将 run 置为不可提交的终态；Builder 可用 `request_input` 写入 typed `needs_input` 事件，Actor 再向用户追问。`resume` 不重放可能已经产生外部副作用的模型/工具回合，而是创建带 `previousRun` hash 清单的新 immutable attempt，并重新进入原来的 Builder → verifier → gate 流程。job 状态会如实记录 `paused`、`waiting_for_input`、`cancelled` 或 `finished`，宿主重载后没有进程内 runner 时要求 Actor 重新委托，避免伪造续跑。
 
 ```text
@@ -115,6 +117,47 @@ verifier / regression / gate    → Builder 只读
 这不是以减少信息或减少选择来防错；Builder 可以尝试任意合理方案。约束只落在“谁能让目标状态生效”：只有独立 verifier 通过、gate 执行的 proposal 才能修改 live target。
 
 若部署在尚未物理隔离的开发阶段，必须如实标记为 **trusted exploration mode**：一旦向 Builder 暴露能直接写 live target 的原始宿主 shell，就无法声称“所有目标写入均经过 verifier”。该模式可用于能力验证，但不是可证明的治理边界。正式治理模式需把目标写入收敛到 proposal/gate 路径；这不限制 Builder 的全局读取、工作区写入或探索深度。
+
+### 5.1 Compact progress state
+
+完整 journal 是证据账本，不是每轮的默认上下文。每个 run 同时维护公开、可审计的
+`state/progress-state.json`，只保存下一回合恢复所需的最小工作记忆：
+
+```json
+{
+  "schemaVersion": 1,
+  "version": 7,
+  "state": "exploring",
+  "phase": "hypothesizing",
+  "objective": "用户原始目标或 actor 交付目标",
+  "hypothesis": "可证伪的改进假设",
+  "known": ["已确认的事实"],
+  "unknowns": ["仍无法由现有证据判定的点"],
+  "nextIntent": "下一步要取得什么新证据",
+  "lastAction": "write_world_model",
+  "lastObservationHash": "…",
+  "unchangedReadStreak": 0,
+  "pendingMessageIds": [],
+  "updatedAt": "…"
+}
+```
+
+Kernel 在状态迁移、工具反馈、Actor 消息、world-model/plan 写入和提交边界自动更新
+`state/phase/lastAction/unchangedReadStreak/pendingMessageIds`；Builder 通过公开的
+`write_world_model`、`write_plan` 声明 `hypothesis/known/unknowns/nextIntent`。Driver 每轮
+优先注入这份小表和少量最新反馈，原始 actor、target、journal、历史资产只保留 hash/入口，
+由 Builder 按需调用 `read_input`、`read_journal` 或全局读取工具。这样减少上下文回放和重复
+读取，但不减少 Builder 的可读范围，也不把状态表当作强制路线或隐藏思维链；verifier/gate
+仍只读取冻结证据和 proposal。
+
+### 5.2 可替换 coding execution runtime
+
+Kernel 不要求 Builder 的每一步都来自 JSON tool micro-loop。`loom-native` 保持现有 Driver；
+显式配置的 `mini-swe` runtime 由宿主先以 pinned commit 物化一次性 workspace，并提供独立的、
+自包含 dependency snapshot。它只在该 workspace 内读、写、运行命令；其 durable trajectory 的
+`Submitted` 终态是“请求冻结”的信号，不是批准。Kernel 仅从自己保存的 before/after bytes 编译
+proposal，再交给 Importer、verifier 与 gate。缺少 executable、runtime config、baseline 或
+dependency snapshot 必须在启动时失败，不能退回 live workspace 或隐式使用宿主依赖。
 
 ## 6. 迁移顺序
 

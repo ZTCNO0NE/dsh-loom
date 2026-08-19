@@ -185,7 +185,10 @@ export async function adjudicatePatch(
       failureSummary: applied.error ?? 'gate/install rejected and rolled back',
       validatedAt: new Date().toISOString(),
     }
-    return { kind: 'patch', verdict: 'rejected', patch, report: rejected, reason: rejected.failureSummary }
+    // A rejected Gate result is still essential evidence: callers must be
+    // able to distinguish verifier rejection from an attempted install that
+    // was atomically rolled back after its cold smoke.
+    return { kind: 'patch', verdict: 'rejected', patch, report: rejected, applied, reason: rejected.failureSummary }
   }
   await deps.onApplied?.({ patch, report, applied })
   return { kind: 'patch', verdict: 'approved', patch, report, applied }

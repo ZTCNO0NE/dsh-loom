@@ -19,6 +19,18 @@ function decisionsLlm(decisions: unknown[], prompts: string[] = []): LlmStreamLi
 }
 
 describe('BuilderDriver', () => {
+  it('accepts a native function-call decision envelope through the same tool allowlist', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-native-envelope-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    const outcome = await new BuilderDriver({
+      llm: decisionsLlm([{ decision: { kind: 'tool', action: { tool: 'write_submission', proposal: { capability: 'patch-evolution' } } } }, { decision: { kind: 'submit' } }]),
+      provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task', compactPrompt: true,
+    }).run(kernel, run.id)
+    expect(outcome.state).toBe('submitted')
+    expect(kernel.proposal(run.id)).toEqual({ capability: 'patch-evolution' })
+  })
+
   it('feeds core-authored tool results back through a bounded multi-step run before submit', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-'))
     const kernel = new BuilderKernel(root, 's')
@@ -101,6 +113,8 @@ describe('BuilderDriver', () => {
       provider: 'test', model: 'test', systemPrompt: 'flow and communication', taskContext: 'short task', compactPrompt: true,
     }).run(kernel, run.id)
     expect(prompts[0]).toContain('Durable context index')
+    expect(prompts[0]).toContain('Task objective and entry points')
+    expect(prompts[0]).toContain('short task')
     expect(prompts[0]).toContain('context_index')
     expect(prompts[0]).not.toContain('veryLargeRawContext')
     expect(prompts[0]).not.toContain('x'.repeat(1_000))
@@ -391,6 +405,27 @@ describe('BuilderDriver', () => {
     expect(outcome.state).toBe('submitted')
     expect(kernel.load(run.id).state).toBe('submitted')
     expect(prompts[1]).toContain('Oracle evidence satisfied')
+  })
+
+  it('preserves a marker-verified candidate by refusing further exploration until it is finalized', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-completion-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: { objective: 'fix candidate' }, targetBefore: {} })
+    const outcome = await new BuilderDriver({
+      llm: decisionsLlm([
+        { kind: 'tool', action: { name: 'run_workspace_command', command: 'node', args: ['-e', "console.log('strict-order-pass')"] } },
+        { kind: 'tool', action: { name: 'write_workspace_file', path: 'actor-loop.mjs', content: 'broken overwrite' } },
+        { kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'patch-evolution', patch: { id: 'p1', targetId: 'x', targetKind: 'config', config: {}, dependencies: [], rationale: 'r', expectedOutcome: 'o', version: 1, createdAt: new Date().toISOString() } } } },
+        { kind: 'submit' },
+      ]),
+      provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task', compactPrompt: true,
+      successMarker: 'strict-order-pass',
+    }).run(kernel, run.id)
+    expect(outcome).toMatchObject({ state: 'submitted', modelTurns: 4 })
+    expect(() => readFileSync(join(builderRunPaths(root, 's', run.id).workspace, 'actor-loop.mjs'), 'utf8')).toThrow()
+    expect(kernel.context(run.id).journal).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'error', action: 'write_workspace_file', error: expect.stringContaining('verified completion requires') }),
+    ]))
   })
 
   it('surfaces a rejected submit (missing draft) as visible feedback and recovers', async () => {

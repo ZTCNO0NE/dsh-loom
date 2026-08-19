@@ -1,10 +1,86 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { BuilderKernel, builderRunPaths } from '../builder/kernel.js'
 
 describe('BuilderKernel', () => {
+  it('compiles a loop proposal from Kernel-captured workspace edits without model-supplied hashes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-compile-loop-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ kind: 'loop_candidate', actor: {}, targetBefore: { baselineCommit: 'a'.repeat(40) } })
+    const workspace = builderRunPaths(root, 's', run.id).workspace
+    const source = join(workspace, 'packages/core/agent-loop/src/tool-calls.ts')
+    mkdirSync(join(source, '..'), { recursive: true })
+    writeFileSync(source, 'export const before = true\n', 'utf8')
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_workspace_file', path: 'packages/core/agent-loop/src/tool-calls.ts', content: 'export const after = true\n' } })
+    const result = kernel.decide(run.id, { kind: 'tool', action: { name: 'compile_loop_submission', rationale: 'tested scheduler change' } })
+    expect(result).toMatchObject({ written: 'compiled_loop_submission', edits: 1 })
+    kernel.decide(run.id, { kind: 'submit' })
+    const proposal = kernel.proposal(run.id)
+    expect(proposal).toMatchObject({
+      capability: 'loop-evolution',
+      payload: { source: { kind: 'builder-generated', baseline: { ref: 'a'.repeat(40) }, edits: [expect.objectContaining({ path: 'packages/core/agent-loop/src/tool-calls.ts', after: 'export const after = true\n' })] } },
+    })
+    const edit = (proposal?.payload as { source: { edits: Array<{ beforeHash: string }> } }).source.edits[0]
+    expect(edit?.beforeHash).toBe(createHash('sha256').update('export const before = true\n', 'utf8').digest('hex'))
+  })
+
+  it('does not compile a loop proposal from a runtime change outside the permitted loop source', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-compile-scope-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ kind: 'loop_candidate', actor: {}, targetBefore: { baselineCommit: 'a'.repeat(40) } })
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_workspace_file', path: 'README.md', content: 'runtime attempted an out-of-scope change\n' } })
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'compile_loop_submission', rationale: 'do not accept unrelated output' } }))
+      .toThrow(/at least one captured agent-loop source edit/)
+    expect(kernel.proposal(run.id)).toBeNull()
+  })
+
+  it('compiles one host-materialized config edit into the existing patch-evolution envelope', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-compile-config-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ kind: 'patch', actor: {}, targetBefore: { targetId: 'agent-default-model', targetKind: 'config' } })
+    const workspace = builderRunPaths(root, 's', run.id).workspace
+    mkdirSync(workspace, { recursive: true })
+    writeFileSync(join(workspace, 'actor-config.json'), JSON.stringify({ model: 'before' }), 'utf8')
+    kernel.captureWorkspaceBaseline(run.id, 'actor-config.json')
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_workspace_file', path: 'actor-config.json', content: JSON.stringify({ model: 'after' }) } })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'compile_config_submission', rationale: 'switch to the verified model', expectedOutcome: 'actor can resolve the configured model' } }))
+      .toMatchObject({ written: 'compiled_config_submission', targetId: 'agent-default-model' })
+    kernel.decide(run.id, { kind: 'submit' })
+    expect(kernel.proposal(run.id)).toMatchObject({
+      capability: 'patch-evolution',
+      payload: { targetId: 'agent-default-model', targetKind: 'config', action: 'update', config: { model: 'after' } },
+    })
+  })
+
+  it('compiles a bounded host-materialized tool bundle into the existing patch-evolution envelope', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-compile-module-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ kind: 'patch', actor: {}, targetBefore: { targetId: 'echo-tool', targetName: 'echo-tool', targetKind: 'tool', moduleEntry: 'index.mjs' } })
+    const workspace = builderRunPaths(root, 's', run.id).workspace
+    mkdirSync(join(workspace, 'actor-module'), { recursive: true })
+    writeFileSync(join(workspace, 'actor-module', 'index.mjs'), 'export const name = "echo-tool"\n', 'utf8')
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'compile_module_submission', rationale: 'add an isolated echo tool' } }))
+      .toMatchObject({ written: 'compiled_module_submission', targetId: 'echo-tool' })
+    kernel.decide(run.id, { kind: 'submit' })
+    expect(kernel.proposal(run.id)).toMatchObject({
+      capability: 'patch-evolution',
+      payload: { action: 'insert', targetId: 'echo-tool', targetKind: 'tool', module: { entry: 'index.mjs', files: [expect.objectContaining({ path: 'index.mjs' })] } },
+    })
+  })
+
+  it('accepts one host-assigned run id for a pre-materialized workspace and rejects collisions', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-host-id-'))
+    const kernel = new BuilderKernel(root, 's')
+    const id = 'builder-1234567890-deadbeef'
+    const run = kernel.create({ id, actor: { sourcePath: join(builderRunPaths(root, 's', id).workspace, 'source.ts') }, targetBefore: {} })
+    expect(run.id).toBe(id)
+    expect(() => kernel.create({ id, actor: {}, targetBefore: {} })).toThrow(/already exists/)
+    expect(() => kernel.create({ id: 'outside-workspace', actor: {}, targetBefore: {} })).toThrow(/invalid builder run id/)
+  })
+
   it('persists immutable inputs and core-authored tool feedback for a resumed run', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-'))
     const kernel = new BuilderKernel(root, 's')
@@ -115,6 +191,19 @@ describe('BuilderKernel', () => {
     expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })).toMatchObject({
       observation: { newInformation: false, unchangedSinceSeq: expect.any(Number) },
     })
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'write_workspace_file', path: 'evidence/fact.txt', content: 'workspace fact\n' } })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: 'evidence/fact.txt' } })).toMatchObject({
+      path: join(builderRunPaths(root, 's', run.id).workspace, 'evidence/fact.txt'), content: 'workspace fact\n',
+    })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'apply_workspace_patch', patch: [
+      'diff --git a/evidence/fact.txt b/evidence/fact.txt',
+      '--- a/evidence/fact.txt', '+++ b/evidence/fact.txt', '@@ -1 +1 @@', '-workspace fact', '+patched fact', '',
+    ].join('\n') } })).toMatchObject({ applied: true, files: ['evidence/fact.txt'] })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_workspace_file', path: 'evidence/fact.txt' } }))
+      .toMatchObject({ content: 'patched fact\n' })
+    const missing = join(root, 'missing-source.ts')
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: missing } }))
+      .toThrow(`file is unavailable: ${missing}`)
     expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'list_directory', path: root } })).toMatchObject({
       entries: expect.arrayContaining([expect.objectContaining({ name: 'actor-state.txt', type: 'file' })]),
     })
@@ -162,6 +251,20 @@ describe('BuilderKernel', () => {
     })
     expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'read_input', document: 'provenance' } })).toMatchObject({
       value: expect.objectContaining({ artifacts: expect.arrayContaining([expect.objectContaining({ path: candidate })]) }),
+    })
+  })
+
+  it('resolves a relative search root from the Builder workspace', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-search-root-'))
+    const kernel = new BuilderKernel(root, 's')
+    const run = kernel.create({ actor: {}, targetBefore: {} })
+    const workspace = builderRunPaths(root, 's', run.id).workspace
+    mkdirSync(join(workspace, 'src'), { recursive: true })
+    const source = join(workspace, 'src', 'candidate.ts')
+    writeFileSync(source, 'export const marker = "workspace-search"\n', 'utf8')
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'search_text', query: 'workspace-search', roots: ['src'] } })).toMatchObject({
+      roots: [join(workspace, 'src')],
+      matches: expect.arrayContaining([expect.objectContaining({ path: source })]),
     })
   })
 

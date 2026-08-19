@@ -1,9 +1,11 @@
-import { mkdtempSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { LoopCandidateGateway } from '../candidates/gateway.js'
-import { BuilderKernel } from '../builder/kernel.js'
+import { CandidateImporter } from '../candidates/index.js'
+import { BuilderKernel, builderRunPaths } from '../builder/kernel.js'
 
 function submittingLlm() {
   let wroteSubmission = false
@@ -25,7 +27,106 @@ function submittingLlm() {
   }
 }
 
+function diagnosisThenImplementationLlm() {
+  let wroteSubmission = false
+  return {
+    async *stream(options: { prompt: string }) {
+      const pendingMatch = options.prompt.match(/"pendingMessageIds":\[([^\]]*)\]/)
+      const pendingIds = pendingMatch?.[1]
+        ? (JSON.parse(`[${pendingMatch[1]}]`) as unknown[]).filter((value): value is string => typeof value === 'string')
+        : []
+      const diagnosis = options.prompt.includes('当前是 diagnosis-first 对齐 pass')
+      const decision = pendingIds[0]
+        ? { kind: 'tool', action: { name: 'acknowledge_message', messageId: pendingIds[0], status: 'accepted', understanding: diagnosis ? '先基于证据整理方向，再交由用户选择。' : '已收到用户选择：优先收敛，同时保留安全契约。', nextAction: diagnosis ? '写入诊断报告。' : '冻结一个可验证的候选。' } }
+        : diagnosis
+          ? {
+              kind: 'tool', action: { name: 'write_diagnosis_report', report: {
+                observations: [{ fact: 'existing evidence contains both convergence and task-success signals', evidenceRefs: ['evidence/manifest.json'] }],
+                directions: [
+                  { id: 'convergence', goal: 'reduce repeated unchanged exploration', evidenceRefs: ['evidence/manifest.json'], unknowns: ['whether it is the user priority'], cost: 'low' },
+                  { id: 'task-success', goal: 'target a concrete actor failure first', evidenceRefs: ['evidence/manifest.json'], unknowns: ['which workload matters most'], cost: 'medium' },
+                ],
+                question: {
+                  question: 'Which improvement direction should the implementation pass take?',
+                  options: [{ id: 'convergence', label: 'Convergence' }, { id: 'task-success', label: 'Task success' }],
+                  whyNow: 'The evidence does not establish which product tradeoff the user prefers.',
+                  evidenceRefs: ['evidence/manifest.json'],
+                },
+              } },
+            }
+          : !wroteSubmission
+            ? (wroteSubmission = true, { kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'patch-evolution', payload: { id: 'implementation-p1', targetId: 'candidate', targetKind: 'config', config: {}, dependencies: [], rationale: 'selected direction', expectedOutcome: 'test-only frozen proposal', version: 1, createdAt: new Date().toISOString() } } } })
+            : { kind: 'submit' }
+      yield { kind: 'block-start', type: 'text' }
+      yield { kind: 'text-delta', text: JSON.stringify(decision) }
+      yield { kind: 'block-end' }
+    },
+  }
+}
+
+function miniRuntimeFixture(root: string, program: string) {
+  const baseline = join(root, 'baseline')
+  const snapshot = join(root, 'dependency-snapshot')
+  const executable = join(root, 'mini-fixture.sh')
+  mkdirSync(join(baseline, 'packages/core/agent-loop/src'), { recursive: true })
+  mkdirSync(snapshot, { recursive: true })
+  writeFileSync(join(baseline, 'packages/core/agent-loop/src/tool-calls.ts'), 'export const baseline = true\n', 'utf8')
+  execFileSync('git', ['init'], { cwd: baseline, stdio: 'ignore' })
+  execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: baseline })
+  execFileSync('git', ['config', 'user.name', 'test'], { cwd: baseline })
+  execFileSync('git', ['add', '.'], { cwd: baseline })
+  execFileSync('git', ['commit', '-m', 'baseline'], { cwd: baseline, stdio: 'ignore' })
+  writeFileSync(executable, program, 'utf8')
+  chmodSync(executable, 0o755)
+  return { baseline, snapshot, executable }
+}
+
+function importerFixture(root: string) {
+  const baseline = join(root, 'importer-baseline')
+  const dependencies = join(root, 'importer-dependencies')
+  const executable = join(root, 'mini-adversarial.sh')
+  mkdirSync(join(baseline, 'packages/core/agent-loop/src'), { recursive: true })
+  mkdirSync(join(baseline, 'packages/core/agent-loop/lib'), { recursive: true })
+  writeFileSync(join(baseline, 'packages/core/agent-loop/src/tool-calls.ts'), 'export const baseline = true\n')
+  writeFileSync(join(baseline, 'packages/core/agent-loop/lib/index.js'), 'export const entry = true\n')
+  writeFileSync(join(baseline, 'packages/core/agent-loop/package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-agent-loop' }))
+  writeFileSync(join(baseline, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n')
+  execFileSync('git', ['init'], { cwd: baseline, stdio: 'ignore' })
+  execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: baseline })
+  execFileSync('git', ['config', 'user.name', 'test'], { cwd: baseline })
+  execFileSync('git', ['add', '.'], { cwd: baseline }); execFileSync('git', ['commit', '-m', 'baseline'], { cwd: baseline, stdio: 'ignore' })
+  mkdirSync(join(dependencies, 'node_modules', '.bin'), { recursive: true }); mkdirSync(join(dependencies, 'vendor'), { recursive: true })
+  for (const tool of ['tsc', 'tsdown']) {
+    const script = join(dependencies, 'node_modules', '.bin', tool)
+    writeFileSync(script, '#!/bin/sh\nexit 0\n'); chmodSync(script, 0o755)
+  }
+  writeFileSync(executable, '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do\n  if [ "$1" = "-o" ]; then out="$2"; shift 2; continue; fi\n  if [ "$1" = "-c" ] && case "$2" in environment.cwd=*) true;; *) false;; esac; then work="${2#environment.cwd=}"; shift 2; continue; fi\n  shift\ndone\nprintf \'export const candidate = true\\n\' > "$work/packages/core/agent-loop/src/tool-calls.ts"\nprintf \'runtime scratch\' > "$work/outside.txt"\nprintf \'{"messages":[{"role":"assistant","tool_calls":[{}]},{"role":"exit","extra":{"exit_status":"Submitted"}}]}\' > "$out"\n', 'utf8')
+  chmodSync(executable, 0o755)
+  return { baseline, dependencies, executable }
+}
+
 describe('loop candidate gateway', () => {
+  it('keeps an adversarial runtime outside write out of the archive→Importer candidate artifact', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-adversarial-importer-'))
+    const fixture = importerFixture(root)
+    const gateway = new LoopCandidateGateway({
+      enabled: true, root, sessionId: 's', provider: 'test', model: 'test', maxTokens: 128, llm: submittingLlm(), executionRuntime: 'mini-swe',
+      miniSwe: { executable: fixture.executable, configPath: 'ignored', baselineRoot: fixture.baseline, dependencySnapshot: join(fixture.dependencies, 'node_modules'), stepLimit: 3, timeoutMs: 5_000 },
+    })
+    const started = gateway.startExploration('make one permitted loop change')
+    if (!started.accepted) throw new Error('test requires enabled exploration')
+    const result = await gateway.runExploration(started.runId)
+    if (!result.proposal) throw new Error('test requires a compiler proposal')
+    const loop = result.proposal.payload as { source: { kind: 'builder-generated'; baseline: { uri: string; ref: string }; edits: Array<{ path: string; beforeHash: string; after: string }> }; packageName: string; packagePath: string; entry: string; config: Record<string, unknown>; expectedOutcome: string; capabilities: string[] }
+    const manifest = new CandidateImporter({ root, baselineRoot: fixture.baseline, buildDependencyRoot: join(fixture.dependencies, 'node_modules') }).acquire({
+      id: 'adversarial-loop', displayName: 'adversarial fixture', source: loop.source, packageName: loop.packageName, packagePath: loop.packagePath,
+      entry: loop.entry, build: { method: 'sandboxed-dsh-workspace' }, config: loop.config, expectedOutcome: loop.expectedOutcome, capabilities: loop.capabilities,
+    })
+    expect(readFileSync(join(manifest.artifactPath, 'src', 'tool-calls.ts'), 'utf8')).toContain('candidate = true')
+    expect(existsSync(join(manifest.artifactPath, '..', '..', '..', 'outside.txt'))).toBe(false)
+    expect(existsSync(join(builderRunPaths(root, 's:loop-exploration', started.runId).workspace, 'outside.txt'))).toBe(true)
+  })
+
   it('does not invoke a builder or write a registry while disabled', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-gateway-'))
     const gateway = new LoopCandidateGateway({
@@ -55,6 +156,76 @@ describe('loop candidate gateway', () => {
     const result = await gateway.explore('换一个更强 loop 基座', { activeActorRequest: true })
     expect(result).toMatchObject({ mode: 'exploration', state: 'aborted', accepted: false })
     expect(result.runId).toMatch(/^builder-/)
+  })
+
+  it('aborts a mini-SWE execution with a malformed trajectory without creating a proposal', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-gateway-mini-malformed-'))
+    const mini = miniRuntimeFixture(root, '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = "-o" ]; then out="$2"; shift; fi; shift; done\nprintf \'not-json\' > "$out"\n')
+    const gateway = new LoopCandidateGateway({
+      enabled: true, root, sessionId: 's', provider: 'test', model: 'test', maxTokens: 128,
+      llm: submittingLlm(), executionRuntime: 'mini-swe',
+      miniSwe: { executable: mini.executable, configPath: 'ignored', baselineRoot: mini.baseline, dependencySnapshot: mini.snapshot, stepLimit: 3, timeoutMs: 5_000 },
+    })
+    const started = gateway.startExploration('修复真实 loop')
+    if (!started.accepted) throw new Error('test requires enabled exploration')
+    await expect(gateway.runExploration(started.runId)).resolves.toMatchObject({ state: 'aborted', accepted: false, reason: expect.stringContaining('trajectory is unreadable') })
+    expect(gateway.explorationStatus(started.runId)).toMatchObject({ state: 'aborted', proposal: { available: false } })
+  })
+
+  it('re-materializes a fresh mini-SWE workspace after verifier rejection so the next immutable run can execute', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-gateway-mini-reopen-'))
+    const mini = miniRuntimeFixture(root, '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do\n  if [ "$1" = "-o" ]; then out="$2"; shift 2; continue; fi\n  if [ "$1" = "-c" ] && case "$2" in environment.cwd=*) true;; *) false;; esac; then work="${2#environment.cwd=}"; shift 2; continue; fi\n  shift\ndone\nprintf \'export const candidate = true\\n\' > "$work/packages/core/agent-loop/src/tool-calls.ts"\nprintf \'{"messages":[{"role":"assistant","tool_calls":[{}]},{"role":"exit","extra":{"exit_status":"Submitted"}}]}\' > "$out"\n')
+    const gateway = new LoopCandidateGateway({
+      enabled: true, root, sessionId: 's', provider: 'test', model: 'test', maxTokens: 128,
+      llm: submittingLlm(), executionRuntime: 'mini-swe',
+      miniSwe: { executable: mini.executable, configPath: 'ignored', baselineRoot: mini.baseline, dependencySnapshot: mini.snapshot, stepLimit: 3, timeoutMs: 5_000 },
+    })
+    const started = gateway.startExploration('修复真实 loop')
+    if (!started.accepted) throw new Error('test requires enabled exploration')
+    await expect(gateway.runExploration(started.runId)).resolves.toMatchObject({ state: 'submitted', accepted: true })
+    const nextRunId = gateway.reopenExploration(started.runId, { verdict: 'rejected', failureSummary: 'independent verifier rejected first attempt' })
+    const nextWorkspace = builderRunPaths(root, 's:loop-exploration', nextRunId).workspace
+    expect(readFileSync(join(nextWorkspace, 'packages/core/agent-loop/src/tool-calls.ts'), 'utf8')).toContain('baseline = true')
+    await expect(gateway.runExploration(nextRunId)).resolves.toMatchObject({ state: 'submitted', accepted: true })
+  })
+
+  it('uses diagnosis-first to obtain a user choice, then resumes as a fresh immutable implementation pass', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-gateway-diagnosis-first-'))
+    const gateway = new LoopCandidateGateway({
+      enabled: true, diagnosisFirst: true, root, sessionId: 's', provider: 'test', model: 'test', maxTokens: 128,
+      builderMaxModelTurns: 8, builderMaxToolSteps: 12, llm: diagnosisThenImplementationLlm(),
+    })
+    const diagnosis = gateway.startExploration('让 actor 的 loop 更智能', { evidencePack: { manifestPath: 'evidence/manifest.json' } })
+    if (!diagnosis.accepted) throw new Error('test requires enabled exploration')
+    expect(diagnosis).toMatchObject({ passMode: 'diagnosis' })
+    await expect(gateway.runExploration(diagnosis.runId)).resolves.toMatchObject({ state: 'waiting_for_input', passMode: 'diagnosis' })
+    expect(gateway.explorationStatus(diagnosis.runId)).toMatchObject({
+      passMode: 'diagnosis', state: 'waiting_for_input',
+      diagnosisReport: {
+        available: true,
+        directions: expect.arrayContaining([expect.objectContaining({ id: 'convergence' })]),
+        question: expect.objectContaining({ options: expect.arrayContaining([expect.objectContaining({ id: 'convergence' })]) }),
+      },
+    })
+
+    gateway.messageExploration(diagnosis.runId, {
+      rawUserText: '选择 convergence：先减少重复读取，但不能牺牲安全契约。',
+      actorMemo: 'selectedOption=convergence；保持安全边界。',
+      idempotencyKey: 'choice-1',
+    })
+    const implementation = gateway.resumeExploration(diagnosis.runId)
+    if (!implementation.accepted) throw new Error('test requires enabled exploration')
+    expect(implementation).toMatchObject({ passMode: 'implementation' })
+    expect(implementation.runId).not.toBe(diagnosis.runId)
+
+    const kernel = new BuilderKernel(root, 's:loop-exploration')
+    const next = kernel.context(implementation.runId)
+    expect(next.run).toMatchObject({ mode: 'implementation', lineageId: kernel.load(diagnosis.runId).lineageId, parentRunId: diagnosis.runId })
+    expect(next.input.previousRun).toMatchObject({ runId: diagnosis.runId })
+    expect(next.messages.map((message) => message.rawUserText)).toContain('选择 convergence：先减少重复读取，但不能牺牲安全契约。')
+
+    await expect(gateway.runExploration(implementation.runId)).resolves.toMatchObject({ state: 'submitted', passMode: 'implementation' })
+    expect(gateway.explorationStatus(implementation.runId)).toMatchObject({ proposal: { available: true } })
   })
 
   it('creates an actor exploration before background execution and exposes its durable inbox to the next Builder turn', async () => {

@@ -310,8 +310,11 @@ if (regression) {
         ...(profileHome ? { DSH_LOOP_PROFILE_HOME: profileHome } : {}),
       },
     })
-    report.C6 = out.toString().includes('allPass') ? 'pass' : 'fail'
-    report.C6Output = out.toString().slice(-300)
+    const output = out.toString()
+    // `fromzero-verify` always prints an `allPass` field, including when one
+    // of L1–L5 failed.  Presence is not evidence of a successful regression.
+    report.C6 = /"allPass"\s*:\s*true\b/.test(output) ? 'pass' : 'fail'
+    report.C6Output = output.slice(-300)
   } catch (error) {
     report.C6 = 'fail'
     report.C6Output = String(error.stdout ?? error.stderr ?? error.message ?? '').slice(-300)

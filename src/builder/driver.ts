@@ -1,4 +1,4 @@
-import type { LlmStreamLike } from '../meta/propose.js'
+import type { LlmNativeTool, LlmStreamLike } from '../meta/propose.js'
 import { BUILDER_BASE_TOOLS, BuilderCapabilityRegistry, type BuilderCapabilityPlugin } from './capabilities.js'
 import { BuilderKernel, type BuilderDecision, type BuilderToolAction } from './kernel.js'
 import { sha256 } from '../protocol/index.js'
@@ -114,6 +114,17 @@ export class BuilderDriver {
       }
       modelTurns++
       try {
+        if (context.run.state === 'ready_to_submit' && !isCompletionDecision(decision)) {
+          if (decision.kind === 'tool') toolSteps++
+          // A target-declared success marker is not an ordinary phase hint:
+          // it is the terminal success condition of this bounded pass. Keep
+          // the already-verified workspace intact while the Builder writes
+          // its proposal. A new experiment belongs in a fresh immutable run.
+          const action = decision.kind === 'tool' ? decision.action.name : decision.kind
+          const error = new Error(`verified completion requires write_submission, submit, or abort; ${action} would mutate or extend a completed pass`)
+          kernel.append(runId, 'error', action, undefined, error)
+          continue
+        }
         const result = kernel.decide(runId, decision)
         if (decision.kind === 'tool') toolSteps++
         if (decision.kind === 'tool' && this.options.successMarker
@@ -121,6 +132,11 @@ export class BuilderDriver {
           && result && typeof result === 'object' && (result as { exitCode?: unknown }).exitCode === 0
           && `${String((result as { stdout?: unknown }).stdout ?? '')}${String((result as { stderr?: unknown }).stderr ?? '')}`.includes(this.options.successMarker)) {
           kernel.transition(runId, 'ready_to_submit')
+          kernel.requireSubmissionDraft(runId)
+        }
+        if (decision.kind === 'tool' && (decision.action.name === 'write_workspace_file' || decision.action.name === 'apply_workspace_patch')
+          && this.options.successMarker && kernel.load(runId).state !== 'submitted') {
+          kernel.requireEvidence(runId)
         }
         if (decision.kind === 'submit') {
           return { state: 'submitted', runId, proposal: kernel.proposal(runId) ?? undefined, modelTurns, toolSteps }
@@ -137,6 +153,12 @@ export class BuilderDriver {
         // A rejected decision (e.g. submit without a draft) is feedback, not
         // a silent failure: journal it so the next prompt can correct it.
         kernel.append(runId, 'error', decision.kind === 'tool' ? decision.action.name : decision.kind, undefined, error)
+        if (decision.kind === 'submit' && String(error).includes('requires a proposal draft')) {
+          // Do not leave the model to infer the recovery from a prose error.
+          // Turn this common delivery mistake into a durable kernel obligation;
+          // the next turn can only satisfy it with write_submission.
+          kernel.requireSubmissionDraft(runId)
+        }
       }
     }
 
@@ -175,7 +197,7 @@ export class BuilderDriver {
     const capabilities = new BuilderCapabilityRegistry().registerAll(this.options.capabilities ?? [])
     const progressBanner = this.options.progressBanner ? deriveProgressBanner(context.journal) : ''
     const evidenceSatisfied = context.run.state === 'ready_to_submit' && this.options.successMarker
-      ? `Oracle evidence satisfied (marker=${this.options.successMarker}). The remaining valid actions are write_submission then submit, or abort with a reason; do not keep exploring.`
+      ? `Oracle evidence satisfied (marker=${this.options.successMarker}). The Kernel now accepts only write_submission, submit, or abort for this pass; do not keep exploring or edit the verified workspace.`
       : ''
     if (this.options.compactPrompt) return this.compactPrompt(context, pendingMessages, progressBanner)
     return [
@@ -256,7 +278,7 @@ export class BuilderDriver {
     const capabilities = new BuilderCapabilityRegistry().registerAll(this.options.capabilities ?? [])
     const latestFeedback = [...context.journal].reverse().find((entry) => entry.kind === 'tool' || entry.kind === 'error')
     const evidenceSatisfied = context.run.state === 'ready_to_submit' && this.options.successMarker
-      ? `Oracle evidence satisfied (marker=${this.options.successMarker}). The remaining valid actions are write_submission then submit, or abort with a reason; do not keep exploring.`
+      ? `Oracle evidence satisfied (marker=${this.options.successMarker}). The Kernel now accepts only write_submission, submit, or abort for this pass; do not keep exploring or edit the verified workspace.`
       : ''
     const previousAttempt = context.input.previousAttempt as Record<string, unknown> | null | undefined
     const rejectionFacts = previousAttempt && (previousAttempt.verdict === 'rejected' || previousAttempt.failureSummary)
@@ -273,12 +295,13 @@ export class BuilderDriver {
       'tool read_journal {limit}',
       'tool read_file {path}; list_directory {path}; inspect_file {path}; trace_artifact {artifact: id|absolutePath}',
       'tool search_text {query,roots?: string[],maxResults?: number}; it is read-only argv search, never write a shell pipeline into command.',
-      'tool read_workspace_file {path}; write_workspace_file {path,content}; run_workspace_command {command,args?: string[],timeoutMs?: number}',
+      'tool read_workspace_file {path}; write_workspace_file {path,content}; apply_workspace_patch {patch: unified git diff}; run_workspace_command {command,args?: string[],timeoutMs?: number}',
       'tool acknowledge_message {messageId,status,understanding,nextAction?}',
       'tool request_input {kind?,question,options?,whyNow?,evidenceRefs?,blocking?}',
       'tool write_world_model/write_plan {value:{hypothesis:"...",nextIntent:"..."}}',
       'tool invoke_capability {capability,tool,input}',
-      diagnosisMode ? 'tool write_diagnosis_report {report}; then wait for user direction' : 'tool write_submission {proposal}; then submit when evidence is sufficient',
+      diagnosisMode ? 'tool write_diagnosis_report {report}; then wait for user direction' : 'tool write_submission {proposal}; for a workspace loop edit use compile_loop_submission {rationale,expectedOutcome?}; then submit when evidence is sufficient',
+      !diagnosisMode ? 'For a verified workspace loop candidate, call compile_loop_submission after tests pass; Kernel derives exact beforeHash/after edits from the captured workspace, then call submit.' : '',
       'decision is exactly one JSON object: {kind:"tool",action} | {kind:"continue",summary} | {kind:"submit"} | {kind:"abort",reason}',
       'Tool arguments are direct fields of action; action.input and action.params are equivalent wrappers.',
     ].join('\n')
@@ -288,6 +311,7 @@ export class BuilderDriver {
       diagnosisMode ? 'This is an explicitly requested diagnosis pass: report 1–3 evidence-backed directions and a blocking question, then wait. No proposal.' : 'This is an implementation pass: form a falsifiable hypothesis, use evidence/simulation as useful, and submit only a concrete auditable proposal.',
       `Tools (minimal protocol):\n${protocol}`,
       `Capability ids (metadata is available from the context index): ${capabilities.list().map((capability) => capability.id).join(', ') || '(none)'}`,
+      `Task objective and entry points (authoritative handoff):\n${this.options.taskContext.slice(0, 1_800)}`,
       `Durable context index: ${String(context.contextIndex.path ?? 'read_input(context_index)')}. It contains every durable file address and a one-line content overview. Read it first only when you need to locate evidence; then read only the necessary entry.`,
       rejectionFacts
         ? `Previous attempt rejection (facts, not pointers): ${JSON.stringify(rejectionFacts)}. Your job is to fix the candidate so it satisfies the oracle at oraclePath: read previousCandidatePath (read-only), make the minimal correction, and write the repaired file to YOUR OWN workspace using a relative path such as actor-loop.mjs (the workspace tool is already rooted at your workspace; do not write to previousCandidatePath), run the oracle command against your workspace file, then write_submission and submit.`
@@ -298,6 +322,11 @@ export class BuilderDriver {
       `Recent feedback index: ${JSON.stringify(context.journal.slice(-4).map((entry) => ({ seq: entry.seq, kind: entry.kind, action: entry.action, resultHash: entry.result ? sha256(entry.result) : undefined, error: entry.error })))}`,
       latestFeedback
         ? `Latest observable tool feedback (compressed; use it before rereading): ${JSON.stringify({ seq: latestFeedback.seq, kind: latestFeedback.kind, action: latestFeedback.action, ...(latestFeedback.result ? { result: compactPromptValue(latestFeedback.result, 1_200) } : {}), ...(latestFeedback.error ? { error: latestFeedback.error.slice(0, 800) } : {}) })}`
+        : '',
+      context.progressState.progressRequirement === 'write_submission'
+        ? 'KERNEL DELIVERY CHECKPOINT: the last submit was rejected because no proposal draft exists. The only valid next tool is write_submission with the concrete verified candidate proposal; do not call submit again until it succeeds.'
+        : context.progressState.progressRequirement === 'produce_evidence'
+          ? 'KERNEL EVIDENCE CHECKPOINT: the candidate was edited. The next tool must produce fresh evidence (run the oracle/simulation or request verification) before another edit or submission.'
         : '',
       'The immutable actor snapshot and Actor messages are the task handoff. Read actor only if the pending message, provenance graph and index do not identify the next evidence. Treat errors as pointers into artifacts: trace → inspect → change/test, not as an instruction to repeat a broad read.',
       evidenceSatisfied,
@@ -315,6 +344,7 @@ export class BuilderDriver {
       temperature: 0,
       maxTokens: this.options.maxTokens ?? 6000,
       sessionId: `${runId}:builder`,
+      nativeTools: builderNativeTools(),
     })) {
       if (chunk.kind === 'block-start') inText = chunk.type === 'text'
       else if (chunk.kind === 'block-end') inText = false
@@ -329,7 +359,14 @@ export class BuilderDriver {
     if (!json) throw new Error(`no JSON decision: ${JSON.stringify(text.slice(0, 200))}`)
     const value = JSON.parse(json) as unknown
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('decision must be an object')
-    const decision = value as Record<string, unknown>
+    // Native function-call providers commonly wrap the protocol object in a
+    // single named argument (`{ decision: {...} }`).  Unwrapping this transport
+    // envelope does not broaden the decision grammar: the exact same strict
+    // allowlist below validates the inner object.
+    const rawValue = value as Record<string, unknown>
+    const decision: Record<string, unknown> = isObject(rawValue.decision)
+      ? rawValue.decision
+      : rawValue
     const kind = decision.kind
     // Required fields are strict; harmless model-added metadata is ignored so
     // the micro-loop can recover from ordinary JSON wrappers without narrowing
@@ -381,6 +418,7 @@ export class BuilderDriver {
     if (action.name === 'inspect_file' && typeof action.path === 'string') return { name: action.name, path: action.path }
     if (action.name === 'trace_artifact' && typeof action.artifact === 'string') return { name: action.name, artifact: action.artifact }
     if (action.name === 'write_workspace_file' && typeof action.path === 'string' && typeof action.content === 'string') return { name: action.name, path: action.path, content: action.content }
+    if (action.name === 'apply_workspace_patch' && typeof action.patch === 'string') return { name: action.name, patch: action.patch }
     if (action.name === 'read_workspace_file' && typeof action.path === 'string') return { name: action.name, path: action.path }
     if (action.name === 'run_workspace_command' && typeof action.command === 'string' && (action.args === undefined || (Array.isArray(action.args) && action.args.every(arg => typeof arg === 'string')))
       && (action.timeoutMs === undefined || typeof action.timeoutMs === 'number')) {
@@ -428,11 +466,51 @@ export class BuilderDriver {
       return { name: action.name, capability: action.capability, tool: action.tool, input: action.input }
     }
     if (action.name === 'write_submission' && isObject(action.proposal)) return { name: action.name, proposal: action.proposal }
+    if (action.name === 'compile_loop_submission' && typeof action.rationale === 'string' && (action.expectedOutcome === undefined || typeof action.expectedOutcome === 'string')) return { name: action.name, rationale: action.rationale, ...(action.expectedOutcome === undefined ? {} : { expectedOutcome: action.expectedOutcome }) }
+    if (action.name === 'compile_config_submission' && typeof action.rationale === 'string' && (action.expectedOutcome === undefined || typeof action.expectedOutcome === 'string')) return { name: action.name, rationale: action.rationale, ...(action.expectedOutcome === undefined ? {} : { expectedOutcome: action.expectedOutcome }) }
+    if (action.name === 'compile_module_submission' && typeof action.rationale === 'string' && (action.expectedOutcome === undefined || typeof action.expectedOutcome === 'string')) return { name: action.name, rationale: action.rationale, ...(action.expectedOutcome === undefined ? {} : { expectedOutcome: action.expectedOutcome }) }
     if (action.name === 'write_candidate_draft' && isObject(action.proposal)) return { name: action.name, proposal: action.proposal }
     if (action.name === 'inspect_staging' && typeof action.path === 'string') return { name: action.name, path: action.path }
     if (action.name === 'preflight_staging_entry' && typeof action.entry === 'string') return { name: action.name, entry: action.entry }
     throw new Error(`tool is not allowlisted: ${String(action.name)}`)
   }
+}
+
+/** Native schemas make the existing Kernel tools visible as callable actions.
+ * They are transport metadata only; parseTool remains the sole allowlist. */
+function builderNativeTools(): LlmNativeTool[] {
+  const object = (properties: Record<string, unknown> = {}, required: string[] = []): Record<string, unknown> => ({ type: 'object', properties, ...(required.length ? { required } : {}), additionalProperties: false })
+  const string = { type: 'string' }
+  const number = { type: 'number' }
+  const value = { type: 'object' }
+  const tools: Array<[string, string, Record<string, unknown>]> = [
+    ['read_input', 'Read one immutable Builder input document.', object({ document: { type: 'string', enum: ['actor', 'target_before', 'context_index', 'provenance', 'progress_state', 'world_model', 'plan', 'previous_attempt', 'previous_run'] } }, ['document'])],
+    ['read_journal', 'Read recent durable Builder tool and decision feedback.', object({ limit: number })],
+    ['read_file', 'Read a global or workspace-relative file.', object({ path: string }, ['path'])],
+    ['list_directory', 'List a global or workspace-relative directory.', object({ path: string }, ['path'])],
+    ['search_text', 'Search text under workspace-relative or absolute roots.', object({ query: string, roots: { type: 'array', items: string }, maxResults: number }, ['query'])],
+    ['inspect_file', 'Inspect exports, imports and preview of a source file.', object({ path: string }, ['path'])],
+    ['trace_artifact', 'Trace a factual provenance artifact.', object({ artifact: string }, ['artifact'])],
+    ['write_world_model', 'Persist an explicit hypothesis and next intent.', object({ value }, ['value'])],
+    ['write_plan', 'Persist a public plan.', object({ value }, ['value'])],
+    ['write_diagnosis_report', 'Persist diagnosis directions and user choice.', object({ report: value }, ['report'])],
+    ['write_workspace_file', 'Write a file in this immutable Builder workspace.', object({ path: string, content: string }, ['path', 'content'])],
+    ['apply_workspace_patch', 'Apply a unified diff in this Builder workspace.', object({ patch: string }, ['patch'])],
+    ['read_workspace_file', 'Read a file in this Builder workspace.', object({ path: string }, ['path'])],
+    ['run_workspace_command', 'Run an argv command in this Builder workspace.', object({ command: string, args: { type: 'array', items: string }, timeoutMs: number }, ['command'])],
+    ['acknowledge_message', 'Acknowledge an Actor message.', object({ messageId: string, status: string, understanding: string, nextAction: string, question: string }, ['messageId', 'status', 'understanding'])],
+    ['publish_progress', 'Publish a user-visible progress summary.', object({ summary: string, phase: string, question: string }, ['summary'])],
+    ['request_input', 'Request clarification, choice, or verification from Actor.', object({ kind: string, question: string, context: string, whyNow: string, evidenceRefs: { type: 'array', items: string }, blocking: { type: 'boolean' }, options: { type: 'array', items: value } }, ['question'])],
+    ['invoke_capability', 'Invoke a registered capability tool.', object({ capability: string, tool: string, input: value }, ['capability', 'tool', 'input'])],
+    ['write_submission', 'Freeze a concrete proposal draft.', object({ proposal: value }, ['proposal'])],
+    ['compile_loop_submission', 'Compile a loop proposal from captured workspace edits.', object({ rationale: string, expectedOutcome: string }, ['rationale'])],
+    ['compile_config_submission', 'Compile a config proposal from the host-materialized actor-config.json edit.', object({ rationale: string, expectedOutcome: string }, ['rationale'])],
+    ['compile_module_submission', 'Compile a tool or skill proposal from the host-materialized actor-module bundle.', object({ rationale: string, expectedOutcome: string }, ['rationale'])],
+    ['submit', 'Submit the already frozen proposal.', object()],
+    ['continue', 'Continue after tool feedback.', object({ summary: string }, ['summary'])],
+    ['abort', 'Abort with an evidence-backed reason.', object({ reason: string }, ['reason'])],
+  ]
+  return tools.map(([name, description, parameters]) => ({ name, description, parameters }))
 }
 
 /**
@@ -466,6 +544,13 @@ function firstCompleteJsonObject(text: string): string | null {
     }
   }
   return null
+}
+
+/** A verified bounded pass may only finalize its already-tested candidate. */
+function isCompletionDecision(decision: BuilderDecision): boolean {
+  return decision.kind === 'submit'
+    || decision.kind === 'abort'
+    || (decision.kind === 'tool' && decision.action.name === 'write_submission')
 }
 
 function deriveProgressBanner(journal: ReturnType<BuilderKernel['context']>['journal']): string {

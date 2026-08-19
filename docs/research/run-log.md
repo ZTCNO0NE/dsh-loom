@@ -602,3 +602,191 @@
 - 记录：`run-records/2026-08-19-builder-oracle-rejection-{facts,workspace-map,workspace-normalize,ready-to-submit,submit-feedback}-convergence-rate-official.json`；成功样本 `submit-feedback` 记录 attempt 2。
 - 结论：收敛从 0% 到 33% 的增益来自"问题可见 + 工具路径语义正确 + 失败反馈可见"，不是提升回合数；剩余失败模式是模型在成功信号后仍继续编辑/覆盖候选，提交纪律仍不稳。
 - 结论等级：**causal-navigation-visible / causal-navigation-adoption-failed / repair-convergence=0%**。下一诊断应分析完整 provenance artifact 的表征与 runtime action surface；不要再以更多 token、更多尾插文本或更多固定 checkpoint 掩盖该失败。
+
+### 2026-08-19 marker-verified completion guard
+
+- 观察到的唯一剩余失败是：Builder 在自己的 `run_workspace_command` 已返回 `strict-order-pass` 后，仍继续写 workspace，最终覆盖已通过的候选。该状态不是普通探索 phase，而是任务声明的可验证成功条件。
+- 实装：`successMarker` 命中使 run 进入 `ready_to_submit` 后，Driver 只接受 `write_submission`、`submit` 或 `abort`。其它决策不执行、不触碰 workspace，并以可见 journal error 回给模型；若要继续实验须从外部开 fresh immutable run。这样既保留成功前的开放探索，也不让成功后无意义编辑破坏已验证内容。
+- 确定性回归：`oracle pass → write_workspace_file(overwrite) → write_submission → submit`，覆盖写被拒、proposal 正常冻结并提交；全量 `npm test` **178/178**、`npm run check`、`npm run build`、`git diff --check` 通过。
+- 官方 record：`/chenzute/dsh-src/eval/run-records/2026-08-19-builder-oracle-rejection-completion-guard-convergence-rate-official.json`，同配置 fresh 3 pass。它不构成 Guard A/B：三次都没有发生“Builder 自己看到 marker 成功后还要编辑”的前提；第 3 次的成功仅由外部 post-check 发现，Builder 没有运行 oracle。因此记录的 0/3 不可解释为 Guard 无效或模型回归，停止继续请求，待采用强制触发该前提的独立对照。
+
+### 2026-08-19 real-agent-loop-delayed-prepare-builder-observation
+
+- 新的真实 package oracle 在每个 immutable Builder workspace 物化完整 pinned DSH archive，并注入 `packages/core/agent-loop/tests/delayed-prepare-regression.spec.ts`。基线确定性失败：`parallel-safe prepares were serialized: second prepare never entered before the first gate`。这不是 fixture candidate；目标与候选范围仍是实际 `packages/core/agent-loop/src/tool-calls.ts`。
+- 修复两个工具语义缺口：host-assigned、格式受校验的 run id 让 immutable actor/target 从创建时绑定自身 workspace；`read_file`/`list_directory` 的相对路径现在以 Builder workspace 为基准，绝对路径仍保持全局只读。工具失败回显已包含已解析路径。
+- 新增通用 `apply_workspace_patch`：Builder 可用 standard unified git diff 对其 workspace 做最小改动；Kernel 先 `git apply --check` 后应用，并保存 patch snapshot。它不是领域路线或 verifier 绕过，proposal 仍须经现有 importer/verifier/gate。
+- 官方 V4 Flash fresh run `builder-1787101206741-969c8d44`（30 turns/30 tools）仍 **未编辑、未 proposal、未进入 verifier/gate**。它复现 delayed-prepare failure、读到真实 workspace 源码并写出正确假设，却持续在 regression command 与 source reads 间循环，未调用新 patch tool。
+- 结论：本轮证明并补齐了真实任务的 workspace/path/edit-tool 基础合同；没有证明该模型在复杂调度重构上自主收敛，更没有性能、安装或 gate 声明。下一步应比较成熟 coding-agent runtime/adapter 的 action policy，而非再累积 prompt 或 phase 特例。
+
+### 2026-08-19 terra-loom-builder-transport-probe
+
+- 接入：新增极小 OpenAI-compatible JSON/SSE transport；`gpt-5.6-terra` 作为可选 `llm.provider`，只从进程环境读取 key，不落盘。该分支不发送 DeepSeek 专有的 `thinking` 字段；该供应商的 SSE 对复杂请求未及时首 token 时可明确采用 non-streaming JSON fallback。所有 Builder/Kernel/verifier/gate 权限边界保持不变。
+- 兼容性：`/v1/models` 显示实际 ID 为 `gpt-5.6-terra`，而非 `openai/gpt-5.6-terra`；后者返回 `model_not_found`。无流式 `response_format=json_object` 短 ping 2.5 秒返回 `{ok:true}`。
+- 真任务尝试：同一真实 `delayed-prepare-regression` Builder run（真实 `tool-calls.ts`，20 turn/36 tool/1600 token）在非流式 fallback 的第一复杂 decision 约 30 秒仍未返回，已人工取消以避免无界消耗。没有 model decision、工具调用、源码 edit、proposal、verifier、gate、install 或性能声明。
+- 留档：`/chenzute/dsh-src/eval/run-records/2026-08-19-terra-loom-builder-transport-probe.json`。结论是 **short-request transport works / real Builder proposal-to-gate not evaluated due provider latency**，不是 Terra 能力失败或 Loom 链路失败。
+
+### 2026-08-19 terra-native-decision-real-builder-observation
+
+- 受控定位：同一约 7KB Loom prompt 移除 `response_format=json_object` 后，Terra 约 5 秒能生成合法 `run_workspace_command` decision；原生 `builder_decision` function-call probe 约 4.7 秒返回相同动作。结论是该网关的 constrained JSON decoding 对复杂 Builder 请求严重延迟，而非输入长度或模型不可用。
+- 实装：OpenAI-compatible adapter 增加 provider capabilities：Terra 使用 non-streaming response、无 `response_format`、一个通用 `builder_decision` native function；函数参数 `{decision:{…}}` 在 Driver 解包后仍走原有严格 JSON/allowlist 校验。它不向模型授予 Kernel 工具以外的权限，verifier/gate/install 边界不变。
+- fresh run `builder-1787115999050-f2a0741b`：20 model turns/20 tool steps 后 budget abort；实际完成 delayed-prepare regression 复现、真实 `tool-calls.ts` 读取、journal 读取、world model 写入并明确正确 hypothesis。未编辑、未写 proposal，故未进入 verifier/gate/install。
+- 事实性新缺口：模型尝试 `search_text` 时，Kernel 返回 `search_text requires at least one available root`；workspace-relative source root 没有可用默认根。此为通用 discovery 工具合同问题，下一轮应修复并以 fresh run 测量，不能人工代替 Builder 写候选。
+- 验证：新增原生 function envelope 的 Driver 单测；全量 **181/181**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 terra-native-decision-search-root-rerun
+
+- 修复：`search_text.roots` 的相对路径现与 `read_file/list_directory` 一致，从 Builder immutable workspace 解析；绝对路径仍是全局只读。新增相对 `src` root 回归。
+- fresh run `builder-1787116500737-5d93a8fd`：native action、真实 baseline regression、真实源码 read 均完成；此前失败的 workspace-relative `search_text` 本次 **exit 0**。模型再次写出正确 hypothesis：不要 await 每个 `startCall/prepare`，而是启动 preparation lifecycle 并保持 cap/ordered commit/barrier。
+- 结果：仍为 20 model turns/20 tool steps budget abort；无 edit、candidate、proposal、verifier、gate、install 或性能结论。由此排除 transport、文本/原生工具可见性、native envelope、workspace path、search root 五类确定性断链；剩余是该模型在真实调度重构上的 edit/submit 行动策略未收敛。停止本轮请求，不能以手工修复替代 Builder。
+- 验证：全量 **182/182**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 workspace-loop-submission-compiler
+
+- 收敛性减法：Builder 不再需要手填 builder-generated `beforeHash`、完整 edits、package/build 元数据。首次 workspace 写入或 unified patch 前，Kernel 保存对应原始源码快照；`compile_loop_submission(rationale, expectedOutcome?)` 只可用于 loop_candidate，并从快照与当前 workspace 确定性生成完整 `loop-evolution` proposal。
+- 安全边界：只收集 `packages/core/agent-loop/src/**/*.ts`、最多 4 个真实变更；仍要求 actor target-before 的 40 位 baseline commit。Compiler 只冻结 proposal；CandidateImporter 仍重新校验 hash/路径/大小、构建，独立 verifier/gate 仍拥有唯一放行权。
+- native transport：当前工作树已具备每个 Builder 工具的 OpenAI function schema，Terra 返回的真实 function call 会被转换为同一 JSON decision，再走原先严格 allowlist；不是 generic `builder_decision` 的特权旁路。
+- 覆盖：新增 workspace edit → compile → submit → proposal 断言；全量 **183/183**、`npm run check`、`npm run build`、`git diff --check` 通过。下一次真实 Terra fresh run 应测 `edit → regression → compile_loop_submission → submit`，仅提交成功后进入独立 verifier/gate。
+
+### 2026-08-19 terra-workspace-compiler-fresh-run
+
+- fresh `builder-1787122031074-1db65f36` 使用 per-tool native functions 和新 task contract：测试通过后仅需 `compile_loop_submission(rationale)`，不再要求模型手写 hash/manifest。
+- 结果仍为 20 model turns/20 tool steps budget abort：真实 baseline regression、源码读与正确 hypothesis 均发生，但没有 workspace edit、测试通过、compiler、proposal 或 submit。
+- 归因：compiler 已通过确定性 edit→proposal 回归，但在这次真实任务从未进入其前提；当前瓶颈明确是 **hypothesis → edit action policy**，而不是 delivery protocol、verifier/gate 或 Terraform transport。不得进入 verifier/gate，更不能宣称性能提升。
+
+### 2026-08-19 terra-40turn-action-policy-control
+
+- 受控变量：保持同一真实 delayed-prepare task、native per-tool functions、workspace compiler、512 output token；只将预算从 20 model turns/36 tools 提至 **40 model turns/64 tools**。
+- fresh `builder-1787122252477-689953e7`：40 model turns/40 tool steps 后 budget abort；持续正确陈述 `fillPool await startCall` 串行化 prepare 的 hypothesis，并重复真实 regression/source/journal 行为。
+- 关键负结果：**0 workspace edit、0 target regression pass、0 original suite pass、0 compile_loop_submission、0 proposal**。因此预算不足不是这条任务的充分解释；不能再用加回合、加 token 或 submission 提示解释/掩盖 action-policy 停滞。
+- 后续方向：若继续，应换用成熟 coding runtime 的动作/trajectory policy，或做原生工具 surface 的独立 A/B；不能把外部 runtime 的 patch 包装为 Loom Builder 自主 proposal。
+
+### 2026-08-19 terra-per-tool-native-schema-rerun
+
+- 实装：BuilderDriver 现在把每项 base action（read/search/inspect/workspace patch/command/submission/submit/abort 等）作为独立 OpenAI function schema 传给支持该 surface 的 transport；Terra response 的 function name + arguments 确定性转换回原 decision，再接受 Kernel 同一 allowlist 校验。没有把执行权移进 adapter。
+- fresh run `builder-1787118050503-6f31c089`：首步不同于前两次，先以 `write_world_model` 写出正确 delayed-prepare hypothesis，后续使用真实 regression command、source read、journal/context input；中途一次 `inspect_file` 返回 file unavailable。20 turns/20 steps 后仍未 edit 或 proposal。
+- 结论：per-tool native schema 证明可用，并改变了动作选择，但没有让该复杂 package 重构在本预算内收敛。此后不应继续以 prompt/工具表面补丁掩盖结果；需要比较成熟 coding runtime 的 planning policy，或换一个由 Builder 自主选择的更小、可验收 pass。无 verifier/gate/install 或性能声明。
+
+### 2026-08-19 mini-swe-runtime-real-scheduler-adapter-probe
+
+- 同一 pinned DSH archive、同一真实 `delayed-prepare-regression.spec.ts`、同一原有 `tool-calls.spec.ts` 对照。mini-SWE-agent（Terra）在自身 8 个 action 内完成：复现基线失败、读取实际 scheduler、编辑 `packages/core/agent-loop/src/tool-calls.ts`、让新增回归通过；随后主动将新增回归与原 suite 一起运行，发现 `failure quiescence` 反例（不应在另一 slot failure 后启动 tool body），再根据该反馈增加 prepare 后 failure check。
+- 最终 host 独立复跑两个测试文件：**22/22 pass**。轨迹：`/chenzute/dsh-src/eval/real-agent-loop-builder/workspace/real-agent-loop/builder-runs/builder-1787122877676-a2635cb1/mini-swe-agent-trajectory.json`。这是实际 `diagnose → edit → test → regression repair` 的正证据，不是人工候选。
+- Kernel 由该 workspace diff 编译 proposal 后，独立 CandidateImporter 正确拒绝：Compiler 的 `beforeHash` 对字符串使用协议 `sha256(JSON.stringify(value))`，Importer 按原文件 bytes 验证，故发生 `beforeHash mismatch`。这暴露的是 Loom compiler/importer cross-boundary 合同漏洞，不是 mini-SWE 模型编辑错误。
+- 已修复 Compiler 使用 raw file-content SHA-256，并增加回归断言；全量 **183/183**、check/build/diff-check 通过。旧 proposal 不得手改 hash 复用；必须以新 immutable mini run 重新生成 edit→tests→compile→submit，Importer 接收后才能做 C0–C8/C6、冷 gate、回滚和 replay。
+- 修复后复跑曾因当前进程没有可用 Terra API credential 而在调用前失败；没有把 supplied key 写入任何文件或记录。故该条目的正式候选/importer/gate 状态仍为 **未证明**。
+
+### 2026-08-19 mini-swe-runtime-real-scheduler-e2e
+
+- 新 fresh immutable run `builder-1787123618188-d57a45a7` 在同一真实任务完成自主闭环：baseline delayed-prepare fail → 读真实 source/tests → edit `tool-calls.ts` → focused oracle pass → 原 `tool-calls.spec.ts` + oracle **22/22 pass** → runtime 完成意图。模型总 11 actions；一次对 archive workspace 的 `git diff` 无效被工具反馈后，仍正确完成，没有人工改候选。
+- 提交链路：Kernel 从 run 的 immutable before/after snapshot 生成 builder-generated proposal；CandidateImporter 以 pinned `47f943859bef60e4160492346772ded9b24f765a` 重新 materialize、精确 before-hash 校验、无网络 bwrap build，成功 stage。旧 Compiler 使用 protocol `sha256(JSON.stringify(string))`、Importer 使用 raw bytes 的不兼容已修复，旧 proposal 未复用。
+- 构建/运行环境的两项真缺口均保持 fail-closed：host DSH `node_modules` 的顶层 pnpm link 指向旧 eval path；git archive 又不带 vendor generated types。评测为明确的 read-only dependency+vendor snapshot 构建，并用 host 已构建 checkout 的 Node+tsx CLI entry 做 cold Loader runtime；不让 builder workspace 兼任 actor runtime。
+- 完整 contract report：`meta-workspace-mini-swe-agent-e2e-20260819/runtime/reports/builder-1787123618188-d57a45a7-contract-4.json`，**C0/C1/C2/C3/C4/C6/C7/C8 全 pass**，candidate actor exit 0。修复 runner C6：`allPass` 字段存在不再等于 pass，必须匹配 `"allPass": true`；`fromzero-verify` 可继承 verifier 的 `DSH_CMD`/`DSH_CWD`，避免 pnpm dependency-status repair 伪失败。
+- 独立 state machine 与 gate：`staging → pending → verified → approved → installed`，cold Loader C0 smoke pass。same-task replay baseline/installed 都输出 `ok`（29,997ms / 29,297ms）；comparison admissible，但一对单样本不构成性能提升结论。cold rollback 后 profile home 不存在、CLI 明确拒绝该 profile、registry 回到 `approved`。
+- 结论：mini-SWE-agent 是当前最合适的 Builder **execution runtime**；Loom 继续拥有 candidate compiler、independent verifier/gate 与 rollback。正式产品接入仍需将 runtime 的 source materialization 和 self-contained build snapshot 显式配置化，不能把 eval command 当作默认运行路径。
+
+### 2026-08-19 mini-swe-candidate-prepare-overlap-measurement
+
+- 为避免错把“pool cap 10→20”的旧性能协议套到并未修改 cap 的当前候选，针对实际 diff 做了隔离、无 profile 安装的因果测量。baseline 与 `builder-1787123618188-d57a45a7` 各在 immutable workspace 运行 5 次；2/4/8 个 parallel tools、pool cap 等于 calls 数、每个 `prepare()` 固定 100ms、body 为 0ms。
+- `prepare` 首至末进入 span 的中位数：baseline **102.1 / 304.5 / 707.2ms**；candidate **0.55 / 0.76 / 1.41ms**。两侧均到达全部 prepare；candidate 的 delayed-prepare oracle 与原 `tool-calls` suite 再次为 **22/22 pass**。
+- raw record：`/chenzute/dsh-src/eval/run-records/2026-08-19-mini-swe-prepare-overlap-benchmark.json`；审计及范围说明：`docs/research/2026-08-19-mini-swe-runtime-evidence-audit.md`。临时 benchmark fixture 在测量后删除，未改变 profile、生产或候选源码。
+- 结论严格限为：**Builder 自主候选修复了真实 scheduler 的 prepare 串行瓶颈，并在该受控路径获得可重复时延改善**。尚无 16-call、body latency、exclusive/abort/failure 压力或带 raw actor frames 的端到端任务，因此不得宣称 actor 整体性能提升。
+
+### 2026-08-19 mini-swe-runtime-negative-boundaries
+
+- 新增确定性负向覆盖：mini runtime trajectory 的 exit status 非 `Submitted`，或 runtime 退出而没有 trajectory，均返回 `submitted=false`；不能进入 Kernel compiler。
+- 新增 workspace scope 覆盖：即使 runtime workspace 出现范围外 `README.md` 改动，`compile_loop_submission` 仍因没有捕获到 `packages/core/agent-loop/src/**/*.ts` 改动而失败，proposal 保持为空。因此“runtime 写过文件”不等于“可以交付/安装候选”。
+- 全量 `npm test` **187/187**、`npm run check`、`npm run build`、`git diff --check` 通过。仍缺真正恶意 runtime 同时修改允许和范围外文件的 archive→Importer E2E，以及 timeout/partial/rejection-reopen runtime matrix；不得把当前单元保障扩大为完整供应链对抗性证明。
+
+### 2026-08-19 mini-swe-malformed-trajectory-fail-closed
+
+- 审计发现 `runMiniSwe()` 在 runtime 写出损坏 JSON trajectory 时会直接抛出，虽不能提交候选，但 Gateway 不能稳定将它记为同一个受控 failure path。
+- 修复：trajectory parse 失败现在返回 `submitted=false`、零 turns/steps 以及 `mini-SWE trajectory is unreadable` 错误；Gateway 的既有未提交分支会 abort 并持久化结果。没有 fallback 到 live workspace，也没有 proposal。
+- 新增 malformed trajectory adapter 回归，以及 Gateway E2E：临时 pinned git archive 被 materialize 后，伪 runtime 写出损坏 trajectory；`runExploration` 返回 aborted，持久 status 没有 proposal。全量 `npm test` **189/189**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 mini-swe-timeout-partial-reopen
+
+- adapter 新增 parseable partial trajectory（无 terminal exit）和 subprocess wall-timeout 回归；二者均 fail-closed，不可提交。
+- 发现并修复 mini rejection reopen 断链：旧 `reopenExploration` 仅建 immutable run，未为其 materialize/capture mini workspace；后续 runtime 无基线可编译。现 child run 重新从 pinned baseline materialize、capture before。mini task 也带入完整 Actor inbox；durable Submitted 后 Kernel 写入事实性 receipt，满足提交前消息确认合同。
+- Gateway fake-runtime E2E：首次允许范围内 loop edit → submitted → 模拟 verifier rejection → child run 保持 baseline bytes → 第二次 runtime edit → submitted。全量 `npm test` **193/193**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 actor-evolution-config-ingress
+
+- 新增 `ActorEvolutionGateway`，作为不依附 loop gateway 的通用 execution ingress。首个 plan 是 `config-evolution`：host 写入 isolated `actor-config.json` 并 capture before；mini-SWE 的 durable Submitted 触发 Kernel `compile_config_submission`，生成既有 `patch-evolution` envelope，而非新建 config verifier/gate。
+- fake-runtime E2E：runtime 改写 config 并额外写入 `outside.txt`；冻结 proposal 只包含 host 固定的 `targetId` 与 config after，outside scratch 不进入 payload。此证明 runtime/compile 边界，不代表 runtime 可直接安装。
+- `runMiniSwe` 的执行签名不再要求并未使用的 baseline/dependency 字段，使 config/tool/skill 的 isolated workspace plan 可复用同一 adapter；loop materialization 仍在其 host-owned gateway 中完成。
+- 全量 `npm test` **194/194**、`npm run check`、`npm run build`、`git diff --check` 通过。下一步：把 config ingress 接入 controller 的 `meta_auto` capability dispatch，并用现有 Validator/Gate 运行一次真实 approval/rollback E2E；随后迁移 tool/skill bundle compiler。
+
+### 2026-08-19 actor-evolution-config-adjudication
+
+- config ingress 现已接到既有裁决合同的确定性 E2E：mini-SWE → `compile_config_submission` → `classifyBuilderProposal` → `adjudicatePatch` → **Validator** → 既有 **Gate** before/after write + smoke。没有新增 config verifier 或 bypass。
+- 验证 fixture 提供 expected trajectory 与真实 frames；Validator approved 后 Gate 将 live fixture `{model:'before'}` 更新为 `{model:'after'}`。runtime workspace 的范围外 scratch 仍不进入 payload。
+- 这是 host-independent contract E2E，不是 `meta_auto`/真实 DSH profile 冷运行，故不得说正式 config runtime 已上线。全量 `npm test` **195/195**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 actor-evolution-skill-module-compiler-recheck
+
+- 修正 skill fixture 的 frontmatter 写入后，`ActorEvolutionGateway` 的 skill module ingress 定向 E2E 已重跑通过：mini runtime 只写 `actor-module/`，Kernel 从受限 bundle 编译现有 `patch-evolution` insert envelope。
+- 全量 `npm test` **198/198**、`npm run check`、`npm run build`、`git diff --check` 均通过。此为 compiler/ingress 证据，仍不是 skill load/probe、Gate 冷安装或 rollback 证据。
+
+### 2026-08-19 actor-evolution-module-adjudication-and-reopen
+
+- 修复通用 module compiler 的 verifier staging 断链：此前 mini runtime 的 bundle 只存在于 run workspace，而 `Validator.runModuleLoadCheck` 按合同只读取 verifier-owned staging；现在 Kernel 在冻结 proposal 时把已编译的受限 bundle 写入该 staging，路径逃逸仍 fail-closed。
+- tool E2E 现覆盖 mini-SWE → module compiler → frozen staging → existing module-load Validator → existing insert Gate。它证明没有绕过旧 validator/gate，也不是 live DSH profile 安装。
+- `ActorEvolutionGateway.reopen` 对 config/tool/skill 建立与 loop 同义的 rejection 路径：submitted → rejection report → fresh immutable run；config 从 prior captured before baseline 重物化，module 从新的空 allowlisted root 开始，prior report 与 Actor messages 由 Kernel read-only lineage 继承。
+- 全量 `npm test` **199/199**、`npm run check`、`npm run build`、`git diff --check` 通过。下一步仍是 skill 的真实 catalog/load/probe + Gate rollback、Controller capability dispatch 与 composition 专用合同。
+
+### 2026-08-19 actor-evolution-skill-gate-rollback
+
+- skill path 新增同构裁决 E2E：mini-SWE 在 isolated `actor-module/` 写 SKILL bundle → Kernel compiler 冻结并 verifier-stage → existing `Validator` catalog/probe contract → existing skill `Gate` install。cold smoke 被刻意设为失败后，`removeSkill` 被调用，安装状态回到未安装。
+- 同时修复 `adjudicatePatch` 的证据缺失：Gate 失败此前只返回 rejected report，丢弃原始 `ApplyResult`；现在 rejected result 保留它，调用方能分辨 verifier 未通过与 Gate 已 apply 后 rollback。
+- 该 catalog/probe 为确定性 test double，结论仅为 contract/Gate rollback 闭环，不是 live DSH profile cold load。全量 `npm test` **200/200**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 actor-composition-contract-foundation
+
+- capability registry 现声明 config/tool/skill 的 compiler+verifier+gate metadata；`actor-composition` 被声明为 draft-only，直到专用 ingress/compiler 接入。
+- 新增独立 composition graph verifier 与 transactional Gate（不复用/伪装为普通 patch Gate）：只接受 controller allowlisted targets，检查 bounded/unique operations、unique targets、supported kinds、required trajectories、valid dependency refs、DAG 与 hash binding。Gate 仅在 approved 且同 hash report 下按拓扑序 apply；cold smoke 或 apply 出错时按反序 rollback，stale report 零副作用。
+- 测试覆盖 unauthorized/cyclic graph rejection、two-node transaction cold-smoke rollback、hash-drift no-touch。全量 `npm test` **204/204**、`npm run check`、`npm run build`、`git diff --check` 通过。尚未证明 mini-SWE composition workspace compiler、真实 DSH transactional cold apply 或 actor replay。
+
+### 2026-08-19 actor-composition-mini-swe-ingress
+
+- composition compiler 现从 isolated workspace 的 `composition/<node>/config.json` 或 `composition/<node>/module/` 生成 graph envelope；node id、target id/kind、dependency graph、before snapshot、entry 与 expected trajectory 全部来自 host plan，runtime 只能影响 after artifacts。缺 artifact、无 config diff、越界 module file/size/entry 都 fail-closed。
+- `ActorEvolutionGateway.start/runComposition` 已 materialize host plan、把 builder 任务限定到 graph node directories，并在 durable mini-SWE Submitted 后调用 host compiler + Kernel `write_submission → submit`。定向 E2E 覆盖一 config + 一 dependent tool，确认结果是 `actor-composition` envelope 而非被错误降格为普通 patch。
+- 全量 `npm test` **206/206**、`npm run check`、`npm run build`、`git diff --check` 通过。尚缺 Controller dispatch（composition verifier + transaction Gate）、真实 DSH cold transaction/replay 与 rejection reopen materializer。
+
+### 2026-08-19 mini-swe-adversarial-archive-importer-e2e
+
+- 新增真实链路 fixture：mini runtime 在同一 run 同时修改 allowlisted `packages/core/agent-loop/src/tool-calls.ts` 与 workspace 根 `outside.txt`，并产生 durable Submitted trajectory。
+- Kernel 只从 allowlisted source diff 编译 builder-generated proposal；CandidateImporter 用 pinned local git archive 重新物化 tree、精确 beforeHash 应用 edit、在 networkless bwrap recipe build 后 stage。最终 artifact 含 `tool-calls.ts` 合法 change，**不含** `outside.txt`，而原 Builder workspace 保留该文件供审计。
+- 这证明 workspace 额外写入不会污染 archive/importer candidate，不代表 runtime 可绕过 allowlist。全量 `npm test` **207/207**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 terra-runtime-alias-health
+
+- Terra adapter 接受 runtime-facing `LOOM_TERRA_API_KEY`/`LOOM_TERRA_BASE_URL`，并继续兼容既有 `DSH_TERRA_*`；凭据只来自进程环境，未写入任何记录。
+- 实际 OpenAI-compatible native-tool health probe 约 3 秒返回合法 `builder_decision` wrapper，确认 transport、credential discovery 与 native tool response 可用。此为短健康检查，不是 Builder implementation pass、proposal、verifier/gate/install 或性能结论。
+- 全量 `npm test` **208/208**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 composition-adjudication-release-audit
+
+- `actor-composition` 的 graph verifier、逐 operation verifier 聚合与 transaction Gate 已有确定性合同测试：任一 child verifier 拒绝时 Gate 零触碰；图通过后才按依赖顺序 apply，cold smoke 失败按逆序 rollback，hash 漂移报告零副作用。
+- 审计发现它尚不应被接入 `meta_auto`：现有入口没有可信的 controller-owned composition plan/materializer 输入。若直接接受 Builder 或用户提供的 graph，会把非可信多目标 payload 误当 host plan，破坏 capability/compiler 的 TCB 边界。故保持 capability 已注册但不调度；这是真实 release blocker，而非可由单测绿灯覆盖的缺口。
+- 本次未发起模型请求、未触碰 profile/生产。全量 `npm test` **209/209**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 composition-controller-plan-registry
+
+- 新增 `CompositionPlanRegistry`，将 composition request 限制为 host-registered plan ID；registry 在 materialize 前验证 plan 的唯一/有界 node 与 target、config before、module entry、trajectory 和依赖引用，返回 deep clone，避免 caller 修改已注册的 graph。
+- 全量 **211/211**、`npm run check`、`npm run build`、`git diff --check` 通过。该项只是可信 ingress 底座；尚未把 registry、mini-SWE execution、per-component verifier 和 transaction Gate 接入 `meta_auto`，故不构成安装/回滚证据。
+
+### 2026-08-19 composition-controller-seam
+
+- 新增可注入 `CompositionController`：外部请求只能给 registered `planId`，Controller 依次 resolve host plan、启动 mini-SWE composition workspace、要求 durable Submitted/frozen envelope，再运行每个 child verifier 和 transaction Gate。
+- 定向 E2E 验证两个节点（config → tool）均通过 verifier 后才进入 Gate，且 Gate 的 apply 顺序为 config、tool。此前 fixture 把普通 `-c` 参数误解析为 cwd，已仅接受 `environment.cwd=`；这是测试工具解析修复，不是 runtime 行为变更。
+- 尚未接入 DSH `meta_auto` 参数/config 及真实 loader gate，故仍不构成 profile 安装或 rollback 结论。
+- 全量 `npm test` **212/212**、`npm run check`、`npm run build`、`git diff --check` 通过。
+
+### 2026-08-19 composition-controller-child-reject
+
+- 为 Controller seam 补 runtime-generated envelope 的负例：mini-SWE 生成 config → tool composition，config verifier pass、tool verifier reject。断言 transaction Gate 的 snapshot/apply/rollback 都未调用，结果为 `rejected` 并带 tool 原因。
+- 定向 `composition-controller` **2/2**、`npm run check` 通过；这锁定了“任一组件失败零副作用”，但不替代真实 DSH loader transaction adapter。
+
+### 2026-08-19 npm-package-hygiene-audit
+
+- `npm pack --dry-run` 发现旧构建会带入 `dist/fromzero/**` 的历史 runtime 示例。已将 build 改为先清理全部 `dist`，prepack 明确移除 `dist/fromzero` 与 `dist/meta-workspace`；复跑 tarball 从 86 变为 77 个文件，检查确认无两类路径。
+- 同时用 lockfile-only install 将根 lockfile version 从历史 `0.1.0` 对齐 package `1.1.0`。全量 **213/213**、check/build/diff-check 均通过；这修的是发布物卫生，不改变 runtime 权限或性能结论。

@@ -1,6 +1,6 @@
 # Plugin Composition Spec — Capability / Verifier / Gate
 
-更新：2026-08-18。状态：设计基线，尚未实现注册器。
+更新：2026-08-18。状态：Builder capability runtime registry 已实现；Verifier/Gate 治理注册器仍按本规格逐步迁移。
 
 本规格承接 [`builder-foundation-spec.md`](./builder-foundation-spec.md)。目标不是让所有组件拥有相同权限，而是使能力可以自由增加、验证可以按能力组合，同时让任何不完整或非法的验收都不能穿过 Gate。
 
@@ -8,7 +8,7 @@
 
 ```text
 Builder base loop
-  └─ Capability plugin（Builder 可使用、可提案升级）
+  └─ Capability plugin + runtime（Builder 可使用、可提案升级）
        └─ immutable proposal + artifacts
             └─ Verifier plugin set（独立、只读、fail-closed）
                  └─ Gate（唯一 live apply / rollback 权限）
@@ -16,7 +16,7 @@ Builder base loop
 
 | 类别 | 目的 | 谁可改 | 是否能让目标生效 |
 | --- | --- | --- | --- |
-| Capability plugin | 给 Builder 增加探索/产出能力 | Builder 可提案，普通 verifier 审核 | 否 |
+| Capability plugin/runtime | 给 Builder 增加探索/产出能力 | Builder 可提案，普通 verifier 审核 | 否 |
 | Verifier plugin | 对一个 capability/target 的契约给出独立 verdict | 治理注册表/操作者；Builder 只读 | 否 |
 | Gate | 绑定证据、快照、安装、回滚 | 最小 Kernel 所有 | 是 |
 | Kernel | journal、proposal hash、状态迁移、授权与回注 | 产品代码 | 只调度 Gate，不选择内容 |

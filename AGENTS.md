@@ -71,6 +71,9 @@ observe（观察/监督员）→ judge（评审门）→ design（builder 改进
 
 - `CURRENT.md` — 当前状态/下一步（恢复必读）
 - `docs/builder-foundation-spec.md` — Builder 基础 loop、capability 与裁决边界（2026-08-18 架构基线）
+- `docs/simulation-capability-spec.md` — workspace-simulation capability、证据等级与仿真/真实一致性边界
+- `docs/builder-evolution-flow-spec.md` — Builder 事实→假设→仿真→提问/验证→提交的软流程骨架
+- `docs/artifact-provenance-navigation-spec.md` — rejection/error 到 candidate、producer、接口源码的事实溯因导航合同
 - `docs/plugin-composition-spec.md` — capability、verifier 与 gate 的插件拼装和 fail-closed 规则
 - `docs/architecture.md` — 设计原理与风险
 - `docs/loop-layer-contracts.md` — C1-C8 + 完整契约报告定义 + 放开条件

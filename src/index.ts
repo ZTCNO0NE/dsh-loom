@@ -28,7 +28,7 @@ import {
 import type { IsolationOptions } from './isolation/runner.js'
 import { runIsolation } from './isolation/runner.js'
 import { childEnv } from './isolation/runner.js'
-import { officialDeepSeekLlm } from './llm/official.js'
+import { officialDeepSeekLlm, terraLlm } from './llm/official.js'
 import { LoopCandidateGateway } from './candidates/gateway.js'
 import { CandidateImporter, CandidateRegistry, type CandidateManifest, type ContractEvidence, type LoopInstallReport } from './candidates/index.js'
 import { profileGateOps } from './candidates/profile-gate.js'
@@ -126,6 +126,14 @@ export interface MetaValidateConfig {
     builderMaxModelTurns: number
     builderMaxToolSteps: number
     builderMaxWallTimeMs: number
+    diagnosisFirst: boolean
+    repeatReadRejectAfter: number
+    enforceProgressCheckpoints: boolean
+    executionRuntime: 'loom-native' | 'mini-swe'
+    miniSweExecutable: string
+    miniSweConfigPath: string
+    miniSweDependencySnapshot: string
+    miniSweStepLimit: number
   }
   lockedTargets: LockedTargetPolicy
 }
@@ -200,6 +208,17 @@ export const Config: Schema<MetaValidateConfig> = Schema.object({
     builderMaxModelTurns: Schema.number().default(24),
     builderMaxToolSteps: Schema.number().default(48),
     builderMaxWallTimeMs: Schema.number().default(600000),
+    // Builder remains free to decide whether evidence is insufficient and ask
+    // the Actor. Controllers may explicitly opt into a diagnosis-only pass,
+    // but a broad request must not be converted into a mandatory form flow.
+    diagnosisFirst: Schema.boolean().default(false),
+    repeatReadRejectAfter: Schema.number().default(0),
+    enforceProgressCheckpoints: Schema.boolean().default(false),
+    executionRuntime: Schema.union(['loom-native', 'mini-swe']).default('loom-native'),
+    miniSweExecutable: Schema.string().default(''),
+    miniSweConfigPath: Schema.string().default(''),
+    miniSweDependencySnapshot: Schema.string().default(''),
+    miniSweStepLimit: Schema.number().default(30),
   }),
   lockedTargets: Schema.object({
     ids: Schema.array(Schema.string()).default(DEFAULT_LOCKED_TARGETS.ids),
@@ -394,7 +413,9 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
 
   // Independent meta-layer model: builder + review gate use the official
   // DeepSeek API (V4 Flash by default), while the actor keeps its own route.
-  const metaLlm = config.llm.provider === 'deepseek-official' ? officialDeepSeekLlm() : undefined
+  const metaLlm = config.llm.provider === 'deepseek-official'
+    ? officialDeepSeekLlm()
+    : config.llm.provider === 'gpt-5.6-terra' ? terraLlm() : undefined
   const loopCandidateGateway = new LoopCandidateGateway({
     enabled: config.allowLoopCandidates.enabled,
     root: config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime'),
@@ -407,7 +428,23 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     builderMaxModelTurns: config.allowLoopCandidates.builderMaxModelTurns,
     builderMaxToolSteps: config.allowLoopCandidates.builderMaxToolSteps,
     builderMaxWallTimeMs: config.allowLoopCandidates.builderMaxWallTimeMs,
+    diagnosisFirst: config.allowLoopCandidates.diagnosisFirst,
+    builderKernelOptions: {
+      ...(config.allowLoopCandidates.repeatReadRejectAfter > 0 ? { repeatReadRejectAfter: config.allowLoopCandidates.repeatReadRejectAfter } : {}),
+      ...(config.allowLoopCandidates.enforceProgressCheckpoints ? { enforceProgressCheckpoints: true } : {}),
+    },
     onUsage: recordUsage('builder-loop-candidate'),
+    executionRuntime: config.allowLoopCandidates.executionRuntime,
+    ...(config.allowLoopCandidates.executionRuntime === 'mini-swe' ? {
+      miniSwe: {
+        executable: config.allowLoopCandidates.miniSweExecutable,
+        configPath: config.allowLoopCandidates.miniSweConfigPath,
+        baselineRoot: config.allowLoopCandidates.baselineRoot,
+        dependencySnapshot: config.allowLoopCandidates.miniSweDependencySnapshot,
+        stepLimit: config.allowLoopCandidates.miniSweStepLimit,
+        timeoutMs: config.allowLoopCandidates.builderMaxWallTimeMs,
+      },
+    } : {}),
   })
   const loopJobRunners = new Map<string, (jobId: string) => Promise<{ summary: string; status?: 'finished' | 'paused' | 'cancelled' | 'waiting_for_input' }>>()
   const loopRunHolders = new Map<string, { runId: string; runner: (jobId: string) => Promise<{ summary: string; status?: 'finished' | 'paused' | 'cancelled' | 'waiting_for_input' }>; request: Record<string, unknown>; holder?: { runId: string } }>()
