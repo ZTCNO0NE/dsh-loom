@@ -167,6 +167,35 @@ describe('loop candidate registry', () => {
       edits: [{ path: 'packages/core/tools/src/index.ts', beforeHash: 'a'.repeat(64), after: 'x' }],
     })).toThrow(/outside the agent-loop source allowlist/)
   })
+
+  it('applies only exact, bounded builder-generated source edits', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-generated-'))
+    const sourcePath = join(root, 'packages/core/agent-loop/src/constants.ts')
+    mkdirSync(join(root, 'packages/core/agent-loop/src'), { recursive: true })
+    const before = 'export const DEFAULT_MAX_PARALLEL_TOOL_CALLS = 10\n'
+    writeFileSync(sourcePath, before)
+    const beforeHash = createHash('sha256').update(before).digest('hex')
+    const after = 'export const DEFAULT_MAX_PARALLEL_TOOL_CALLS = 20\n'
+    const edits = [{ path: 'packages/core/agent-loop/src/constants.ts', beforeHash, after }]
+    expect(applyBuilderGeneratedEdits(root, {
+      kind: 'builder-generated',
+      baseline: { uri: 'https://github.com/deepseek-ai/deepseek-harness.git', ref: 'a'.repeat(40) },
+      edits,
+    })).toEqual([{ path: edits[0].path, beforeHash, afterHash: createHash('sha256').update(after).digest('hex') }])
+    expect(readFileSync(sourcePath, 'utf8')).toBe(after)
+    expect(() => applyBuilderGeneratedEdits(root, {
+      kind: 'builder-generated', baseline: { uri: 'https://github.com/deepseek-ai/deepseek-harness.git', ref: 'a'.repeat(40) },
+      edits: [{ ...edits[0], beforeHash }],
+    })).toThrow(/beforeHash mismatch/)
+  })
+
+  it('rejects generated edits outside agent-loop source', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-generated-'))
+    expect(() => applyBuilderGeneratedEdits(root, {
+      kind: 'builder-generated', baseline: { uri: 'https://github.com/deepseek-ai/deepseek-harness.git', ref: 'a'.repeat(40) },
+      edits: [{ path: 'packages/core/tools/src/index.ts', beforeHash: 'a'.repeat(64), after: 'x' }],
+    })).toThrow(/outside the agent-loop source allowlist/)
+  })
 })
 
 describe('Loader replacement profile adapter', () => {
