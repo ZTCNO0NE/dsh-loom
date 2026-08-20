@@ -345,6 +345,11 @@ mini-SWE 2.4.6 本体已经随 Loom npm 包提供，不要求你的镜像存在 
 
 在 **DeepSeek Harness 源码根目录** 打开 PowerShell。先确认 DSH 本身能启动；Loom 不负责修复 DSH checkout 的构建或 `tsx/esm` 环境问题：
 ```powershell
+# 0. 在启动 DSH 的同一个 PowerShell 中配置 Loom 状态目录和独立 Builder key。
+$env:DSH_META_VALIDATE_ROOT = "$env:USERPROFILE\.dsh\meta-validate"
+$env:DSH_META_API_KEY = "<你的 Builder DeepSeek key>"
+# Terra 用户改用：$env:LOOM_TERRA_API_KEY / $env:LOOM_TERRA_BASE_URL
+
 pnpm dsh web
 ```
 
@@ -375,6 +380,11 @@ pnpm dsh web --patch $patch
 在 **DeepSeek Harness 源码根目录** 打开 Terminal，先确认 `pnpm dsh web` 能启动，再按顺序执行：
 
 ```bash
+# 0. 在启动 DSH 的同一个 Terminal 中配置 Loom 状态目录和独立 Builder key。
+export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
+export DSH_META_API_KEY="<你的 Builder DeepSeek key>"
+# Terra 用户改用：export LOOM_TERRA_API_KEY=... 和 export LOOM_TERRA_BASE_URL=...
+
 # 1. 安装 Loom 并检查 Web profile。
 pnpm dsh plugin --profile web add dsh-loom@1.2.15
 pnpm dsh web --dump-config
@@ -394,6 +404,11 @@ pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 在 **DeepSeek Harness 源码根目录** 打开 shell，先确认 `pnpm dsh web` 能启动，再按顺序执行：
 
 ```bash
+# 0. 在启动 DSH 的同一个 shell 中配置 Loom 状态目录和独立 Builder key。
+export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
+export DSH_META_API_KEY="<你的 Builder DeepSeek key>"
+# Terra 用户改用：export LOOM_TERRA_API_KEY=... 和 export LOOM_TERRA_BASE_URL=...
+
 # 1. 安装 Loom 并检查 Web profile。
 pnpm dsh plugin --profile web add dsh-loom@1.2.15
 pnpm dsh web --dump-config
