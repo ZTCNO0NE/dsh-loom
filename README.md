@@ -351,19 +351,19 @@ pnpm dsh web
 确认 DSH 可用后，按顺序执行：
 
 ```powershell
-# 1. 安装 Loom 到独立 profile。
-pnpm dsh plugin --profile loom add dsh-loom@1.2.15
+# 1. 安装 Loom 到 Web profile。
+pnpm dsh plugin --profile web add dsh-loom@1.2.15
 
 # 2. 检查插件确已加载；输出中必须有 meta-validate。
-pnpm dsh --profile loom --dump-config
+pnpm dsh web --dump-config
 
 # 3. 安装 mini-SWE runtime；显式指定目录，后面的 patch 路径与 setup 输出完全一致。
 $runtimeRoot = Join-Path $env:USERPROFILE ".dsh\meta-validate\runtime\mini-swe-agent-2.4.6"
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\loom\node_modules\dsh-loom\bin\setup-windows.ps1" --runtime-root $runtimeRoot
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-loom\bin\setup-windows.ps1" --runtime-root $runtimeRoot
 
 # 4. 使用同一个绝对 patch 路径启动；不要改成相对 .meta-validate 路径。
 $patch = Join-Path $runtimeRoot "loom-active-evolution.patch.yml"
-pnpm dsh --profile loom --patch $patch
+pnpm dsh web --patch $patch
 ```
 
 此路径专门处理 Windows 的 `Scripts\\python.exe` / `Scripts\\mini.exe` 和 profile bin 不进入 PowerShell `PATH` 的差异。若 `python --version` 小于 3.10 或找不到命令，安装 Python 3.10+ 并勾选 **Add Python to PATH**；conda/pyenv 用户可先设置 `$env:PYTHON` 为所需解释器。
@@ -375,16 +375,16 @@ pnpm dsh --profile loom --patch $patch
 在 **DeepSeek Harness 源码根目录** 打开 Terminal，先确认 `pnpm dsh web` 能启动，再按顺序执行：
 
 ```bash
-# 1. 安装 Loom 并检查 profile。
-pnpm dsh plugin --profile loom add dsh-loom@1.2.15
-pnpm dsh --profile loom --dump-config
+# 1. 安装 Loom 并检查 Web profile。
+pnpm dsh plugin --profile web add dsh-loom@1.2.15
+pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
 runtime_root="$HOME/.dsh/meta-validate/runtime/mini-swe-agent-2.4.6"
-sh "$HOME/.dsh/profiles/loom/node_modules/dsh-loom/bin/setup-unix.sh" --runtime-root "$runtime_root"
+sh "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/setup-unix.sh" --runtime-root "$runtime_root"
 
 # 3. 启动 Web 对话。
-pnpm dsh --profile loom --patch "$runtime_root/loom-active-evolution.patch.yml"
+pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 ```
 
 需要 `python3 --version` 为 3.10 或更高；没有时可使用 `brew install python`。Apple Silicon 与 Intel 均使用这一段命令。
@@ -394,16 +394,16 @@ pnpm dsh --profile loom --patch "$runtime_root/loom-active-evolution.patch.yml"
 在 **DeepSeek Harness 源码根目录** 打开 shell，先确认 `pnpm dsh web` 能启动，再按顺序执行：
 
 ```bash
-# 1. 安装 Loom 并检查 profile。
-pnpm dsh plugin --profile loom add dsh-loom@1.2.15
-pnpm dsh --profile loom --dump-config
+# 1. 安装 Loom 并检查 Web profile。
+pnpm dsh plugin --profile web add dsh-loom@1.2.15
+pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
 runtime_root="$HOME/.dsh/meta-validate/runtime/mini-swe-agent-2.4.6"
-sh "$HOME/.dsh/profiles/loom/node_modules/dsh-loom/bin/setup-unix.sh" --runtime-root "$runtime_root"
+sh "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/setup-unix.sh" --runtime-root "$runtime_root"
 
 # 3. 启动 Web 对话。
-pnpm dsh --profile loom --patch "$runtime_root/loom-active-evolution.patch.yml"
+pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 ```
 
 需要 `python3 >= 3.10` 和 venv 支持；Debian/Ubuntu 常用 `sudo apt install python3-venv`。若内部镜像缺少某个依赖，可临时切换官方 PyPI 或配置 wheelhouse。
