@@ -357,7 +357,7 @@ pnpm dsh web
 
 ```powershell
 # 1. 安装 Loom 到 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.15
+pnpm dsh plugin --profile web add dsh-loom@1.2.16
 
 # 2. 检查插件确已加载；输出中必须有 meta-validate。
 pnpm dsh web --dump-config
@@ -386,7 +386,7 @@ export DSH_META_API_KEY="<你的 Builder DeepSeek key>"
 # Terra 用户改用：export LOOM_TERRA_API_KEY=... 和 export LOOM_TERRA_BASE_URL=...
 
 # 1. 安装 Loom 并检查 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.15
+pnpm dsh plugin --profile web add dsh-loom@1.2.16
 pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
@@ -410,7 +410,7 @@ export DSH_META_API_KEY="<你的 Builder DeepSeek key>"
 # Terra 用户改用：export LOOM_TERRA_API_KEY=... 和 export LOOM_TERRA_BASE_URL=...
 
 # 1. 安装 Loom 并检查 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.15
+pnpm dsh plugin --profile web add dsh-loom@1.2.16
 pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。

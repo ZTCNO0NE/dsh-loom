@@ -308,61 +308,6 @@ function isBuilderGeneratedSource(source: CandidateSourceRequest): source is Bui
   return 'kind' in source && source.kind === 'builder-generated'
 }
 
-const GENERATED_BASELINE_URI = 'https://github.com/deepseek-ai/deepseek-harness.git'
-const GENERATED_PACKAGE_PATH = 'packages/core/agent-loop'
-const GENERATED_PACKAGE_NAME = '@deepseek-ai/dsh-agent-loop'
-const GENERATED_PATH_PREFIX = `${GENERATED_PACKAGE_PATH}/src/`
-const GENERATED_MAX_EDITS = 4
-const GENERATED_MAX_FILE_BYTES = 48_000
-const GENERATED_MAX_TOTAL_BYTES = 96_000
-
-function textHash(value: string): string {
-  return createHash('sha256').update(value).digest('hex')
-}
-
-function isBuilderGeneratedSource(source: CandidateSourceRequest): source is BuilderGeneratedSourceRequest {
-  return 'kind' in source && source.kind === 'builder-generated'
-}
-
-/**
- * Apply the only self-authored loop change allowed by the importer. The
- * builder supplies an exact before hash and a complete replacement file; the
- * core validates path, size, count, and baseline bytes before writing. This is
- * intentionally exported for deterministic unit tests and verifier tooling.
- */
-export function applyBuilderGeneratedEdits(repositoryRoot: string, source: BuilderGeneratedSourceRequest): Array<{ path: string; beforeHash: string; afterHash: string }> {
-  if (!Array.isArray(source.edits) || source.edits.length < 1 || source.edits.length > GENERATED_MAX_EDITS) {
-    throw new Error(`builder-generated edit count must be 1-${GENERATED_MAX_EDITS}`)
-  }
-  const seen = new Set<string>()
-  let totalBytes = 0
-  const summary: Array<{ path: string; beforeHash: string; afterHash: string }> = []
-  for (const edit of source.edits) {
-    if (!edit || typeof edit.path !== 'string' || typeof edit.beforeHash !== 'string' || typeof edit.after !== 'string') {
-      throw new Error('builder-generated edit requires path, beforeHash, and after')
-    }
-    if (!edit.path.startsWith(GENERATED_PATH_PREFIX) || edit.path.includes('..') || !/^[A-Za-z0-9._/-]+\.tsx?$/.test(edit.path)) {
-      throw new Error(`builder-generated edit path is outside the agent-loop source allowlist: ${edit.path}`)
-    }
-    if (seen.has(edit.path)) throw new Error(`builder-generated edit path is duplicated: ${edit.path}`)
-    seen.add(edit.path)
-    if (!/^[0-9a-f]{64}$/i.test(edit.beforeHash)) throw new Error(`invalid beforeHash for generated edit: ${edit.path}`)
-    const file = resolve(repositoryRoot, edit.path)
-    if (!file.startsWith(`${resolve(repositoryRoot)}${sep}`) || !existsSync(file) || !lstatSync(file).isFile()) {
-      throw new Error(`builder-generated edit target is unavailable: ${edit.path}`)
-    }
-    const before = readFileSync(file, 'utf8')
-    if (textHash(before) !== edit.beforeHash.toLowerCase()) throw new Error(`builder-generated beforeHash mismatch: ${edit.path}`)
-    const bytes = Buffer.byteLength(edit.after, 'utf8')
-    if (bytes === 0 || bytes > GENERATED_MAX_FILE_BYTES) throw new Error(`builder-generated replacement is too large or empty: ${edit.path}`)
-    totalBytes += bytes
-    if (totalBytes > GENERATED_MAX_TOTAL_BYTES) throw new Error('builder-generated replacement budget exceeded')
-    writeFileSync(file, edit.after, { encoding: 'utf8', mode: 0o644 })
-    summary.push({ path: edit.path, beforeHash: edit.beforeHash.toLowerCase(), afterHash: textHash(edit.after) })
-  }
-  return summary
-}
-
 /**
  * Apply the only self-authored loop change allowed by the importer. The
  * builder supplies an exact before hash and a complete replacement file; the
