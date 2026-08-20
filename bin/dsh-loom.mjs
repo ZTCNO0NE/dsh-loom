@@ -2,7 +2,7 @@
 /**
  * dsh-loom CLI — 便携版"3 分钟亲历自进化"。
  * 用法：dsh-loom try
- * 不依赖仓库/demo 脚本/本机路径；需要 dsh 在 PATH、DEEPSEEK_API_KEY 可路由，
+ * 不依赖仓库/demo 脚本/本机路径；需要 dsh 在 PATH、DSH 凭据中 DEEPSEEK_API_KEY 可路由，
  * 且当前 profile 已安装 dsh-loom（dsh plugin add dsh-loom）。
  */
 import { spawn, spawnSync } from 'node:child_process'

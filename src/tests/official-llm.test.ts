@@ -44,6 +44,24 @@ describe('official DeepSeek LLM adapter', () => {
     }
   })
 
+  it('resolves a fresh host-only credential for every request', async () => {
+    const originalFetch = globalThis.fetch
+    const secrets = ['first-secret', 'second-secret']
+    const authorizations: string[] = []
+    globalThis.fetch = async (_input, init) => {
+      authorizations.push(String(new Headers(init?.headers).get('Authorization')))
+      return new Response('data: {"choices":[{"delta":{"content":"{}"}}]}\n\ndata: [DONE]\n\n', { status: 200 })
+    }
+    try {
+      const llm = officialDeepSeekLlm({ baseURL: 'https://example.test', resolveApiKey: async () => secrets.shift() })
+      for await (const _chunk of llm.stream({ provider: 'deepseek-official', model: 'deepseek-v4-flash', prompt: 'first', maxTokens: 8 })) { /* consume */ }
+      for await (const _chunk of llm.stream({ provider: 'deepseek-official', model: 'deepseek-v4-flash', prompt: 'second', maxTokens: 8 })) { /* consume */ }
+      expect(authorizations).toEqual(['Bearer first-secret', 'Bearer second-secret'])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('uses the OpenAI-compatible Terra transport without DeepSeek thinking fields', async () => {
     const originalFetch = globalThis.fetch
     let request: Record<string, unknown> | undefined

@@ -1,5 +1,14 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-20 Builder 统一读取 DSH 用户凭据（待 Windows 真机 E2E 后发布）
+
+- Loom 不再以 `process.env` 作为产品路径的 Builder 凭据来源：`src/index.ts` 注入 DSH `credentials` service，`BuilderCredentialResolver` 在每次 Builder/Review Gate LLM 请求及每次 mini-SWE spawn 前动态 `resolve()`。
+- 默认官方 Builder 只解析 DSH 用户凭据 `DEEPSEEK_API_KEY`；`llm.credentialRef` 是高级、仅存 reference 的覆盖入口（可填兼容的 `DSH_META_API_KEY`）。只有显式 `llm.provider: gpt-5.6-terra` 才解析 `LOOM_TERRA_API_KEY → DSH_TERRA_API_KEY`。
+- mini-SWE 子进程仅得到临时 `OPENAI_API_KEY`，会删除父环境中的 provider key aliases；secret 不进入 config/prompt/journal/evidence/status。`meta_status` 只投影 provider/model/ref/configured/source。
+- README 与 `docs/USAGE.md` 已改为默认在 DSH Settings/Models 或 `$DSH_HOME/.credentials.yaml` 配置一次 `DEEPSEEK_API_KEY`；不再要求用户每个 shell 设置 Builder 专属变量。
+- 定向和全量验证：`npm test` **242/242**、`npm run check`、`npm run build`、`git diff --check` 通过；另以隔离 `DSH_HOME` 的真实 `pnpm dsh web --patch cordis.patch.yml --dump-config` 确认 Web composition 含 `credentials-local` 且 Loom row 正确加载。
+- 下一步：在 Windows Web 使用**仅** `%USERPROFILE%\.dsh\.credentials.yaml` 的 `DEEPSEEK_API_KEY`（不设进程 key）启动，检查 `meta_status` 为 `credentialConfigured:true, credentialSource:file`，再完成一次 `meta_auto(plan)` readiness；通过后再决定版本号、npm 发布与 Git tag。
+
 ## 2026-08-20 Windows 源码 checkout host peer 修复（进行中）
 
 - Windows 真机启动已定位到 DSH 宿主缺口，而非 mini-SWE 或 patch 路径：源码版 `apps/cli/package.json` 将 `@deepseek-ai/dsh-tools` 放在 `devDependencies`，`healProfilesModuleFallback` 只扫描 `dependencies/peerDependencies`，因此 `%USERPROFILE%\\.dsh\\profiles\\node_modules` 缺少该 peer。

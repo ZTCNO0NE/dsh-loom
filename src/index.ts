@@ -29,6 +29,7 @@ import type { IsolationOptions } from './isolation/runner.js'
 import { runIsolation } from './isolation/runner.js'
 import { childEnv } from './isolation/runner.js'
 import { officialDeepSeekLlm, terraLlm } from './llm/official.js'
+import { BuilderCredentialResolver, type CredentialServiceLike } from './llm/credentials.js'
 import { LoopCandidateGateway } from './candidates/gateway.js'
 import { miniSweChildEnv } from './builder/mini-swe-env.js'
 import { bundledMiniSwePaths } from './builder/bundled-mini-swe.js'
@@ -59,7 +60,9 @@ const PLUGIN_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
 export const name = 'dsh-meta-validate'
 
-export const inject = ['tools', 'agents', 'loader'] as const
+// DSH owns secrets and their hot-reload lifecycle. Loom consumes only this
+// service seam; it never reads or persists the credentials document itself.
+export const inject = ['tools', 'agents', 'loader', 'credentials'] as const
 
 export interface MetaValidateConfig {
   mode: 'observe' | 'propose' | 'apply'
@@ -80,6 +83,8 @@ export interface MetaValidateConfig {
   llm: {
     provider: string
     model: string
+    /** Advanced: a DSH credential reference, never a secret value. */
+    credentialRef: string
   }
   builder: {
     maxModelTurns: number
@@ -172,6 +177,7 @@ export const Config: Schema<MetaValidateConfig> = Schema.object({
   llm: Schema.object({
     provider: Schema.string().default('deepseek-official'),
     model: Schema.string().default('deepseek-v4-flash'),
+    credentialRef: Schema.string().default(''),
   }),
   builder: Schema.object({
     maxModelTurns: Schema.number().default(12),
@@ -485,11 +491,17 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     })
   }
 
+  const credentials = (ctx as Context & { credentials?: CredentialServiceLike }).credentials
+  const builderCredentials = new BuilderCredentialResolver(credentials, config.llm.provider, config.llm.credentialRef)
+  const resolveBuilderKey = async (): Promise<string | undefined> => (await builderCredentials.resolve())?.value
+
   // Independent meta-layer model: builder + review gate use the official
   // DeepSeek API (V4 Flash by default), while the actor keeps its own route.
+  // The key is resolved from DSH immediately before every request so editing
+  // .credentials.yaml takes effect without restarting Web.
   const metaLlm = config.llm.provider === 'deepseek-official'
-    ? officialDeepSeekLlm()
-    : config.llm.provider === 'gpt-5.6-terra' ? terraLlm() : undefined
+    ? officialDeepSeekLlm({ resolveApiKey: resolveBuilderKey })
+    : config.llm.provider === 'gpt-5.6-terra' ? terraLlm({ resolveApiKey: resolveBuilderKey }) : undefined
   const loopCandidateGateway = new LoopCandidateGateway({
     enabled: config.allowLoopCandidates.enabled,
     root: config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime'),
@@ -517,7 +529,10 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
         dependencySnapshot: config.allowLoopCandidates.miniSweDependencySnapshot,
         stepLimit: config.allowLoopCandidates.miniSweStepLimit,
         timeoutMs: config.allowLoopCandidates.builderMaxWallTimeMs,
-        env: miniSweChildEnv(config.llm.provider),
+        resolveEnv: async () => {
+          const credential = await builderCredentials.require()
+          return miniSweChildEnv(config.llm.provider, process.env, credential.value)
+        },
       },
     } : {}),
   })
@@ -865,11 +880,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
     async execute() {
-      const builderCredentialConfigured = config.llm.provider === 'deepseek-official'
-        ? Boolean(process.env.DSH_META_API_KEY ?? process.env.DEEPSEEK_API_KEY)
-        : config.llm.provider === 'gpt-5.6-terra'
-          ? Boolean(process.env.LOOM_TERRA_API_KEY ?? process.env.DSH_TERRA_API_KEY)
-          : false
+      const builderCredential = await builderCredentials.describe()
       const bundledRuntime = bundledMiniSwePaths({
         metaRoot: root,
         packageRoot: PLUGIN_ROOT,
@@ -888,8 +899,10 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
         builder: {
           provider: config.llm.provider,
           model: config.llm.model,
-          credentialConfigured: builderCredentialConfigured,
-          error: builderCredentialConfigured ? null : 'Builder API key is missing from the DSH process environment',
+          credentialRef: builderCredential.ref,
+          credentialConfigured: builderCredential.configured,
+          credentialSource: builderCredential.source ?? null,
+          error: builderCredential.configured ? null : `Builder credential ${builderCredential.ref} is not configured in DSH credentials`,
         },
         activeEvolution: {
           enabled: config.activeEvolution.enabled,
@@ -1143,6 +1156,10 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
         if (!config.activeEvolution.enabled || !bundledRuntime.ready) {
           return cleanToolResult({ accepted: false, mode: evolutionMode, error: config.activeEvolution.enabled ? 'mini-SWE runtime is not installed; run dsh-loom setup in the same DSH_META_VALIDATE_ROOT, then restart DSH' : 'activeEvolution is disabled' }) as unknown as JsonValue
         }
+        const builderCredential = await builderCredentials.describe()
+        if (!builderCredential.configured) {
+          return cleanToolResult({ accepted: false, mode: evolutionMode, error: `Builder credential ${builderCredential.ref} is not configured in DSH credentials` }) as unknown as JsonValue
+        }
         const taskSession = new EvolutionTaskSessionStore(root, config.sessionId)
         const redoSourceId = args.redo === true ? taskSession.read().recent?.planId : undefined
         const redoSource = redoSourceId ? readJson<UserEvolutionPlan>(join(root, 'user-evolution', config.sessionId, `${redoSourceId}.json`)) : undefined
@@ -1170,7 +1187,10 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
             configPath: bundledRuntime.configPath,
             stepLimit: config.activeEvolution.miniSweStepLimit,
             timeoutMs: config.activeEvolution.timeoutMs,
-            env: miniSweChildEnv(config.llm.provider),
+            resolveEnv: async () => {
+              const credential = await builderCredentials.require()
+              return miniSweChildEnv(config.llm.provider, process.env, credential.value)
+            },
           },
         })
         const controller = new UserEvolutionController({

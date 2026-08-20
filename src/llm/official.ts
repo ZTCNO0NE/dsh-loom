@@ -6,12 +6,16 @@ export interface OfficialLlmOptions {
   model?: string
   /** Default stays disabled; evaluation callers may explicitly assess reasoning mode. */
   thinking?: 'enabled' | 'disabled'
+  /** Host-only dynamic secret lookup; evaluated once per real request. */
+  resolveApiKey?: () => Promise<string | undefined>
 }
 
 export interface OpenAiCompatibleLlmOptions {
   baseURL: string
   apiKey?: string
   apiKeyEnv: string
+  /** Host-only dynamic secret lookup; evaluated once per real request. */
+  resolveApiKey?: () => Promise<string | undefined>
   /** Some compatible APIs reject DeepSeek's non-standard thinking field. */
   includeThinking?: boolean
   /** Some proxy gateways buffer SSE until completion; use their JSON response. */
@@ -34,6 +38,7 @@ export function officialDeepSeekLlm(options: OfficialLlmOptions = {}): LlmStream
     baseURL: options.baseURL ?? process.env.DSH_META_BASE_URL ?? process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
     apiKey: options.apiKey ?? process.env.DSH_META_API_KEY ?? process.env.DEEPSEEK_API_KEY,
     apiKeyEnv: 'DEEPSEEK_API_KEY',
+    resolveApiKey: options.resolveApiKey,
     includeThinking: true,
   }, options)
 }
@@ -47,7 +52,7 @@ export function openAiCompatibleLlm(options: OpenAiCompatibleLlmOptions, deepSee
   return {
     async *stream(call: LlmCallOptions): AsyncIterable<LlmChunk> {
       const baseURL = options.baseURL.replace(/\/$/, '')
-      const apiKey = options.apiKey ?? process.env[options.apiKeyEnv] ?? ''
+      const apiKey = await options.resolveApiKey?.() ?? options.apiKey ?? process.env[options.apiKeyEnv] ?? ''
       if (!apiKey) {
         throw new Error(`openAiCompatibleLlm: ${options.apiKeyEnv} missing`)
       }
@@ -171,13 +176,14 @@ function nativeToolDecision(name: string, argumentsText: string): string {
 }
 
 /** Isolated evaluation adapter. Key remains process-local and never persisted. */
-export function terraLlm(options: { baseURL?: string; apiKey?: string } = {}): LlmStreamLike {
+export function terraLlm(options: { baseURL?: string; apiKey?: string; resolveApiKey?: () => Promise<string | undefined> } = {}): LlmStreamLike {
   return openAiCompatibleLlm({
     baseURL: options.baseURL ?? process.env.LOOM_TERRA_BASE_URL ?? process.env.DSH_TERRA_BASE_URL ?? 'https://api.nwafu-ai.cn/v1',
     // LOOM_* is the public runtime-facing name; retain DSH_* for existing
     // evaluation shells. Both are process-local only and never persisted.
     apiKey: options.apiKey ?? process.env.LOOM_TERRA_API_KEY,
     apiKeyEnv: 'DSH_TERRA_API_KEY',
+    resolveApiKey: options.resolveApiKey,
     includeThinking: false,
     stream: false,
     responseFormat: false,

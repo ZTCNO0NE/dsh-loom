@@ -6,9 +6,11 @@
 
 ## 两个可用阶段
 
-### Builder 凭据（与 Actor 分开）
+### Builder 凭据（复用 DSH，角色仍独立）
 
-Actor 的 provider 配置不等于 Builder 已配置。Loom 默认用独立的 DeepSeek V4 Flash 做 Builder/Review Gate；启动 DSH 的同一终端需要 `DSH_META_API_KEY`（兼容 `DEEPSEEK_API_KEY`）。Terra 使用 `LOOM_TERRA_API_KEY`/`LOOM_TERRA_BASE_URL` 并配置 provider 为 `gpt-5.6-terra`。缺少该凭据时，状态和历史查询仍可用，但 `meta_auto` 不会进入真实 Builder proposal。
+Actor 的 provider 配置不等于 Builder 角色，但默认不需要再配置第二份 key：Loom 默认把 DeepSeek V4 Flash 的 Builder/Review Gate 凭据解析为 DSH 用户凭据 `DEEPSEEK_API_KEY`。请在 DSH Settings/Models 或 `$DSH_HOME/.credentials.yaml` 配置它。DSH credentials service 每次调用动态解析，外部更新文件后的下一次 Builder 调用自动使用新值。缺失时，状态和历史查询仍可用，但 `meta_auto` 不会进入真实 Builder proposal；`meta_status` 只显示 ref、configured 与来源（file/env），从不显示值。
+
+需要不同 key 的高级用户可将 Loom `llm.credentialRef` 设为另一个 DSH credential ref（例如兼容的 `DSH_META_API_KEY`）；不要把 key 放进 Loom config。Terra 仅在显式 `llm.provider: gpt-5.6-terra` 时解析 `LOOM_TERRA_API_KEY`，再兼容 `DSH_TERRA_API_KEY`。
 
 | 阶段 | 你能做什么 | 不会发生什么 |
 | --- | --- | --- |

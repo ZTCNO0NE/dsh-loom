@@ -331,13 +331,7 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 - 首次安装能访问 Python 依赖源（企业镜像、官方 PyPI 或 wheelhouse 均可）；
 - 已按 DSH 文档配置一个可回复的 Actor 模型 provider。
 
-> **重要：Builder 需要独立的模型凭据。** Loom 不会让 Actor 代替 Builder 工作。默认 Builder/Review Gate 使用 `deepseek-official` 的 `deepseek-v4-flash`，启动 DSH 的同一个终端必须设置 `DSH_META_API_KEY`（也兼容 `DEEPSEEK_API_KEY`）。如果改用 Terra，设置 `LOOM_TERRA_API_KEY` 和 `LOOM_TERRA_BASE_URL`，并将 Loom 的 `llm.provider` 配置为 `gpt-5.6-terra`。没有 Builder key 时，Web 仍可启动、状态工具仍可用，但 `meta_auto` 不会产生真实 proposal。密钥只放环境变量或 DSH 的本地凭据配置，不要写入 README、patch、workspace 或提交记录。
-
-Windows PowerShell 示例（请替换为你自己的 key，不要把真实 key 提交）：
-
-```powershell
-$env:DSH_META_API_KEY = "<你的 Builder DeepSeek key>"
-```
+> **重要：Builder 默认复用 DSH 的同一份凭据。** 在 DSH 的 Settings/Models 凭据页，或 `$DSH_HOME/.credentials.yaml`（Windows 默认为 `%USERPROFILE%\.dsh\.credentials.yaml`）配置 `DEEPSEEK_API_KEY` 即可。Loom 会在每次 Builder、Review Gate 或 mini-SWE 调用前通过 DSH credentials service 重新读取它；更新文件后的下一次调用无需重启 Web。Actor 与 Builder 是独立角色，但不需要两套 key。缺失时 Web 与状态工具仍可用，`meta_auto` 会明确说明未配置且不会创建真实 proposal。密钥绝不能写入聊天、patch、workspace、任务卡或提交记录。
 
 mini-SWE 2.4.6 本体已经随 Loom npm 包提供，不要求你的镜像存在 `mini-swe-agent`。`setup` 会先检查 Python 版本，再创建隔离 venv；不会改 DSH checkout、生产 profile 或凭据。
 
@@ -345,10 +339,9 @@ mini-SWE 2.4.6 本体已经随 Loom npm 包提供，不要求你的镜像存在 
 
 在 **DeepSeek Harness 源码根目录** 打开 PowerShell。先确认 DSH 本身能启动；Loom 不负责修复 DSH checkout 的构建或 `tsx/esm` 环境问题：
 ```powershell
-# 0. 在启动 DSH 的同一个 PowerShell 中配置 Loom 状态目录和独立 Builder key。
+# 0. 先在 DSH Settings/Models 配置 DEEPSEEK_API_KEY（见上方说明）。
+#    Loom 会读取同一份 DSH 用户凭据；此处无需再设置 Builder 专用环境变量。
 $env:DSH_META_VALIDATE_ROOT = "$env:USERPROFILE\.dsh\meta-validate"
-$env:DSH_META_API_KEY = "<你的 Builder DeepSeek key>"
-# Terra 用户改用：$env:LOOM_TERRA_API_KEY / $env:LOOM_TERRA_BASE_URL
 
 pnpm dsh web
 ```
@@ -380,10 +373,9 @@ pnpm dsh web --patch $patch
 在 **DeepSeek Harness 源码根目录** 打开 Terminal，先确认 `pnpm dsh web` 能启动，再按顺序执行：
 
 ```bash
-# 0. 在启动 DSH 的同一个 Terminal 中配置 Loom 状态目录和独立 Builder key。
+# 0. 先在 DSH Settings/Models 配置 DEEPSEEK_API_KEY（见上方说明）。
+#    Loom 会读取同一份 DSH 用户凭据；此处无需再设置 Builder 专用环境变量。
 export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
-export DSH_META_API_KEY="<你的 Builder DeepSeek key>"
-# Terra 用户改用：export LOOM_TERRA_API_KEY=... 和 export LOOM_TERRA_BASE_URL=...
 
 # 1. 安装 Loom 并检查 Web profile。
 pnpm dsh plugin --profile web add dsh-loom@1.2.17
@@ -404,10 +396,9 @@ pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 在 **DeepSeek Harness 源码根目录** 打开 shell，先确认 `pnpm dsh web` 能启动，再按顺序执行：
 
 ```bash
-# 0. 在启动 DSH 的同一个 shell 中配置 Loom 状态目录和独立 Builder key。
+# 0. 先在 DSH Settings/Models 配置 DEEPSEEK_API_KEY（见上方说明）。
+#    Loom 会读取同一份 DSH 用户凭据；此处无需再设置 Builder 专用环境变量。
 export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
-export DSH_META_API_KEY="<你的 Builder DeepSeek key>"
-# Terra 用户改用：export LOOM_TERRA_API_KEY=... 和 export LOOM_TERRA_BASE_URL=...
 
 # 1. 安装 Loom 并检查 Web profile。
 pnpm dsh plugin --profile web add dsh-loom@1.2.17
@@ -438,7 +429,6 @@ Web 是长驻服务，适合任务卡、Builder 后台进度、确认、取消�
 
 ```powershell
 # Windows PowerShell
-$env:DSH_META_API_KEY = "<你的 Builder key>"
 $patch = "$runtimeRoot\loom-active-evolution.patch.yml"
 pnpm dsh web --patch $patch
 ```
@@ -446,11 +436,14 @@ pnpm dsh web --patch $patch
 macOS/Linux：
 
 ```bash
-export DSH_META_API_KEY="<你的 Builder key>"
 pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 ```
 
 保持进程运行，然后打开 `http://localhost:3080`。用户直接提出需求、确认任务卡、询问演进进度，不需要填写 planId 或调用内部工具名。
+
+### 高级：使用不同的 Builder 凭据或 Terra
+
+普通使用不需要本节。若确实要让 Builder 使用不同于默认 `DEEPSEEK_API_KEY` 的 DSH credential reference，在 Loom 配置中设置 `llm.credentialRef`，例如 `DSH_META_API_KEY`；该值是**引用名**，不是 key。只有显式把 `llm.provider` 设为 `gpt-5.6-terra` 时，Loom 才依次解析 `LOOM_TERRA_API_KEY`、兼容的 `DSH_TERRA_API_KEY`，并使用 `LOOM_TERRA_BASE_URL` 或 `DSH_TERRA_BASE_URL` 作为端点。所有引用仍由 DSH Settings 或 `.credentials.yaml` 管理。
 
 ### 一次性 CLI（诊断/脚本）
 

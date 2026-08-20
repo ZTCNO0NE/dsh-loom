@@ -16,6 +16,8 @@ export interface MiniSweRuntimeOptions {
   timeoutMs: number
   /** Host-owned runtime environment (for example an OpenAI-compatible route). */
   env?: NodeJS.ProcessEnv
+  /** Resolves a fresh host-only environment immediately before spawning. */
+  resolveEnv?: () => Promise<NodeJS.ProcessEnv>
 }
 
 export interface MiniSweExecution {
@@ -56,6 +58,7 @@ export async function runMiniSwe(options: Omit<MiniSweRuntimeOptions, 'baselineR
   & { workspace: string; task: string; trajectoryPath: string }): Promise<MiniSweExecution> {
   let error: string | undefined
   try {
+    const env = options.resolveEnv ? await options.resolveEnv() : options.env
     await execFileAsync(options.executable, [
       '-m', options.model, '-y', '--exit-immediately', '-l', '0', '-o', options.trajectoryPath,
       '-c', options.configPath,
@@ -67,7 +70,7 @@ export async function runMiniSwe(options: Omit<MiniSweRuntimeOptions, 'baselineR
       cwd: options.workspace,
       timeout: options.timeoutMs,
       maxBuffer: 4 * 1024 * 1024,
-      ...(options.env ? { env: options.env } : {}),
+      ...(env ? { env } : {}),
     })
   } catch (caught) {
     error = String((caught as { message?: string }).message ?? caught)
