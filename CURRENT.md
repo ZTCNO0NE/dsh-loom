@@ -1,5 +1,16 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-21 mini-SWE 弹性预算与通用 runtime profile（Windows 6/6，待最终发布门）
+
+- 失败 run `builder-1787264098546-4cbde99f` 已完成完整 Skill 内容与结构检查，但把 30 次模型调用全部耗尽，终态 `LimitsExceeded`，因此没有 submission、Verifier 或 Gate。它不是空白 JSON 问题。
+- runner 新增软预算着陆：剩余 2 次调用时要求停止重复探索、最多做一次必要修正；最后 1 次要求已有可用候选时执行正式 completion command。它不自动提交文件，轨迹仍必须真实 `Submitted`，独立 compiler/Verifier/Gate 没有旁路。
+- Windows Web 主入口 fresh redo：Actor 先把“Loom 系统”误当 targetId 被校验拒绝；用户澄清后以原目标 `skill/builder-json-decision-output` 创建新 immutable plan `evolution-1787264820585-1hsxubuf`、run `builder-1787264820616-d190282d`。第 29/30 次调用收到软提醒，终态真实 `Submitted`；Verifier `approved`（196/196 alignment、module load 与 skill isolation pass），Gate `skill-insert`，cold-skill-load pass，任务 `completed/effective=true/restartRequired=false`。
+- 同一轨迹暴露 upstream `LocalEnvironment` 以 `shell=True` 选择宿主默认 shell；Windows 因此落到 `cmd.exe`，与 bash action 合同断裂。Loom runner 现在所有平台都显式启动 Bash：Windows 自动发现 Git Bash，POSIX 从 PATH 解析；支持 `LOOM_BASH`/`LOOM_PYTHON` 覆盖，错误显式覆盖 fail closed。action-local `python3` 固定映射到已解析解释器，模型收到精简动态 runtime profile，不再猜 `/workspace` 或重复探查已声明能力。
+- 默认上限从 30 提到 40，并在 75%/剩余 2/剩余 1 回合提供渐进式收敛提示；这只是弹性上限，不自动提交、不绕过独立裁决。小预算阈值重合时，final/2-call 提示优先于 75% checkpoint。
+- 六条独立 Windows product-entry Skill run 全部真实 `Submitted → approved → Gate skill-insert → cold-load pass → effective=true`。model turns 为 `9/8/5/5/6/5`（中位 5.5），tool executions `8/7/4/4/5/4`（中位 4.5）。动态 profile 的 attempts 5–6 分别 6/5 回合即提交，0 环境探查、0 非零工具结果、未触发 75% checkpoint，说明 40 回合上限没有拖长简单任务。attempt 6 原始 JSON 中文正常；此前乱码仅为 PowerShell/SSH 显示。
+- Windows 自动/显式覆盖、错误覆盖 fail-closed，以及 Linux 隔离 mini-SWE 2.4.6 的 Bash/heredoc/pipe/relative-path/python3 probes 均已完成。聚合记录：`/chenzute/dsh-src/eval/run-records/2026-08-21-windows-mini-swe-stability-6/report.json`；release evidence：`docs/evidence/v1.2.32.md`。
+- `1.2.32` 本地 tarball 已安装到 Windows `web/loom` profile，setup 成功，冷 Web listener PID `116484`、HTTP 200；两个 profile 都读回 version 1.2.32。执行入口经 `bundledMiniSwePaths` 从当前 npm packageRoot 解析，包内 runner 10807 bytes 且包含 `LoomLocalEnvironment`/checkpoint，YAML 含动态 profile；runtimeRoot 中旧同名文件不是 resolver 入口，未把它误作验证结果。完整发布门：Python compile、TypeScript check、**266/266**、build、diff-check、pack 通过；待 commit/push/tag/GitHub/npm publish 与 registry 正式包复核。
+
 ## 2026-08-21 v1.2.31 已发布：回滚后旧“待重启”文案冲突修复
 
 - Windows `1.2.30` 实时核查：Web PID `120904`、HTTP 200、Loom 1.2.30；`harness-state.restartRequired=false`、`applied=[]`，最近任务 `evolution-1787230109885-juuho59t` 为 `rolledBack:true`。因此当前没有待重启变更，Actor 结论“仍需冷重启”是错误的。

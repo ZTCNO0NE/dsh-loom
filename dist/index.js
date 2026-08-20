@@ -130,14 +130,14 @@ export const Config = Schema.object({
         miniSweExecutable: Schema.string().default(''),
         miniSweConfigPath: Schema.string().default(''),
         miniSweDependencySnapshot: Schema.string().default(''),
-        miniSweStepLimit: Schema.number().default(30),
+        miniSweStepLimit: Schema.number().default(40),
     }),
     activeEvolution: Schema.object({
         enabled: Schema.boolean().default(false),
         runtimeRoot: Schema.string().default(''),
         miniSweExecutable: Schema.string().default(''),
         miniSweConfigPath: Schema.string().default(''),
-        miniSweStepLimit: Schema.number().default(30),
+        miniSweStepLimit: Schema.number().default(40),
         timeoutMs: Schema.number().default(600000),
     }),
     lockedTargets: Schema.object({

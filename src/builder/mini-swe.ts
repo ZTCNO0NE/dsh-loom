@@ -94,11 +94,18 @@ export async function runMiniSwe(options: Omit<MiniSweRuntimeOptions, 'baselineR
     }
   }
   const messages = trajectory.messages ?? []
+  const terminal = [...messages].reverse().find((message) => message.role === 'exit')
+  const exitStatus = terminal?.extra?.exit_status
+  const modelTurns = messages.filter((message) => message.role === 'assistant').length
+  const toolSteps = messages.filter((message) => Array.isArray(message.tool_calls) && message.tool_calls.length > 0).length
+  const submitted = exitStatus === 'Submitted'
   return {
-    submitted: messages.some((message) => message.role === 'exit' && message.extra?.exit_status === 'Submitted'),
+    submitted,
     trajectoryPath: options.trajectoryPath,
-    modelTurns: messages.filter((message) => message.role === 'assistant').length,
-    toolSteps: messages.filter((message) => Array.isArray(message.tool_calls) && message.tool_calls.length > 0).length,
-    ...(error ? { error } : {}),
+    modelTurns,
+    toolSteps,
+    ...(!submitted && exitStatus
+      ? { error: `mini-SWE exited ${exitStatus} after ${modelTurns} model turns and ${toolSteps} tool steps without submission` }
+      : error ? { error } : {}),
   }
 }

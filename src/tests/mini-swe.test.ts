@@ -65,6 +65,20 @@ describe('mini-SWE runtime adapter', () => {
       workspace: root, trajectoryPath: join(root, 'trajectory.json'), task: 'test',
     })
     expect(result).toMatchObject({ submitted: false, modelTurns: 1, toolSteps: 1 })
+    expect(result.error).toBe('mini-SWE exited Failed after 1 model turns and 1 tool steps without submission')
+  })
+
+  it('reports a hard step-limit exit with its consumed budget', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-mini-swe-limit-'))
+    const executable = join(root, 'mini-fixture.sh')
+    writeFileSync(executable, '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = "-o" ]; then out="$2"; shift; fi; shift; done\nprintf \'{"messages":[{"role":"assistant","tool_calls":[{}]},{"role":"assistant","tool_calls":[{}]},{"role":"exit","extra":{"exit_status":"LimitsExceeded"}}]}\' > "$out"\nexit 1\n', 'utf8')
+    chmodSync(executable, 0o755)
+    const result = await runMiniSwe({
+      executable, configPath: 'ignored', baselineRoot: 'ignored', dependencySnapshot: 'ignored', model: 'test', stepLimit: 2, timeoutMs: 5_000,
+      workspace: root, trajectoryPath: join(root, 'trajectory.json'), task: 'test',
+    })
+    expect(result).toMatchObject({ submitted: false, modelTurns: 2, toolSteps: 2 })
+    expect(result.error).toBe('mini-SWE exited LimitsExceeded after 2 model turns and 2 tool steps without submission')
   })
 
   it('does not treat a parseable partial trajectory without a terminal exit as a submission', async () => {

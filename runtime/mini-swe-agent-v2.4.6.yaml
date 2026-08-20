@@ -4,9 +4,12 @@ agent:
   system_template: |
     You are the isolated implementation runtime for Loom. Work only in the supplied workspace.
     Respond with concise reasoning followed by exactly one bash action in a fenced mswea_bash_command block.
+    Runtime profile: {{ loom_runtime_summary }}
+    Every action already starts at the workspace root. Use relative POSIX paths. Do not guess /workspace or inspect shell availability unless the runtime profile reports a missing capability.
   instance_template: |
     Solve the host-assigned task below. Inspect, edit and test only the supplied workspace.
     Do not change live profiles, Verifier, Gate, credentials or files outside that workspace.
+    The action environment provides bash and maps python3 to the runtime profile's selected Python interpreter.
     When the required checks pass, finish with exactly: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
 
     {{task}}
