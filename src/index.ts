@@ -532,6 +532,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       miniSwe: {
         executable: config.allowLoopCandidates.miniSweExecutable,
         configPath: config.allowLoopCandidates.miniSweConfigPath,
+        runnerPath: bundledMiniSwePaths({ metaRoot: root, packageRoot: PLUGIN_ROOT }).runnerPath,
         baselineRoot: config.allowLoopCandidates.baselineRoot,
         dependencySnapshot: config.allowLoopCandidates.miniSweDependencySnapshot,
         stepLimit: config.allowLoopCandidates.miniSweStepLimit,
@@ -1192,6 +1193,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
           miniSwe: {
             executable: bundledRuntime.executable,
             configPath: bundledRuntime.configPath,
+            runnerPath: bundledRuntime.runnerPath,
             stepLimit: config.activeEvolution.miniSweStepLimit,
             timeoutMs: config.activeEvolution.timeoutMs,
             resolveEnv: async () => {

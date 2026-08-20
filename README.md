@@ -350,7 +350,7 @@ pnpm dsh web
 
 ```powershell
 # 1. 安装 Loom 到 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.19
+pnpm dsh plugin --profile web add dsh-loom@1.2.20
 
 # 2. 检查插件确已加载；输出中必须有 meta-validate。
 pnpm dsh web --dump-config
@@ -378,7 +378,7 @@ pnpm dsh web --patch $patch
 export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
 
 # 1. 安装 Loom 并检查 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.19
+pnpm dsh plugin --profile web add dsh-loom@1.2.20
 pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
@@ -401,7 +401,7 @@ pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
 
 # 1. 安装 Loom 并检查 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.19
+pnpm dsh plugin --profile web add dsh-loom@1.2.20
 pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。

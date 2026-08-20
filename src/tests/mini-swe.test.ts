@@ -40,6 +40,21 @@ describe('mini-SWE runtime adapter', () => {
     expect(readFileSync(join(root, 'trajectory.json'), 'utf8')).not.toContain('host-value')
   })
 
+  it('uses the non-interactive runner through the venv Python launcher', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-mini-swe-runner-'))
+    const mini = join(root, 'mini')
+    const python = join(root, 'python')
+    const runner = join(root, 'loom-mini-swe-runner.py')
+    const observed = join(root, 'args.txt')
+    writeFileSync(runner, '# runner fixture\n', 'utf8')
+    writeFileSync(python, `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(observed)}\nout=''\nwhile [ "$#" -gt 0 ]; do if [ "$1" = '--output' ]; then out="$2"; shift; fi; shift; done\nprintf '{"messages":[{"role":"exit","extra":{"exit_status":"Submitted"}}]}' > "$out"\n`, 'utf8')
+    chmodSync(python, 0o755)
+    const result = await runMiniSwe({ executable: mini, runnerPath: runner, configPath: 'config.yaml', baselineRoot: 'ignored', dependencySnapshot: 'ignored', model: 'test', stepLimit: 3, timeoutMs: 5_000, workspace: root, trajectoryPath: join(root, 'trajectory.json'), task: 'test task' })
+    expect(result.submitted).toBe(true)
+    expect(readFileSync(observed, 'utf8')).toContain(runner)
+    expect(readFileSync(observed, 'utf8')).toContain('--workspace')
+  })
+
   it('does not treat an incomplete durable trajectory as a submission', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-mini-swe-incomplete-'))
     const executable = join(root, 'mini-fixture.sh')
