@@ -56,7 +56,14 @@ import {
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
-const PLUGIN_ROOT = fileURLToPath(new URL('../..', import.meta.url))
+/** Resolve the package root from an entry such as `dsh-loom/dist/index.js`. */
+export function pluginRootFromModuleUrl(moduleUrl: string): string {
+  // One parent is the package root; two parents incorrectly resolve to the
+  // surrounding `node_modules` directory and lose the vendored mini-SWE config.
+  return fileURLToPath(new URL('..', moduleUrl))
+}
+
+const PLUGIN_ROOT = pluginRootFromModuleUrl(import.meta.url)
 
 export const name = 'dsh-meta-validate'
 

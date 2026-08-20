@@ -8,6 +8,7 @@
 - README 与 `docs/USAGE.md` 已改为默认在 DSH Settings/Models 或 `$DSH_HOME/.credentials.yaml` 配置一次 `DEEPSEEK_API_KEY`；不再要求用户每个 shell 设置 Builder 专属变量。
 - 定向和全量验证：`npm test` **242/242**、`npm run check`、`npm run build`、`git diff --check` 通过；另以隔离 `DSH_HOME` 的真实 `pnpm dsh web --patch cordis.patch.yml --dump-config` 确认 Web composition 含 `credentials-local` 且 Loom row 正确加载。
 - 下一步：在 Windows Web 使用**仅** `%USERPROFILE%\.dsh\.credentials.yaml` 的 `DEEPSEEK_API_KEY`（不设进程 key）启动，检查 `meta_status` 为 `credentialConfigured:true, credentialSource:file`，再完成一次 `meta_auto(plan)` readiness；通过后再决定版本号、npm 发布与 Git tag。
+- 追加修复（尚未发布）：`PLUGIN_ROOT` 曾从 installed `dist/index.js` 错退两级到 profile `node_modules`，导致 vendored `runtime/mini-swe-agent-v2.4.6.yaml` 被误判缺失（`configPresent:false`）；改为退一级至实际 `dsh-loom` 包根。该问题与用户 setup 无关。
 
 ## 2026-08-20 Windows 源码 checkout host peer 修复（进行中）
 
