@@ -1,5 +1,12 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-20 v1.2.30 已发布
+
+- Release code commit：`ef52da5`；annotated tag：`v1.2.30`；GitHub Release：<https://github.com/ZTCNO0NE/dsh-loom/releases/tag/v1.2.30>。
+- GitHub asset `dsh-loom-1.2.30.tgz` 已核验 SHA-256 `a11d1e08043e61fbf483a2781540bb2b06820660c0db1d30a38973422b65d28a`。
+- npm `dsh-loom@1.2.30` 已发布并成为 `latest`；registry shasum `5560f855167793ed2c974323efd8306fb0376bf1`，integrity `sha512-tl5QiBmmUbacOKM2JOPGlLdzAdjSx603uSlEgr251aOojWHoW7REY2hPiyDuWOHVSDYLJxl9qRX7Crzi9bEriA==`。
+- 发布门槛证据、claim boundary 与原始记录哈希见 `docs/evidence/v1.2.30.md`。下一步不是继续补 Windows/Linux 安装补丁，而是按固定 Loop 矩阵推进复杂源码实现收敛率；产品轨只接收真实用户反馈修正。
+
 ## 2026-08-20 Windows Config settings adapter + Gate rollback 真机 E2E（通过）
 
 - Windows 真机证明 loader overlay 不足以修改 `agent-default-model`：DSH `settings.yaml` 用户层优先于组合层，旧 `cold-config-overlay` 只证明可组合，不证明 Actor 真实使用新值。旧 approved record 保留为缺陷证据，不用于宣传。
