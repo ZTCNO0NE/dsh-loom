@@ -26,10 +26,10 @@ describe('actor evolution gateway', () => {
     expect(result).toMatchObject({ state: 'submitted', proposal: {
       capability: 'patch-evolution', payload: { targetId: 'agent-default-model', targetKind: 'config', action: 'update', config: { model: 'after', timeoutMs: 30000 } },
     } })
-    const paths = builderRunPaths(root, 's:actor-evolution', started.runId)
+    const paths = builderRunPaths(root, 's--actor-evolution', started.runId)
     expect(readFileSync(join(paths.workspaceBaseline, 'actor-config.json'), 'utf8')).toContain('before')
     expect(readFileSync(join(paths.workspace, 'outside.txt'), 'utf8')).toBe('runtime scratch')
-    const kernel = new BuilderKernel(root, 's:actor-evolution')
+    const kernel = new BuilderKernel(root, 's--actor-evolution')
     expect(kernel.proposal(started.runId)).toEqual(result.proposal)
   })
 
@@ -80,9 +80,9 @@ describe('actor evolution gateway', () => {
     if (classified.kind !== 'known' || classified.proposal.capability !== 'patch-evolution') throw new Error('test requires patch proposal')
     let installed = false
     const result = await adjudicatePatch(classified.proposal, {
-      root, sessionId: 's:actor-evolution',
-      validator: new Validator(null, { regressionDir: REGRESSION_DIR, maxCases: 20, coverageThreshold: 0.75, workspaceRoot: root, sessionId: 's:actor-evolution' }),
-      gate: new Gate(null, { root, sessionId: 's:actor-evolution' }),
+      root, sessionId: 's--actor-evolution',
+      validator: new Validator(null, { regressionDir: REGRESSION_DIR, maxCases: 20, coverageThreshold: 0.75, workspaceRoot: root, sessionId: 's--actor-evolution' }),
+      gate: new Gate(null, { root, sessionId: 's--actor-evolution' }),
       evidenceEvents: expectedTrajectory.events,
       applyOps: {
         readConfig: () => ({}), writeConfig: () => {}, rowExists: () => installed,
@@ -120,16 +120,16 @@ describe('actor evolution gateway', () => {
     if (classified.kind !== 'known' || classified.proposal.capability !== 'patch-evolution') throw new Error('test requires patch proposal')
     let installed = false
     const result = await adjudicatePatch(classified.proposal, {
-      root, sessionId: 's:actor-evolution',
+      root, sessionId: 's--actor-evolution',
       validator: new Validator(null, {
-        regressionDir: REGRESSION_DIR, maxCases: 20, coverageThreshold: 0.75, workspaceRoot: root, sessionId: 's:actor-evolution',
+        regressionDir: REGRESSION_DIR, maxCases: 20, coverageThreshold: 0.75, workspaceRoot: root, sessionId: 's--actor-evolution',
         skillIsolation: {
           dshCommand: ['unused'], cwd: root, profile: 'fixture', baseOverlays: [], stagingRoot: join(root, 'skill-staging'),
           dumpRunner: () => '# catalog baseline\n',
           probeRunner: (_overlays, task) => ({ out: `loaded edit-verify: ${task}`, exit: 0 }),
         },
       }),
-      gate: new Gate(null, { root, sessionId: 's:actor-evolution' }), evidenceEvents: expectedTrajectory.events,
+      gate: new Gate(null, { root, sessionId: 's--actor-evolution' }), evidenceEvents: expectedTrajectory.events,
       applyOps: {
         readConfig: () => ({}), writeConfig: () => {}, skillExists: () => installed,
         installSkill: () => { installed = true }, removeSkill: () => { installed = false },
@@ -148,7 +148,7 @@ describe('actor evolution gateway', () => {
     chmodSync(executable, 0o755)
     const gateway = new ActorEvolutionGateway({ root, sessionId: 's', model: 'test', miniSwe: { executable, configPath: 'ignored', stepLimit: 3, timeoutMs: 5_000 } })
     const started = gateway.startConfig('切换模型', { capability: 'config-evolution', targetId: 'agent-default-model', before: { model: 'before' } })
-    const kernel = new BuilderKernel(root, 's:actor-evolution')
+    const kernel = new BuilderKernel(root, 's--actor-evolution')
     kernel.decide(started.runId, { kind: 'tool', action: { name: 'write_workspace_file', path: 'actor-config.json', content: '{"model":"rejected"}\n' } })
     const message = kernel.context(started.runId).messages[0]
     if (!message) throw new Error('test requires initial Actor message')
@@ -156,7 +156,7 @@ describe('actor evolution gateway', () => {
     kernel.decide(started.runId, { kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'patch-evolution', payload: { targetId: 'agent-default-model', targetKind: 'config' }, rationale: 'fixture' } } })
     kernel.decide(started.runId, { kind: 'submit' })
     const reopened = gateway.reopen(started.runId, { verdict: 'rejected', failureSummary: 'cold smoke failed' })
-    const next = builderRunPaths(root, 's:actor-evolution', reopened.runId)
+    const next = builderRunPaths(root, 's--actor-evolution', reopened.runId)
     expect(reopened.runId).not.toBe(started.runId)
     expect(readFileSync(join(next.workspace, 'actor-config.json'), 'utf8')).toContain('before')
     expect(readFileSync(join(next.workspaceBaseline, 'actor-config.json'), 'utf8')).toContain('before')

@@ -9,6 +9,7 @@
 - 定向和全量验证：`npm test` **242/242**、`npm run check`、`npm run build`、`git diff --check` 通过；另以隔离 `DSH_HOME` 的真实 `pnpm dsh web --patch cordis.patch.yml --dump-config` 确认 Web composition 含 `credentials-local` 且 Loom row 正确加载。
 - 下一步：在 Windows Web 使用**仅** `%USERPROFILE%\.dsh\.credentials.yaml` 的 `DEEPSEEK_API_KEY`（不设进程 key）启动，检查 `meta_status` 为 `credentialConfigured:true, credentialSource:file`，再完成一次 `meta_auto(plan)` readiness；通过后再决定版本号、npm 发布与 Git tag。
 - 追加修复（尚未发布）：`PLUGIN_ROOT` 曾从 installed `dist/index.js` 错退两级到 profile `node_modules`，导致 vendored `runtime/mini-swe-agent-v2.4.6.yaml` 被误判缺失（`configPresent:false`）；改为退一级至实际 `dsh-loom` 包根。该问题与用户 setup 无关。
+- Windows product E2E 又暴露了第二个真实路径问题：ActorEvolutionGateway 用 `${sessionId}:actor-evolution` 作为持久 Builder workspace 目录，Windows 禁止 `:`。已将持久角色 scope 统一为跨平台 `--`（同时覆盖 loop exploration）；旧失败 run 保留，只能通过 redo 建立新 immutable run。新增 protocol 回归断言 Windows 保留字符不会进入 scope。
 
 ## 2026-08-20 Windows 源码 checkout host peer 修复（进行中）
 

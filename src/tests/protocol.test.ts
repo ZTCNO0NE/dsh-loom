@@ -9,6 +9,7 @@ import {
   paths,
   readJson,
   readJsonl,
+  scopedSessionId,
   sha256,
   workspaceDir,
 } from '../protocol/index.js'
@@ -50,6 +51,12 @@ describe('protocol', () => {
   it('sha256 is stable', () => {
     expect(sha256({ a: 1 })).toBe(sha256({ a: 1 }))
     expect(sha256({ a: 1 })).not.toBe(sha256({ a: 2 }))
+  })
+
+  it('uses a portable delimiter for persisted Builder role scopes', () => {
+    const scoped = scopedSessionId('default-session', 'actor-evolution')
+    expect(scoped).toBe('default-session--actor-evolution')
+    expect(scoped).not.toMatch(/[:<>"/\\|?*]/)
   })
 
   it('paths cover the v1 information catalog', () => {

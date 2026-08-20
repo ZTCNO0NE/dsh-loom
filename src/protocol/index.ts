@@ -25,6 +25,16 @@ export function workspaceDir(root: string, sessionId: string): string {
   return join(root, 'workspace', sessionId)
 }
 
+/**
+ * A filesystem-safe child session namespace for Builder-owned workspaces.
+ * Colons are useful in trace labels but illegal in Windows path components;
+ * use this fixed portable delimiter for all persisted role scopes instead.
+ */
+export function scopedSessionId(sessionId: string, scope: string): string {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(scope)) throw new Error(`invalid Builder session scope: ${scope}`)
+  return `${sessionId}--${scope}`
+}
+
 export function patchDir(root: string, sessionId: string, patchId: string): string {
   return join(workspaceDir(root, sessionId), 'patches', patchId)
 }

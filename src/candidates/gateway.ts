@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { CandidateRegistry } from './index.js'
 import type { LlmStreamLike } from '../meta/propose.js'
-import { atomicWriteJson, sha256 } from '../protocol/index.js'
+import { atomicWriteJson, scopedSessionId, sha256 } from '../protocol/index.js'
 import { BuilderDriver } from '../builder/driver.js'
 import { BuilderKernel, builderRunPaths, type BuilderEvent, type BuilderJournalEntry, type BuilderKernelOptions, type BuilderMessageInput, type BuilderProgressState, type BuilderRunMode, type BuilderRunState } from '../builder/kernel.js'
 import { BuilderCapabilityRuntimeRegistry, LOOP_EVOLUTION_CAPABILITY, WORKSPACE_SIMULATION_CAPABILITY } from '../builder/capabilities.js'
@@ -152,8 +152,10 @@ export class LoopCandidateGateway {
   }
 
   private kernel(): BuilderKernel {
-    return new BuilderKernel(this.options.root, `${this.options.sessionId}:loop-exploration`, this.runtimes, this.options.builderKernelOptions)
+    return new BuilderKernel(this.options.root, this.builderSessionId(), this.runtimes, this.options.builderKernelOptions)
   }
+
+  private builderSessionId(): string { return scopedSessionId(this.options.sessionId, 'loop-exploration') }
 
   /** Create a durable run before it enters the background queue. */
   startExploration(requirements: string, context: Record<string, unknown> = {}): LoopExplorationStart {
@@ -235,7 +237,7 @@ export class LoopCandidateGateway {
     if (this.options.executionRuntime === 'mini-swe' && runContext.run.mode === 'implementation') {
       const mini = this.options.miniSwe
       if (!mini) throw new Error('mini-SWE runtime is selected but not configured')
-      const paths = builderRunPaths(this.options.root, `${this.options.sessionId}:loop-exploration`, runId)
+      const paths = builderRunPaths(this.options.root, this.builderSessionId(), runId)
       const execution = await runMiniSwe({
         ...mini,
         model: this.options.model,
@@ -455,7 +457,7 @@ export class LoopCandidateGateway {
   }
 
   private materializeMiniWorkspace(kernel: BuilderKernel, runId: string, mini: Omit<MiniSweRuntimeOptions, 'model'>, baselineCommit: string): void {
-    const paths = builderRunPaths(this.options.root, `${this.options.sessionId}:loop-exploration`, runId)
+    const paths = builderRunPaths(this.options.root, this.builderSessionId(), runId)
     materializeMiniSweWorkspace({
       baselineRoot: mini.baselineRoot,
       dependencySnapshot: mini.dependencySnapshot,

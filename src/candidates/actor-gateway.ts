@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BuilderKernel, builderRunPaths } from '../builder/kernel.js'
+import { scopedSessionId } from '../protocol/index.js'
 import { runMiniSwe, type MiniSweRuntimeOptions } from '../builder/mini-swe.js'
 import type { ExpectedTrajectory } from '../types.js'
 import { compileCompositionWorkspace, type CompositionWorkspacePlan } from '../composition/compiler.js'
@@ -249,6 +250,7 @@ export class ActorEvolutionGateway {
     } })
   }
 
-  private kernel(): BuilderKernel { return new BuilderKernel(this.options.root, `${this.options.sessionId}:actor-evolution`) }
-  private paths(runId: string) { return builderRunPaths(this.options.root, `${this.options.sessionId}:actor-evolution`, runId) }
+  private builderSessionId(): string { return scopedSessionId(this.options.sessionId, 'actor-evolution') }
+  private kernel(): BuilderKernel { return new BuilderKernel(this.options.root, this.builderSessionId()) }
+  private paths(runId: string) { return builderRunPaths(this.options.root, this.builderSessionId(), runId) }
 }

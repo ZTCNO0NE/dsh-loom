@@ -141,7 +141,7 @@ describe('loop candidate gateway', () => {
     expect(readFileSync(join(manifest.artifactPath, 'lib', 'tool-calls.js'), 'utf8')).toContain('candidate = true')
     expect(existsSync(join(manifest.artifactPath, 'node_modules'))).toBe(false)
     expect(existsSync(join(manifest.artifactPath, '..', '..', 'staging', 'adversarial-loop', 'outside.txt'))).toBe(false)
-    expect(existsSync(join(builderRunPaths(root, 's:loop-exploration', started.runId).workspace, 'outside.txt'))).toBe(true)
+    expect(existsSync(join(builderRunPaths(root, 's--loop-exploration', started.runId).workspace, 'outside.txt'))).toBe(true)
   })
 
   it('does not invoke a builder or write a registry while disabled', async () => {
@@ -201,7 +201,7 @@ describe('loop candidate gateway', () => {
     if (!started.accepted) throw new Error('test requires enabled exploration')
     await expect(gateway.runExploration(started.runId)).resolves.toMatchObject({ state: 'submitted', accepted: true })
     const nextRunId = gateway.reopenExploration(started.runId, { verdict: 'rejected', failureSummary: 'independent verifier rejected first attempt' })
-    const nextWorkspace = builderRunPaths(root, 's:loop-exploration', nextRunId).workspace
+    const nextWorkspace = builderRunPaths(root, 's--loop-exploration', nextRunId).workspace
     expect(readFileSync(join(nextWorkspace, 'packages/core/agent-loop/src/tool-calls.ts'), 'utf8')).toContain('baseline = true')
     await expect(gateway.runExploration(nextRunId)).resolves.toMatchObject({ state: 'submitted', accepted: true })
   })
@@ -235,7 +235,7 @@ describe('loop candidate gateway', () => {
     expect(implementation).toMatchObject({ passMode: 'implementation' })
     expect(implementation.runId).not.toBe(diagnosis.runId)
 
-    const kernel = new BuilderKernel(root, 's:loop-exploration')
+    const kernel = new BuilderKernel(root, 's--loop-exploration')
     const next = kernel.context(implementation.runId)
     expect(next.run).toMatchObject({ mode: 'implementation', lineageId: kernel.load(diagnosis.runId).lineageId, parentRunId: diagnosis.runId })
     expect(next.input.previousRun).toMatchObject({ runId: diagnosis.runId })
@@ -308,7 +308,7 @@ describe('loop candidate gateway', () => {
       failureSummary: 'expected trajectory diverged at tool/call 0',
     })
     expect(nextRunId).not.toBe(started.runId)
-    const kernel = new BuilderKernel(root, 's:loop-exploration')
+    const kernel = new BuilderKernel(root, 's--loop-exploration')
     const next = kernel.context(nextRunId)
     expect(next.input.previousAttempt).toMatchObject({ verdict: 'rejected', failureSummary: 'expected trajectory diverged at tool/call 0' })
     expect(next.messages.map((message) => message.text)).toContain('注意不要动其他配置')
@@ -322,7 +322,7 @@ describe('loop candidate gateway', () => {
     })
     const first = gateway.startExploration('检查并行')
     if (!first.accepted) throw new Error('test requires enabled exploration')
-    const kernel = new BuilderKernel(root, 's:loop-exploration')
+    const kernel = new BuilderKernel(root, 's--loop-exploration')
     kernel.decide(first.runId, { kind: 'tool', action: { name: 'write_workspace_file', path: 'notes/diagnosis.md', content: 'prior result' } })
     const resumed = gateway.startExploration('检查并行', { resumeFromRunId: first.runId })
     if (!resumed.accepted) throw new Error('test requires enabled exploration')
@@ -338,7 +338,7 @@ describe('loop candidate gateway', () => {
     })
     const started = gateway.startExploration('改进 loop')
     if (!started.accepted) throw new Error('test requires enabled exploration')
-    const kernel = new BuilderKernel(root, 's:loop-exploration')
+    const kernel = new BuilderKernel(root, 's--loop-exploration')
     const initial = kernel.context(started.runId).messages[0]
     if (!initial) throw new Error('initial message is required')
     kernel.decide(started.runId, { kind: 'tool', action: { name: 'acknowledge_message', messageId: initial.id, status: 'accepted', understanding: '开始处理。' } })
@@ -361,7 +361,7 @@ describe('loop candidate gateway', () => {
     const resumed = gateway.resumeExploration(started.runId)
     if (!resumed.accepted) throw new Error('test requires enabled exploration')
     expect(resumed.runId).not.toBe(started.runId)
-    const kernel = new BuilderKernel(root, 's:loop-exploration')
+    const kernel = new BuilderKernel(root, 's--loop-exploration')
     expect(kernel.context(resumed.runId).input.previousRun).toMatchObject({ runId: started.runId, lineageId: expect.any(String) })
   })
 })
