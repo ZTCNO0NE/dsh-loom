@@ -1,6 +1,6 @@
 # CURRENT.md — 当前状态与交接
 
-## 2026-08-21 mini-SWE 弹性预算与通用 runtime profile（Windows 6/6，待最终发布门）
+## 2026-08-21 v1.2.32 已发布：mini-SWE 弹性预算与通用 runtime profile
 
 - 失败 run `builder-1787264098546-4cbde99f` 已完成完整 Skill 内容与结构检查，但把 30 次模型调用全部耗尽，终态 `LimitsExceeded`，因此没有 submission、Verifier 或 Gate。它不是空白 JSON 问题。
 - runner 新增软预算着陆：剩余 2 次调用时要求停止重复探索、最多做一次必要修正；最后 1 次要求已有可用候选时执行正式 completion command。它不自动提交文件，轨迹仍必须真实 `Submitted`，独立 compiler/Verifier/Gate 没有旁路。
@@ -9,7 +9,7 @@
 - 默认上限从 30 提到 40，并在 75%/剩余 2/剩余 1 回合提供渐进式收敛提示；这只是弹性上限，不自动提交、不绕过独立裁决。小预算阈值重合时，final/2-call 提示优先于 75% checkpoint。
 - 六条独立 Windows product-entry Skill run 全部真实 `Submitted → approved → Gate skill-insert → cold-load pass → effective=true`。model turns 为 `9/8/5/5/6/5`（中位 5.5），tool executions `8/7/4/4/5/4`（中位 4.5）。动态 profile 的 attempts 5–6 分别 6/5 回合即提交，0 环境探查、0 非零工具结果、未触发 75% checkpoint，说明 40 回合上限没有拖长简单任务。attempt 6 原始 JSON 中文正常；此前乱码仅为 PowerShell/SSH 显示。
 - Windows 自动/显式覆盖、错误覆盖 fail-closed，以及 Linux 隔离 mini-SWE 2.4.6 的 Bash/heredoc/pipe/relative-path/python3 probes 均已完成。聚合记录：`/chenzute/dsh-src/eval/run-records/2026-08-21-windows-mini-swe-stability-6/report.json`；release evidence：`docs/evidence/v1.2.32.md`。
-- `1.2.32` 本地 tarball 已安装到 Windows `web/loom` profile，setup 成功，冷 Web listener PID `116484`、HTTP 200；两个 profile 都读回 version 1.2.32。执行入口经 `bundledMiniSwePaths` 从当前 npm packageRoot 解析，包内 runner 10807 bytes 且包含 `LoomLocalEnvironment`/checkpoint，YAML 含动态 profile；runtimeRoot 中旧同名文件不是 resolver 入口，未把它误作验证结果。完整发布门：Python compile、TypeScript check、**266/266**、build、diff-check、pack 通过；待 commit/push/tag/GitHub/npm publish 与 registry 正式包复核。
+- `1.2.32` 已发布到 npm latest 与 GitHub Release。npm shasum `d156d89ed79317373b35a70a7c36fc2c79e2df86`、integrity `sha512-XrRHc/t0QrtwK2ho96PKXWpGCR3GfLQYFfH6EuNn8wbtFk8QljQF2ru041vRpxmJjykFPRORo7jCi7xhuF/skg==`；GitHub asset 与 npm pack 使用同一 tar 字节。正式 registry 包随后安装到 Windows `web/loom` profile，setup 成功，冷 Web listener PID `123876`、HTTP 200；package spec/version 都是 1.2.32，resolver-owned runner/config 含 `LoomLocalEnvironment`、checkpoint 与动态 profile。完整发布门：Python compile、TypeScript check、**266/266**、build、diff-check、pack 与 registry cold smoke 通过。
 
 ## 2026-08-21 v1.2.31 已发布：回滚后旧“待重启”文案冲突修复
 
