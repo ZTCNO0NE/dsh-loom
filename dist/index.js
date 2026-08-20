@@ -746,6 +746,13 @@ export function apply(ctx, config) {
                 : config.llm.provider === 'gpt-5.6-terra'
                     ? Boolean(process.env.LOOM_TERRA_API_KEY ?? process.env.DSH_TERRA_API_KEY)
                     : false;
+            const bundledRuntime = bundledMiniSwePaths({
+                metaRoot: root,
+                packageRoot: PLUGIN_ROOT,
+                runtimeRoot: config.activeEvolution.runtimeRoot,
+                executable: config.activeEvolution.miniSweExecutable,
+                configPath: config.activeEvolution.miniSweConfigPath,
+            });
             const jobsDir = join(root, 'workspace', config.sessionId, 'jobs');
             const jobFiles = existsSync(jobsDir) ? readdirSync(jobsDir).sort().reverse() : [];
             const latestJob = jobFiles.length > 0
@@ -759,6 +766,14 @@ export function apply(ctx, config) {
                     model: config.llm.model,
                     credentialConfigured: builderCredentialConfigured,
                     error: builderCredentialConfigured ? null : 'Builder API key is missing from the DSH process environment',
+                },
+                activeEvolution: {
+                    enabled: config.activeEvolution.enabled,
+                    runtimeRoot: bundledRuntime.runtimeRoot,
+                    executablePresent: existsSync(bundledRuntime.executable),
+                    configPresent: existsSync(bundledRuntime.configPath),
+                    ready: bundledRuntime.ready,
+                    error: bundledRuntime.ready ? null : 'mini-SWE runtime is not ready at the configured runtimeRoot; rerun dsh-loom setup and launch with its generated patch',
                 },
                 workspaceRoot: root,
                 thresholds: config.thresholds,

@@ -15,6 +15,7 @@
 - 文档补齐 Builder 独立凭据说明：默认 `DSH_META_API_KEY`/`DEEPSEEK_API_KEY`，Terra 使用 `LOOM_TERRA_API_KEY` + `LOOM_TERRA_BASE_URL`；明确 `dsh-loom` 是 bundle 而非 skill，Actor key 不会自动成为 Builder key。
 - `meta_status` 新增脱敏 Builder health projection：provider、model、`credentialConfigured` 和缺失提示，不返回任何 key。`dsh-loom@1.2.15` 已发布；仍未开放通过 Actor 明文写入凭据，当前安全入口是启动 DSH 前设置环境变量。
 - Linux 真机冷路径已验证：隔离 DSH_HOME → web profile 安装 Loom → `--dump-config` 发现 `meta-validate` → setup/mini-SWE/patch → Web 启动并收到 HTTP 200。过程中发现并修复 `CandidateImporter` 中重复的 builder-generated helper 声明（1.2.15 会使 Web import 抛 SyntaxError）；`dsh-loom@1.2.16` 已发布。定向 17 tests、check、build、diff-check 通过。
+- Windows runtime lookup 统一：setup patch 现在同时写入 `workspaceRoot` 和 `activeEvolution.runtimeRoot`，不再依赖已运行 Web 宿主是否继承 User 级 `DSH_META_VALIDATE_ROOT`；`meta_status` 显示解析后的 runtime 路径、executable/config presence、ready/error。`dsh-loom@1.2.17` 已发布，check + mini runtime tests + build + diff-check 通过。
 
 ## 2026-08-20 文章插图版式调整
 

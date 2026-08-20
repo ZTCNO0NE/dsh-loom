@@ -72,7 +72,20 @@ function bootstrapRuntime() {
   }
   const patch = join(runtimeRoot, 'loom-active-evolution.patch.yml')
   // Quote the path so spaces, ':' and other YAML-significant characters are safe.
-  writeFileSync(patch, ['- id: meta-validate', '  config:', '    activeEvolution:', '      enabled: true', `      runtimeRoot: ${JSON.stringify(runtimeRoot)}`, ''].join('\n'))
+  // Keep the patch self-contained: a Web process launched from a shortcut or
+  // an already-open terminal may not inherit a newly-written Windows user
+  // environment variable. Both durable workspace and runtime therefore come
+  // from the same setup-owned cache, not from process environment luck.
+  const workspaceRoot = dirname(dirname(runtimeRoot))
+  writeFileSync(patch, [
+    '- id: meta-validate',
+    '  config:',
+    `    workspaceRoot: ${JSON.stringify(workspaceRoot)}`,
+    '    activeEvolution:',
+    '      enabled: true',
+    `      runtimeRoot: ${JSON.stringify(runtimeRoot)}`,
+    '',
+  ].join('\n'))
   return { runtimeRoot, mini, patch }
 }
 
