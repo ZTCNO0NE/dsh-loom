@@ -1,12 +1,12 @@
 # CURRENT.md — 当前状态与交接
 
-## 2026-08-21 回滚后旧“待重启”文案冲突（Windows 真机通过，发布 v1.2.31）
+## 2026-08-21 v1.2.31 已发布：回滚后旧“待重启”文案冲突修复
 
 - Windows `1.2.30` 实时核查：Web PID `120904`、HTTP 200、Loom 1.2.30；`harness-state.restartRequired=false`、`applied=[]`，最近任务 `evolution-1787230109885-juuho59t` 为 `rolledBack:true`。因此当前没有待重启变更，Actor 结论“仍需冷重启”是错误的。
 - 根因是三个历史投影未随 rollback 更新：`latestJob.summary` 保留安装时“待重启”；completed progress 仍称“完成安装”；limitations 仍保留 cold restart 句。Actor 把它们和实时 false/已回滚混合后得出矛盾结论。
 - 修复：`meta_status` 按 immutable plan 动态投影 user-evolution job 摘要；回滚任务卡显示“恢复安装前快照”；展示层过滤已失效的 cold-restart 限制；未来 rollback 同步更新持久 job summary；terminal recovery 让 `rolledBack` 优先于旧 `restartRequired`。
 - Windows 换装本地测试包后冷启动 Web，真实 Actor 再次调用两项工具：任务卡 progress 为“已通过 Gate 恢复安装前快照 / 当前任务不再有待重启生效的变更”，旧 cold-restart limitation 已消失；`meta_status` 返回 `restartRequired:false`、job `finished`、summary `用户委托 config/agent-default-model：已回滚`，Actor 正确结论为“无需重启”。
-- 验证：定向 13/13、全量 **262/262**、`npm run check`、`npm run build`、`git diff --check` 与 Windows 真机 cold restart 通过。补丁发布版本为 `1.2.31`。
+- 验证：定向 13/13、全量 **262/262**、`npm run check`、`npm run build`、`git diff --check` 与 Windows 真机 cold restart 通过。Git tag/GitHub Release `v1.2.31` 已发布；npm `dsh-loom@1.2.31` 已成为 `latest`，shasum `5a46516fd325c912697aa02eec02962a5058e8f1`。
 
 ## 2026-08-20 v1.2.30 已发布
 
