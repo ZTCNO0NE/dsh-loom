@@ -912,6 +912,15 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       const latestJob = jobFiles.length > 0
         ? readJson<{ id?: string; status?: string; summary?: string; error?: string }>(join(jobsDir, jobFiles[0]!))
         : null
+      let latestJobSummary = latestJob?.summary ?? null
+      if (latestJob?.id) {
+        const persisted = readJson<PersistedJob>(jobPathFor(latestJob.id))
+        if (persisted?.request?.kind === 'user-evolution' && typeof persisted.request.planId === 'string') {
+          const plan = readJson<UserEvolutionPlan>(join(root, 'user-evolution', config.sessionId, `${persisted.request.planId}.json`))
+          const terminal = plan ? terminalJobFromPlan(plan) : null
+          if (terminal) latestJobSummary = terminal.summary
+        }
+      }
       return {
         mode: config.mode,
         sessionId: config.sessionId,
@@ -942,7 +951,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
           updatedAt: candidate.updatedAt,
         })),
         latestJob: latestJob
-          ? { id: latestJob.id ?? null, status: latestJob.status ?? null, summary: latestJob.summary ?? null, error: latestJob.error ?? null }
+          ? { id: latestJob.id ?? null, status: latestJob.status ?? null, summary: latestJobSummary, error: latestJob.error ?? null }
           : null,
         growthCount: readLedger(root, config.sessionId).length,
       }
@@ -1087,7 +1096,11 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
           : plan.state === 'queued' || plan.state === 'executing'
             ? '正在隔离 workspace 中执行；未通过 Verifier/Gate 前不会生效。'
             : plan.state === 'completed'
-              ? '已通过独立裁决并生效；报告包含限制与回滚边界。'
+              ? plan.result?.rolledBack
+                ? '已通过 Gate 回滚；当前没有待重启生效的变更。'
+                : plan.result?.restartRequired
+                  ? '已通过独立裁决并安装；等待宿主冷重启后生效。'
+                  : '已通过独立裁决并生效；报告包含限制与回滚边界。'
               : '未生效；请查看报告原因，不会静默重试或绕过裁决。',
       }) as unknown as JsonValue
     },
@@ -1152,9 +1165,13 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
           rolledBack: true,
           rollbackReceipt: paths.rollbackReceipt(root, config.sessionId, patch.id),
           summary: '已通过 Gate 恢复安装前快照；回滚 receipt 已持久化',
-          limitations: [...plan.result.limitations, 'Rollback restores the Gate before snapshot; already-running Actor turns are not rewritten.'],
+          limitations: [
+            ...plan.result.limitations.filter((item) => !/cold host restart|requires a cold host restart|宿主重启/i.test(item)),
+            'Rollback restores the Gate before snapshot; already-running Actor turns are not rewritten.',
+          ],
         }
         atomicWriteJson(planPath, plan)
+        if (session.recent?.jobId) updateJob(session.recent.jobId, { status: 'finished', summary: `用户委托 config/${plan.target.plan.targetId}：已回滚`, error: undefined })
         return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan), rollback: { rolledBack: true, targetId: receipt.targetId } }) as unknown as JsonValue
       }
       return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan, session.active?.jobId ? readJson<PersistedJob>(jobPathFor(session.active.jobId))?.status : undefined) }) as unknown as JsonValue

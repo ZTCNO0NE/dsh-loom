@@ -25,7 +25,9 @@ export function userEvolutionTaskCard(plan, jobStatus, extras = {}) {
                 : phase === 'verifying'
                     ? { current: '候选已冻结，正在由独立 Verifier 与 Gate 裁决。', next: '裁决完成前不会生效。' }
                     : phase === 'completed'
-                        ? { current: '已通过独立裁决并完成安装。', next: '可按同任务报告观察效果和限制。' }
+                        ? result?.rolledBack
+                            ? { current: '已通过 Gate 恢复安装前快照。', next: '当前任务不再有待重启生效的变更。' }
+                            : { current: '已通过独立裁决并完成安装。', next: '可按同任务报告观察效果和限制。' }
                         : phase === 'not_completed'
                             ? { current: '实现未形成可裁决提交。', next: '检查原因后创建新的 immutable plan。' }
                             : phase === 'cancelled'
@@ -57,8 +59,11 @@ export function userEvolutionTaskCard(plan, jobStatus, extras = {}) {
     };
 }
 function presentResult(result) {
+    const limitations = result.rolledBack
+        ? result.limitations.filter((item) => !/cold host restart|requires a cold host restart|宿主重启/i.test(item))
+        : result.limitations;
     return {
         outcome: result.rolledBack ? '已回滚' : result.restartRequired ? '待重启生效' : result.applied ? '已生效' : result.summary.includes('取消') ? '已取消' : result.verdict === 'aborted' ? '未完成' : '未生效',
-        verdict: result.verdict, summary: result.summary, limitations: result.limitations,
+        verdict: result.verdict, summary: result.summary, limitations,
     };
 }

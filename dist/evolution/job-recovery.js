@@ -11,11 +11,13 @@ export function terminalJobFromPlan(plan) {
                     : null;
     if (!status)
         return null;
-    const outcome = plan.result?.restartRequired
-        ? '待重启生效'
-        : plan.result?.applied
-            ? '已生效'
-            : plan.result?.summary ?? plan.state;
+    const outcome = plan.result?.rolledBack
+        ? '已回滚'
+        : plan.result?.restartRequired
+            ? '待重启生效'
+            : plan.result?.applied
+                ? '已生效'
+                : plan.result?.summary ?? plan.state;
     return {
         status,
         summary: `用户委托 ${plan.target.kind}/${plan.target.plan.targetId}：${outcome}`,

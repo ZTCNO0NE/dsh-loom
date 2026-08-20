@@ -36,4 +36,17 @@ describe('user evolution job recovery', () => {
     expect(terminalJobFromPlan(plan('executing'))).toBeNull()
     expect(terminalJobFromPlan(plan('verifying'))).toBeNull()
   })
+
+  it('projects rollback above an obsolete restart-required flag', () => {
+    const rolledBack = plan('completed')
+    rolledBack.result = {
+      runId: 'builder-1', targetKind: 'config', targetId: 'agent-default-model', verdict: 'approved',
+      applied: false, effective: false, restartRequired: true, rolledBack: true,
+      summary: 'restored before snapshot', limitations: [],
+    }
+    expect(terminalJobFromPlan(rolledBack)).toEqual({
+      status: 'finished',
+      summary: '用户委托 config/agent-default-model：已回滚',
+    })
+  })
 })

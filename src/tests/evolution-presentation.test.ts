@@ -59,10 +59,15 @@ describe('user evolution task card', () => {
     rolledBack.result = {
       runId: 'config-run', targetKind: 'config', targetId: 'agent-default-model', verdict: 'approved',
       applied: false, effective: false, restartRequired: false, rolledBack: true,
-      rollbackReceipt: 'C:/secret/internal/rollback.json', summary: '已通过 Gate 回滚', limitations: [],
+      rollbackReceipt: 'C:/secret/internal/rollback.json', summary: '已通过 Gate 回滚',
+      limitations: ['The verified config overlay requires a cold host restart before it affects Actor sessions.', 'Rollback is auditable.'],
     }
     const card = userEvolutionTaskCard(rolledBack)
-    expect(card).toMatchObject({ phase: 'completed', result: { outcome: '已回滚' } })
+    expect(card).toMatchObject({
+      phase: 'completed',
+      progress: { current: '已通过 Gate 恢复安装前快照。', next: '当前任务不再有待重启生效的变更。' },
+      result: { outcome: '已回滚', limitations: ['Rollback is auditable.'] },
+    })
     expect(JSON.stringify(card)).not.toContain('rollback.json')
   })
 })
