@@ -6,6 +6,7 @@ Windows child processes without a console buffer that crashes before its yolo
 mode can start. This runner deliberately imports only the default agent path.
 """
 import argparse
+import os
 from pathlib import Path
 
 from minisweagent.agents import get_agent
@@ -33,7 +34,16 @@ def main() -> None:
             "output_path": Path(args.output), "step_limit": args.step_limit,
             "wall_time_limit_seconds": args.timeout_seconds,
         },
-        "model": {"model_name": args.model},
+        # mini-SWE delegates to LiteLLM.  Loom's public Builder model names
+        # are provider-neutral, while LiteLLM requires an explicit provider
+        # for the OpenAI-compatible endpoints used by DeepSeek and Terra.
+        "model": {
+            "model_name": args.model if "/" in args.model else f"openai/{args.model}",
+            # mini-SWE forwards model_kwargs directly to LiteLLM.  Explicitly
+            # supply api_base so OpenAI-compatible providers never fall back
+            # to api.openai.com in a non-interactive child process.
+            "model_kwargs": {"api_base": os.environ["OPENAI_API_BASE"]} if os.environ.get("OPENAI_API_BASE") else {},
+        },
         "environment": {"cwd": args.workspace},
     })
     config = recursive_merge(*configs)

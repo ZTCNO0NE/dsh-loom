@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -26,6 +26,12 @@ describe('protocol', () => {
     expect(readJson<{ value: number }>(file)).toEqual({ value: 1 })
     atomicWriteJson(file, { value: 2 })
     expect(readJson<{ value: number }>(file)).toEqual({ value: 2 })
+  })
+
+  it('reads a Windows PowerShell UTF-8 BOM JSON artifact', () => {
+    const file = join(tmpRoot(), 'powershell.json')
+    writeFileSync(file, '\ufeff{"model":"deepseek-chat"}\r\n', 'utf8')
+    expect(readJson<{ model: string }>(file)).toEqual({ model: 'deepseek-chat' })
   })
 
   it('jsonl append and malformed-line tolerance', () => {

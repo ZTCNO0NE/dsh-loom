@@ -35,7 +35,7 @@ export interface EvolutionTaskCard {
     }>;
     retryable: boolean;
     result?: {
-        outcome: '已生效' | '未生效' | '未完成' | '已取消';
+        outcome: '已生效' | '待重启生效' | '已回滚' | '未生效' | '未完成' | '已取消';
         verdict: UserEvolutionReport['verdict'];
         summary: string;
         limitations: string[];

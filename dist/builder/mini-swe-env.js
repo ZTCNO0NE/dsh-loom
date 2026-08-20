@@ -3,18 +3,35 @@
  * copied only into the spawned child environment; callers must never serialize
  * this object into a prompt, workspace, trajectory, plan, or evidence record.
  */
-export function miniSweChildEnv(provider, source = process.env) {
+export function miniSweChildEnv(provider, source = process.env, credential) {
     const isTerra = provider === 'gpt-5.6-terra';
     const baseURL = isTerra
         ? source.LOOM_TERRA_BASE_URL ?? source.DSH_TERRA_BASE_URL
-        : source.DSH_META_BASE_URL ?? source.DEEPSEEK_BASE_URL;
-    const apiKey = isTerra
-        ? source.LOOM_TERRA_API_KEY ?? source.DSH_TERRA_API_KEY
-        : source.DSH_META_API_KEY ?? source.DEEPSEEK_API_KEY;
+        : source.DSH_META_BASE_URL ?? source.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com/v1';
+    // Do not forward provider-specific source variables in bulk. The resolved
+    // credential is mapped to the one variable mini-SWE needs for this child.
+    const child = { ...source };
+    delete child.DSH_META_API_KEY;
+    delete child.DEEPSEEK_API_KEY;
+    delete child.LOOM_TERRA_API_KEY;
+    delete child.DSH_TERRA_API_KEY;
+    delete child.OPENAI_API_KEY;
     return {
-        ...source,
+        ...child,
         MSWEA_CONFIGURED: 'true',
-        ...(baseURL ? { OPENAI_BASE_URL: baseURL } : {}),
-        ...(apiKey ? { OPENAI_API_KEY: apiKey } : {}),
+        // LiteLLM's OpenAI adapter consumes OPENAI_API_BASE.  Keep the common
+        // OPENAI_BASE_URL spelling too for runtimes that use the OpenAI SDK
+        // directly, but never fall back to api.openai.com for Loom providers.
+        ...(baseURL ? { OPENAI_API_BASE: baseURL, OPENAI_BASE_URL: baseURL } : {}),
+        ...(credential ? isTerra
+            ? { OPENAI_API_KEY: credential }
+            : { DEEPSEEK_API_KEY: credential }
+            : {}),
     };
+}
+/** Maps Loom's provider-neutral model name to mini-SWE/LiteLLM's provider route. */
+export function miniSweModelName(provider, model) {
+    if (model.includes('/'))
+        return model;
+    return provider === 'deepseek-official' ? `deepseek/${model}` : `openai/${model}`;
 }

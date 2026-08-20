@@ -5,11 +5,15 @@ export interface OfficialLlmOptions {
     model?: string;
     /** Default stays disabled; evaluation callers may explicitly assess reasoning mode. */
     thinking?: 'enabled' | 'disabled';
+    /** Host-only dynamic secret lookup; evaluated once per real request. */
+    resolveApiKey?: () => Promise<string | undefined>;
 }
 export interface OpenAiCompatibleLlmOptions {
     baseURL: string;
     apiKey?: string;
     apiKeyEnv: string;
+    /** Host-only dynamic secret lookup; evaluated once per real request. */
+    resolveApiKey?: () => Promise<string | undefined>;
     /** Some compatible APIs reject DeepSeek's non-standard thinking field. */
     includeThinking?: boolean;
     /** Some proxy gateways buffer SSE until completion; use their JSON response. */
@@ -37,4 +41,5 @@ export declare function openAiCompatibleLlm(options: OpenAiCompatibleLlmOptions,
 export declare function terraLlm(options?: {
     baseURL?: string;
     apiKey?: string;
+    resolveApiKey?: () => Promise<string | undefined>;
 }): LlmStreamLike;

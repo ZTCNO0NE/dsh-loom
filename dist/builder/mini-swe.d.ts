@@ -9,6 +9,9 @@ export interface MiniSweRuntimeOptions {
     timeoutMs: number;
     /** Host-owned runtime environment (for example an OpenAI-compatible route). */
     env?: NodeJS.ProcessEnv;
+    /** Resolves a fresh host-only environment immediately before spawning. */
+    resolveEnv?: () => Promise<NodeJS.ProcessEnv>;
+    runnerPath?: string;
 }
 export interface MiniSweExecution {
     submitted: boolean;

@@ -62,6 +62,7 @@ export declare class ActorEvolutionGateway {
     };
     private abort;
     private acknowledgeRuntimeInbox;
+    private builderSessionId;
     private kernel;
     private paths;
 }

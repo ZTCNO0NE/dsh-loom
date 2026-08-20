@@ -140,6 +140,7 @@ export class ActorEvolutionGateway {
         `Actor request: ${requirements.slice(0, 12_000)}`,
         `Actor inbox: ${JSON.stringify(context.messages.map((message) => ({ id: message.id, rawUserText: message.rawUserText, actorMemo: message.actorMemo }))).slice(0, 12_000)}`,
         `Create only the module bundle under actor-module/. Its required entry is ${String(target.moduleEntry)}. Do not edit verifier, gate, live profiles, or files outside the workspace.`,
+        ...(target.targetKind === 'skill' ? [`The required SKILL.md must begin with YAML frontmatter containing exactly name: ${String(target.targetId)} and a non-empty description: field, followed by --- and the skill instructions.`] : []),
         'When the module is tested, submit using the runtime completion command. Loom will independently compile, validate and gate it.',
       ].join('\n'),
     })

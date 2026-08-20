@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
@@ -259,7 +259,7 @@ describe('validator A3', () => {
   })
 
   function skillPatch() {
-    const p = patch({ action: 'insert', targetName: 'edit-verify', targetKind: 'skill' })
+    const p = patch({ action: 'insert', targetId: 'edit-verify', targetName: 'edit-verify', targetKind: 'skill' })
     p.module = { files: [{ path: 'edit-verify/SKILL.md', content: '---\nname: edit-verify\n---\nwc -l body\n' }], entry: 'edit-verify/SKILL.md' }
     p.expectedTrajectory = {
       schemaVersion: 1,
@@ -278,6 +278,7 @@ describe('validator A3', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-mv-skill-'))
     const sessionId = 's1'
     const p = skillPatch()
+    let probeOverlays: string[] | undefined
     const v = new Validator(null, {
       regressionDir: REGRESSION_DIR,
       maxCases: 20,
@@ -290,7 +291,10 @@ describe('validator A3', () => {
         baseOverlays: [],
         stagingRoot: join(root, 'skills-staging'),
         dumpRunner: () => '# base\n- id: skill-filesystem\n  name: x\n',
-        probeRunner: () => ({ out: '技能 edit-verify 内容：wc -l body', exit: 0 }),
+        probeRunner: (overlays) => {
+          probeOverlays = overlays
+          return { out: '技能 edit-verify 内容：wc -l body', exit: 0 }
+        },
       },
     })
     const report = await v.run(p, [], { actualEvents: [
@@ -300,6 +304,70 @@ describe('validator A3', () => {
     ] })
     expect(report.verdict).toBe('approved')
     expect(report.evidence.some((line) => line.startsWith('skill isolation: pass'))).toBe(true)
+    expect(probeOverlays).toEqual([])
+  })
+
+  it('never treats a SKILL.md bundle as a generic Cordis loader entry', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-mv-skill-routing-'))
+    const sessionId = 's1'
+    const p = skillPatch()
+    let genericDumpCalls = 0
+    const v = new Validator(null, {
+      regressionDir: REGRESSION_DIR,
+      maxCases: 20,
+      workspaceRoot: root,
+      sessionId,
+      isolation: {
+        dshCommand: ['dsh'],
+        cwd: '/tmp',
+        profile: 'headless',
+        baseOverlays: [],
+        stagingRoot: paths.staging(root, sessionId, p.id),
+        dumpRunner: () => {
+          genericDumpCalls++
+          throw new Error('SKILL.md must not be routed through plugin isolation')
+        },
+      },
+      skillIsolation: {
+        dshCommand: ['dsh'],
+        cwd: '/tmp',
+        profile: 'headless',
+        baseOverlays: [],
+        stagingRoot: join(root, 'skills-staging'),
+        dumpRunner: () => '# base\n- id: skill-filesystem\n  name: x\n',
+        probeRunner: () => ({ out: 'loaded edit-verify: wc -l body', exit: 0 }),
+      },
+    })
+    const report = await v.run(p, [], { actualEvents: [
+      { type: 'turn/start', turn: 1 },
+      { type: 'tool/result', turn: 1, step: 1, name: 'edit-verify', error: null },
+      { type: 'turn/end', turn: 1, reason: 'success' },
+    ] })
+    expect(report.verdict).toBe('approved')
+    expect(genericDumpCalls).toBe(0)
+  })
+
+  it('cold-loads a Gate-installed skill from the installed root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-mv-installed-skill-'))
+    const installedRoot = join(root, 'installed-skills')
+    const p = skillPatch()
+    mkdirSync(join(installedRoot, p.targetId), { recursive: true })
+    writeFileSync(join(installedRoot, p.module!.entry), p.module!.files[0]!.content, 'utf8')
+    let mountedRoot = ''
+    const v = new Validator(null, {
+      regressionDir: REGRESSION_DIR,
+      maxCases: 20,
+      skillIsolation: {
+        dshCommand: ['dsh'], cwd: '/tmp', profile: 'headless', baseOverlays: [], stagingRoot: join(root, 'probe'),
+        dumpRunner: (overlays) => {
+          if (overlays.length > 0) mountedRoot = readFileSync(overlays.at(-1)!, 'utf8')
+          return '# base\n- id: skill-filesystem\n  name: x\n'
+        },
+        probeRunner: () => ({ out: `loaded ${p.targetId}`, exit: 0 }),
+      },
+    })
+    expect(v.runInstalledSkillCheck(p, installedRoot)).toMatchObject({ passed: true, file: p.targetId })
+    expect(mountedRoot).toContain(JSON.stringify(installedRoot))
   })
 
   it('rejects skill when the catalog probe reports the skill missing (M4)', async () => {

@@ -17,13 +17,16 @@ import { appendJsonl, atomicWriteJson, ensureWorkspace, metaRoot, paths, PROTOCO
 import { runIsolation } from './isolation/runner.js';
 import { childEnv } from './isolation/runner.js';
 import { officialDeepSeekLlm, terraLlm } from './llm/official.js';
+import { BuilderCredentialResolver } from './llm/credentials.js';
 import { LoopCandidateGateway } from './candidates/gateway.js';
-import { miniSweChildEnv } from './builder/mini-swe-env.js';
+import { miniSweChildEnv, miniSweModelName } from './builder/mini-swe-env.js';
 import { bundledMiniSwePaths } from './builder/bundled-mini-swe.js';
 import { ActorEvolutionGateway } from './candidates/actor-gateway.js';
 import { UserEvolutionController } from './evolution/controller.js';
 import { userEvolutionTaskCard } from './evolution/presentation.js';
 import { EvolutionTaskSessionStore } from './evolution/task-session.js';
+import { agentDefaultModelServiceOf, effectiveHostConfig, writeEffectiveHostConfig } from './evolution/host-config.js';
+import { terminalJobFromPlan } from './evolution/job-recovery.js';
 import { CandidateImporter, CandidateRegistry } from './candidates/index.js';
 import { profileGateOps } from './candidates/profile-gate.js';
 import { createCandidateProfile } from './candidates/profile.js';
@@ -33,9 +36,17 @@ import { createActorEvidencePack, readActorEvidencePack } from './evidence/index
 import { runActorReplay, writeActorComparison } from './evidence/comparison.js';
 import { DEFAULT_LOCKED_TARGETS } from './policy.js';
 import { appendLedger, appendReport, readLedger, readPreferences, scenarioOf, } from './growth/index.js';
-const PLUGIN_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+/** Resolve the package root from an entry such as `dsh-loom/dist/index.js`. */
+export function pluginRootFromModuleUrl(moduleUrl) {
+    // One parent is the package root; two parents incorrectly resolve to the
+    // surrounding `node_modules` directory and lose the vendored mini-SWE config.
+    return fileURLToPath(new URL('..', moduleUrl));
+}
+const PLUGIN_ROOT = pluginRootFromModuleUrl(import.meta.url);
 export const name = 'dsh-meta-validate';
-export const inject = ['tools', 'agents', 'loader'];
+// DSH owns secrets and their hot-reload lifecycle. Loom consumes only this
+// service seam; it never reads or persists the credentials document itself.
+export const inject = ['tools', 'agents', 'loader', 'credentials', 'agentDefaultModel'];
 export const Config = Schema.object({
     mode: Schema.union(['observe', 'propose', 'apply']).default('observe'),
     scheduled: Schema.boolean().default(false),
@@ -54,6 +65,7 @@ export const Config = Schema.object({
     llm: Schema.object({
         provider: Schema.string().default('deepseek-official'),
         model: Schema.string().default('deepseek-v4-flash'),
+        credentialRef: Schema.string().default(''),
     }),
     builder: Schema.object({
         maxModelTurns: Schema.number().default(12),
@@ -190,6 +202,15 @@ export function apply(ctx, config) {
             const job = readJson(join(jobsDir, file));
             if (!job || (job.status !== 'scheduled' && job.status !== 'running'))
                 continue;
+            if (job.request?.kind === 'user-evolution' && typeof job.request.planId === 'string') {
+                const planPath = join(root, 'user-evolution', config.sessionId, `${job.request.planId}.json`);
+                const plan = readJson(planPath);
+                const terminal = plan ? terminalJobFromPlan(plan) : null;
+                if (terminal) {
+                    updateJob(jobId, { status: terminal.status, summary: terminal.summary, error: undefined });
+                    continue;
+                }
+            }
             updateJob(jobId, {
                 status: 'interrupted',
                 error: 'Builder job interrupted by host reload before its worker completed',
@@ -353,18 +374,23 @@ export function apply(ctx, config) {
             completion: usage.completion,
         });
     };
+    const credentials = ctx.credentials;
+    const builderCredentials = new BuilderCredentialResolver(credentials, config.llm.provider, config.llm.credentialRef);
+    const resolveBuilderKey = async () => (await builderCredentials.resolve())?.value;
     // Independent meta-layer model: builder + review gate use the official
     // DeepSeek API (V4 Flash by default), while the actor keeps its own route.
+    // The key is resolved from DSH immediately before every request so editing
+    // .credentials.yaml takes effect without restarting Web.
     const metaLlm = config.llm.provider === 'deepseek-official'
-        ? officialDeepSeekLlm()
-        : config.llm.provider === 'gpt-5.6-terra' ? terraLlm() : undefined;
+        ? officialDeepSeekLlm({ resolveApiKey: resolveBuilderKey })
+        : config.llm.provider === 'gpt-5.6-terra' ? terraLlm({ resolveApiKey: resolveBuilderKey }) : undefined;
     const loopCandidateGateway = new LoopCandidateGateway({
         enabled: config.allowLoopCandidates.enabled,
         root: config.allowLoopCandidates.runtimeRoot || join(root, 'loop-candidate-runtime'),
         sessionId: config.sessionId,
         llm: metaLlm,
         provider: config.llm.provider,
-        model: config.llm.model,
+        model: miniSweModelName(config.llm.provider, config.llm.model),
         maxTokens: config.allowLoopCandidates.maxTokens,
         buildDependencyRoot: config.allowLoopCandidates.buildDependencyRoot,
         builderMaxModelTurns: config.allowLoopCandidates.builderMaxModelTurns,
@@ -381,11 +407,15 @@ export function apply(ctx, config) {
             miniSwe: {
                 executable: config.allowLoopCandidates.miniSweExecutable,
                 configPath: config.allowLoopCandidates.miniSweConfigPath,
+                runnerPath: bundledMiniSwePaths({ metaRoot: root, packageRoot: PLUGIN_ROOT }).runnerPath,
                 baselineRoot: config.allowLoopCandidates.baselineRoot,
                 dependencySnapshot: config.allowLoopCandidates.miniSweDependencySnapshot,
                 stepLimit: config.allowLoopCandidates.miniSweStepLimit,
                 timeoutMs: config.allowLoopCandidates.builderMaxWallTimeMs,
-                env: miniSweChildEnv(config.llm.provider),
+                resolveEnv: async () => {
+                    const credential = await builderCredentials.require();
+                    return miniSweChildEnv(config.llm.provider, process.env, credential.value);
+                },
             },
         } : {}),
     });
@@ -741,11 +771,7 @@ export function apply(ctx, config) {
             render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
         },
         async execute() {
-            const builderCredentialConfigured = config.llm.provider === 'deepseek-official'
-                ? Boolean(process.env.DSH_META_API_KEY ?? process.env.DEEPSEEK_API_KEY)
-                : config.llm.provider === 'gpt-5.6-terra'
-                    ? Boolean(process.env.LOOM_TERRA_API_KEY ?? process.env.DSH_TERRA_API_KEY)
-                    : false;
+            const builderCredential = await builderCredentials.describe();
             const bundledRuntime = bundledMiniSwePaths({
                 metaRoot: root,
                 packageRoot: PLUGIN_ROOT,
@@ -764,8 +790,10 @@ export function apply(ctx, config) {
                 builder: {
                     provider: config.llm.provider,
                     model: config.llm.model,
-                    credentialConfigured: builderCredentialConfigured,
-                    error: builderCredentialConfigured ? null : 'Builder API key is missing from the DSH process environment',
+                    credentialRef: builderCredential.ref,
+                    credentialConfigured: builderCredential.configured,
+                    credentialSource: builderCredential.source ?? null,
+                    error: builderCredential.configured ? null : `Builder credential ${builderCredential.ref} is not configured in DSH credentials`,
                 },
                 activeEvolution: {
                     enabled: config.activeEvolution.enabled,
@@ -774,6 +802,7 @@ export function apply(ctx, config) {
                     configPresent: existsSync(bundledRuntime.configPath),
                     ready: bundledRuntime.ready,
                     error: bundledRuntime.ready ? null : 'mini-SWE runtime is not ready at the configured runtimeRoot; rerun dsh-loom setup and launch with its generated patch',
+                    restartRequired: readJson(paths.harnessState(root, config.sessionId))?.restartRequired ?? false,
                 },
                 workspaceRoot: root,
                 thresholds: config.thresholds,
@@ -936,7 +965,7 @@ export function apply(ctx, config) {
         name: 'meta_evolution_control',
         description: 'Actor 对话任务卡的自然语言控制协议。用户只需说“查看进度”或“取消”；本工具不会暴露 planId、路径、快照或隐藏推理。确认与重做由 Actor 依据当前卡片调用 meta_auto 的受控 Plan/Execute 链。',
         parameters: {
-            action: { type: 'string', description: 'status 或 cancel_queued。Actor 根据用户自然语言选择。' },
+            action: { type: 'string', description: 'status、cancel_queued 或 rollback_recent。Actor 根据用户自然语言选择。' },
         },
         output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
         async execute(args) {
@@ -961,6 +990,44 @@ export function apply(ctx, config) {
                 atomicWriteJson(planPath, plan);
                 taskSession.finish(planId, 'cancelled');
                 return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan), note: '已取消排队任务；未启动 Builder，未修改任何内容。' });
+            }
+            if (args.action === 'rollback_recent') {
+                if (plan.state !== 'completed' || plan.target.kind !== 'config' || !plan.result?.applied || plan.result.rolledBack) {
+                    return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: '只有已安装、尚未回滚的 Config 任务可执行 Gate rollback。' });
+                }
+                const history = readJsonl(paths.history(root, config.sessionId));
+                const applied = [...history].reverse().find((entry) => entry.patchId === plan.result?.runId && entry.action === 'apply');
+                if (!applied || !applied.before || typeof applied.before !== 'object' || Array.isArray(applied.before) || !applied.after || typeof applied.after !== 'object' || Array.isArray(applied.after)) {
+                    return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: 'Gate apply receipt 不完整，fail-closed 拒绝回滚。' });
+                }
+                const patch = {
+                    id: plan.result.runId,
+                    action: 'update',
+                    targetId: plan.target.plan.targetId,
+                    targetKind: 'config',
+                    config: applied.after,
+                    dependencies: [], rationale: 'Gate-owned rollback of the installed user evolution config',
+                    expectedOutcome: 'Restore the exact Gate before snapshot', version: 1, createdAt: new Date().toISOString(),
+                };
+                const cases = await validator.loadRegressionCases();
+                const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline);
+                if (!ops)
+                    return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: 'Gate apply adapter 不可用。' });
+                const receipt = await gate.rollbackInstalledConfig(patch, applied.before, ops);
+                if (!receipt.rolledBack)
+                    return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), rollback: { rolledBack: false, conflict: receipt.conflict ?? null, error: receipt.error ?? null } });
+                plan.result = {
+                    ...plan.result,
+                    applied: false,
+                    effective: false,
+                    restartRequired: false,
+                    rolledBack: true,
+                    rollbackReceipt: paths.rollbackReceipt(root, config.sessionId, patch.id),
+                    summary: '已通过 Gate 恢复安装前快照；回滚 receipt 已持久化',
+                    limitations: [...plan.result.limitations, 'Rollback restores the Gate before snapshot; already-running Actor turns are not rewritten.'],
+                };
+                atomicWriteJson(planPath, plan);
+                return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan), rollback: { rolledBack: true, targetId: receipt.targetId } });
             }
             return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan, session.active?.jobId ? readJson(jobPathFor(session.active.jobId))?.status : undefined) });
         },
@@ -1016,6 +1083,10 @@ export function apply(ctx, config) {
                 if (!config.activeEvolution.enabled || !bundledRuntime.ready) {
                     return cleanToolResult({ accepted: false, mode: evolutionMode, error: config.activeEvolution.enabled ? 'mini-SWE runtime is not installed; run dsh-loom setup in the same DSH_META_VALIDATE_ROOT, then restart DSH' : 'activeEvolution is disabled' });
                 }
+                const builderCredential = await builderCredentials.describe();
+                if (!builderCredential.configured) {
+                    return cleanToolResult({ accepted: false, mode: evolutionMode, error: `Builder credential ${builderCredential.ref} is not configured in DSH credentials` });
+                }
                 const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
                 const redoSourceId = args.redo === true ? taskSession.read().recent?.planId : undefined;
                 const redoSource = redoSourceId ? readJson(join(root, 'user-evolution', config.sessionId, `${redoSourceId}.json`)) : undefined;
@@ -1037,13 +1108,17 @@ export function apply(ctx, config) {
                 });
                 const events = evidenceEventsOf(evidencePack);
                 const evolutionGateway = new ActorEvolutionGateway({
-                    root, sessionId: config.sessionId, model: config.llm.model,
+                    root, sessionId: config.sessionId, model: miniSweModelName(config.llm.provider, config.llm.model),
                     miniSwe: {
                         executable: bundledRuntime.executable,
                         configPath: bundledRuntime.configPath,
+                        runnerPath: bundledRuntime.runnerPath,
                         stepLimit: config.activeEvolution.miniSweStepLimit,
                         timeoutMs: config.activeEvolution.timeoutMs,
-                        env: miniSweChildEnv(config.llm.provider),
+                        resolveEnv: async () => {
+                            const credential = await builderCredentials.require();
+                            return miniSweChildEnv(config.llm.provider, process.env, credential.value);
+                        },
                     },
                 });
                 const controller = new UserEvolutionController({
@@ -1114,7 +1189,26 @@ export function apply(ctx, config) {
                                 confirmation: '我已根据当前会话证据冻结这个候选。是否开始隔离实现，并交给独立 Verifier/Gate 裁决？',
                             }), note: '方案已冻结但尚未执行。请向用户解释目标、风险和验收方式，等待明确确认。' });
                     }
-                    const planId = typeof args.planId === 'string' ? args.planId : taskSession.read().pending?.planId ?? '';
+                    // A redo never reopens the old immutable plan.  It first freezes a
+                    // fresh plan from the prior user intent and target, then follows the
+                    // same queue/execute path as an explicitly confirmed plan.
+                    let planId = typeof args.planId === 'string' ? args.planId : taskSession.read().pending?.planId ?? '';
+                    if (args.redo === true) {
+                        if (!evolutionRequirements || !targetKind) {
+                            return cleanToolResult({ accepted: false, mode: 'execute', error: '重做任务缺少原始目标或用户意图，无法安全创建新计划。' });
+                        }
+                        if (taskSession.read().pending || taskSession.read().active) {
+                            return cleanToolResult({ accepted: false, mode: 'execute', error: '该会话已有等待确认或进行中的任务；请先查看、取消或等待其结束。' });
+                        }
+                        const retry = controller.plan(evolutionRequirements, targetKind);
+                        taskSession.beginPending({
+                            planId: retry.id,
+                            userRequest: evolutionRequirements,
+                            actorExplanation: `根据上一轮未完成任务创建新的 immutable 重做：${retry.target.summary}`,
+                            suggestions: [{ key: 'redo', title: retry.target.summary, summary: retry.target.verification, target: { kind: retry.target.kind, id: retry.target.plan.targetId } }],
+                        });
+                        planId = retry.id;
+                    }
                     if (!planId)
                         return cleanToolResult({ accepted: false, mode: 'execute', error: '当前会话没有等待确认的任务；execute 不会猜测或创建旁路。' });
                     const queued = controller.queue(planId);
@@ -1124,7 +1218,7 @@ export function apply(ctx, config) {
                         taskSession.finish(planId, complete.state === 'completed' ? 'completed' : complete.state === 'rejected' ? 'rejected' : 'aborted');
                         const report = complete.result;
                         return {
-                            summary: `用户委托 ${complete.target.kind}/${complete.target.plan.targetId}：${report?.applied ? '已生效' : complete.state}${report?.summary ? `；${report.summary}` : ''}`,
+                            summary: `用户委托 ${complete.target.kind}/${complete.target.plan.targetId}：${report?.restartRequired ? '待重启生效' : report?.applied ? '已生效' : complete.state}${report?.summary ? `；${report.summary}` : ''}`,
                         };
                     });
                     taskSession.beginActive(planId, jobId);
@@ -1647,6 +1741,10 @@ function currentConfigOf(ctx, baseline) {
             merged[entry.options.id] = { name: entry.options.name ?? entry.options.id, config: { ...(entry.options.config ?? {}) } };
         }
     }
+    const modelService = agentDefaultModelServiceOf(ctx);
+    const modelRow = merged['agent-default-model'];
+    if (modelRow)
+        modelRow.config = effectiveHostConfig('agent-default-model', modelRow.config, modelService);
     const rows = Object.entries(merged).map(([id, row]) => ({ id, name: row.name, config: row.config }));
     const priority = ['agent', 'agent-default-model', 'llm-deepseek', 'llm-pi-ai', 'meta-validate', 'system-prompt'];
     const rank = (row) => {
@@ -1675,7 +1773,9 @@ function buildApplyOps(ctx, validator, cases, meta, baseline) {
     }
     if (!loader)
         return undefined;
+    const modelService = agentDefaultModelServiceOf(ctx);
     const installedByTarget = new Map();
+    const appliedOverlays = new Map();
     const entries = () => [...loader.entries()];
     const harnessStatePath = paths.harnessState(meta.root, meta.sessionId);
     const readHarnessState = () => readJson(harnessStatePath)
@@ -1686,7 +1786,7 @@ function buildApplyOps(ctx, validator, cases, meta, baseline) {
     const updateHarnessState = (patch, overlay, before) => {
         const state = readHarnessState();
         state.restartRequired = true;
-        state.applied = state.applied.filter((record) => record.patchId !== patch.id);
+        state.applied = state.applied.filter((record) => record.targetId !== patch.targetId);
         state.applied.push({
             patchId: patch.id,
             targetId: patch.targetId,
@@ -1700,21 +1800,22 @@ function buildApplyOps(ctx, validator, cases, meta, baseline) {
     };
     const removeHarnessState = (patch) => {
         const state = readHarnessState();
-        state.applied = state.applied.filter((record) => record.patchId !== patch.id);
+        state.applied = state.applied.filter((record) => record.targetId !== patch.targetId);
         state.restartRequired = state.applied.length > 0;
         writeHarnessState(state);
     };
     return {
         readConfig: (targetId) => {
             if (baseline.rows[targetId])
-                return baseline.rows[targetId]?.config ?? {};
+                return effectiveHostConfig(targetId, baseline.rows[targetId]?.config ?? {}, modelService);
             const live = entries().find((entry) => entry.options.id === targetId);
-            return live?.options.config ?? {};
+            return effectiveHostConfig(targetId, live?.options.config ?? {}, modelService);
         },
-        writeConfig: (targetId, config, patch) => {
+        writeConfig: async (targetId, config, patch) => {
             const all = entries();
             const entry = all.find((item) => item.options.id === targetId);
             const name = entry?.options.name ?? baseline.rows[targetId]?.name ?? patch.targetId;
+            const before = effectiveHostConfig(targetId, entry?.options.config ?? baseline.rows[targetId]?.config ?? {}, modelService);
             const overlay = paths.overlayFile(meta.root, meta.sessionId, patch.id);
             const lines = [
                 `- id: ${patch.targetId}`,
@@ -1724,17 +1825,50 @@ function buildApplyOps(ctx, validator, cases, meta, baseline) {
             ];
             mkdirSync(paths.overlays(meta.root, meta.sessionId), { recursive: true });
             writeFileSync(overlay, `${lines.join('\n')}\n`, 'utf8');
+            await writeEffectiveHostConfig(targetId, config, modelService);
+            appliedOverlays.set(patch.id, overlay);
             baseline.set(patch.targetId, name, config);
-            updateHarnessState(patch, overlay, entry?.options.config ?? baseline.rows[patch.targetId]?.config ?? {});
+            updateHarnessState(patch, overlay, before);
             return overlay;
         },
-        restoreConfig: (_targetId, _before, patch) => {
+        restoreConfig: async (_targetId, _before, patch) => {
+            await writeEffectiveHostConfig(_targetId, _before, modelService);
             const overlay = paths.overlayFile(meta.root, meta.sessionId, patch.id);
             rmSync(overlay, { force: true });
+            appliedOverlays.delete(patch.id);
             baseline.set(patch.targetId, baseline.rows[patch.targetId]?.name, _before);
             removeHarnessState(patch);
         },
-        smoke: (patch) => validator.runSmoke(patch, cases),
+        smoke: async (patch) => {
+            const report = await validator.runSmoke(patch, cases);
+            if (patch.targetKind === 'config') {
+                const overlay = appliedOverlays.get(patch.id);
+                const cold = overlay ? validator.runAppliedConfigCheck(patch, overlay) : null;
+                const passed = Boolean(cold?.composed && (!cold.probe || cold.probe.ran));
+                report.checks.push({
+                    name: 'cold-config-overlay',
+                    passed,
+                    detail: passed ? undefined : cold?.dumpError ?? cold?.probe?.outputTail ?? 'Gate overlay was not cold-replayed',
+                });
+                report.passed = report.checks.every((check) => check.passed);
+                return report;
+            }
+            if (patch.targetKind !== 'skill')
+                return report;
+            if (!meta.skillRoot) {
+                report.checks.push({ name: 'cold-skill-load', passed: false, detail: 'skillRoot not configured' });
+            }
+            else {
+                const cold = validator.runInstalledSkillCheck(patch, meta.skillRoot);
+                report.checks.push({
+                    name: 'cold-skill-load',
+                    passed: cold.passed,
+                    detail: cold.passed ? undefined : cold.error ?? cold.probeTail ?? 'installed skill did not load',
+                });
+            }
+            report.passed = report.checks.every((check) => check.passed);
+            return report;
+        },
         rowExists: (id) => entries().some((entry) => entry.options.id === id),
         insertRow: async (patch) => {
             if (!patch.module)

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { appendJsonl, paths, PROTOCOL_VERSION } from '../protocol/index.js';
-import { runIsolation } from '../isolation/runner.js';
+import { runIsolation, runOverlayIsolation } from '../isolation/runner.js';
 import { parseDump, findChangedRows, childEnv } from '../isolation/runner.js';
 function hashOf(value) {
     return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -189,9 +189,26 @@ export class Validator {
     }
     /** M2.6 belongs to the verifier: candidate composition/load check before behavior alignment. */
     runIsolationCheck(patch) {
+        // A skill bundle is data consumed by the skill-filesystem provider, not a
+        // Cordis plugin entry.  Sending its SKILL.md through the generic insert
+        // isolation path creates a loader row whose `name` is the Markdown path;
+        // a real cold boot then (correctly) rejects that path as an invalid module
+        // specifier before the dedicated catalog/load verifier can run.
+        //
+        // Skills have their own fail-closed isolation boundary below
+        // (`runSkillIsolationCheck`), which mounts only the verifier-owned skill
+        // root through dsh-skill-filesystem and performs a real cold Actor load.
+        if (patch.targetKind === 'skill')
+            return null;
         if (!this.options.isolation)
             return null;
         return runIsolation(patch, this.options.isolation);
+    }
+    /** Cold-replay the exact config overlay persisted by Gate. */
+    runAppliedConfigCheck(patch, overlayPath) {
+        if (patch.targetKind !== 'config' || !this.options.isolation)
+            return null;
+        return runOverlayIsolation(patch, this.options.isolation, overlayPath);
     }
     /** M4: deterministic load check for builder-drafted modules (fresh `node --check`). */
     runModuleLoadCheck(patch) {
@@ -247,14 +264,29 @@ export class Validator {
         const staging = join(opts.stagingRoot, patch.id);
         mkdirSync(join(staging, name), { recursive: true });
         writeFileSync(join(staging, skillFile.path), skillFile.content, 'utf8');
-        const probeOverlay = join(staging, 'probe-overlay.yml');
+        return this.probeSkillRoot(name, staging, staging);
+    }
+    /** Cold-load an already installed skill from the Gate-owned root. */
+    runInstalledSkillCheck(patch, installedRoot) {
+        const opts = this.options.skillIsolation;
+        if (!opts)
+            return { passed: false, file: 'skill-isolation', error: 'skillIsolation not configured' };
+        const probeDir = join(opts.stagingRoot, `${patch.id}-installed`);
+        mkdirSync(probeDir, { recursive: true });
+        return this.probeSkillRoot(patch.targetId, installedRoot, probeDir);
+    }
+    probeSkillRoot(name, skillRoot, probeDir) {
+        const opts = this.options.skillIsolation;
+        if (!opts)
+            return { passed: false, file: 'skill-isolation', error: 'skillIsolation not configured' };
+        const probeOverlay = join(probeDir, 'probe-overlay.yml');
         writeFileSync(probeOverlay, [
             '- id: skill-filesystem',
             "  name: '@deepseek-ai/dsh-skill-filesystem'",
             '  config:',
             '    providerName: filesystem',
             '    includeDefaultRoots: false',
-            `    customSkillDirs: [${JSON.stringify(staging)}]`,
+            `    customSkillDirs: [${JSON.stringify(skillRoot)}]`,
         ].join('\n') + '\n', 'utf8');
         const dump = opts.dumpRunner ?? ((overlays) => execFileSync(opts.dshCommand[0], [...opts.dshCommand.slice(1), '--profile', opts.profile, ...overlays.flatMap((o) => ['--patch', o]), '--dump-config'], { cwd: opts.cwd, encoding: 'utf8', timeout: 60000, env: childEnv() }));
         const baseline = parseDump(dump(opts.baseOverlays));
@@ -270,7 +302,10 @@ export class Validator {
                 return { out: String(e.stdout ?? e.stderr ?? e.message ?? ''), exit: e.status ?? -1 };
             }
         });
-        const result = probe([...opts.baseOverlays, probeOverlay], task);
+        // The default probe runner appends probeOverlay itself. Passing it here as
+        // well applies the same loader patch twice, which is not idempotent on the
+        // Windows Cordis loader path.
+        const result = probe(opts.baseOverlays, task);
         const passed = changedRows.length === 0 && result.exit === 0 && result.out.includes(name) && !result.out.includes('不存在');
         return {
             passed,

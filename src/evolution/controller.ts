@@ -28,7 +28,16 @@ export interface UserEvolutionReport {
   targetKind: UserEvolutionTargetKind
   targetId: string
   verdict: 'approved' | 'rejected' | 'aborted'
+  /** Gate artifact was installed. Config artifacts may still await a cold host restart. */
   applied: boolean
+  /** The change is visible to the running Actor process. */
+  effective?: boolean
+  /** A verified config overlay is installed but requires a cold host restart. */
+  restartRequired?: boolean
+  /** A later Gate-owned receipt restored the original before snapshot. */
+  rolledBack?: boolean
+  /** Internal evidence location; presentation must not expose this path. */
+  rollbackReceipt?: string
   summary: string
   limitations: string[]
 }
@@ -141,17 +150,21 @@ export class UserEvolutionController {
 
   private report(plan: UserEvolutionPlan, runId: string, verdict: UserEvolutionReport['verdict'], applied: boolean, summary: string): UserEvolutionReport {
     const targetId = plan.target.plan.targetId
+    const restartRequired = applied && plan.target.kind === 'config'
     return {
       runId,
       targetKind: plan.target.kind,
       targetId,
       verdict,
       applied,
-      summary,
+      effective: applied && !restartRequired,
+      restartRequired,
+      summary: restartRequired ? `${summary}；配置 overlay 已通过冷启动验证，宿主重启后生效` : summary,
       limitations: [
         'Only the host-selected target and isolated workspace are mutable.',
         'Verifier and Gate remain independent final authorities.',
         'A successful install does not by itself prove general task improvement.',
+        ...(restartRequired ? ['The verified config overlay requires a cold host restart before it affects Actor sessions.'] : []),
       ],
     }
   }

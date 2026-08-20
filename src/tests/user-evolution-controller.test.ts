@@ -49,7 +49,13 @@ describe('user evolution controller', () => {
     const plan = controller.plan('switch to an available model', 'config')
     expect(controller.read(plan.id)).toMatchObject({ state: 'planned', target: { kind: 'config' }, evidence: { refs: ['frames.jsonl'] } })
     const complete = await controller.execute(plan.id)
-    expect(complete).toMatchObject({ state: 'completed', result: { verdict: 'approved', applied: true, targetId: 'agent-default-model' } })
+    expect(complete).toMatchObject({
+      state: 'completed',
+      result: {
+        verdict: 'approved', applied: true, effective: false, restartRequired: true,
+        targetId: 'agent-default-model', summary: expect.stringContaining('宿主重启后生效'),
+      },
+    })
     expect(live).toEqual({ model: 'after' })
   })
 

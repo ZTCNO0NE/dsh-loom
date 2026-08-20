@@ -52,7 +52,10 @@ export function openAiCompatibleLlm(options: OpenAiCompatibleLlmOptions, deepSee
   return {
     async *stream(call: LlmCallOptions): AsyncIterable<LlmChunk> {
       const baseURL = options.baseURL.replace(/\/$/, '')
-      const apiKey = await options.resolveApiKey?.() ?? options.apiKey ?? process.env[options.apiKeyEnv] ?? ''
+      // When the host supplied a resolver, credential service is authoritative:
+      // do not silently fall through to an inherited shell variable.
+      const resolved = options.resolveApiKey ? await options.resolveApiKey() : undefined
+      const apiKey = options.resolveApiKey ? resolved ?? '' : options.apiKey ?? process.env[options.apiKeyEnv] ?? ''
       if (!apiKey) {
         throw new Error(`openAiCompatibleLlm: ${options.apiKeyEnv} missing`)
       }

@@ -42,3 +42,5 @@ export declare function buildCandidateOverlay(patch: MetaPatch, stagingRoot?: st
  * It does NOT sense the actor (no session/context copying).
  */
 export declare function runIsolation(patch: MetaPatch, options: IsolationOptions): IsolationResult;
+/** Re-run isolation against the exact persisted Gate overlay artifact. */
+export declare function runOverlayIsolation(patch: MetaPatch, options: IsolationOptions, overlayPath: string): IsolationResult;

@@ -71,6 +71,8 @@ export declare class Validator {
     private reject;
     /** M2.6 belongs to the verifier: candidate composition/load check before behavior alignment. */
     runIsolationCheck(patch: MetaPatch): IsolationResult | null;
+    /** Cold-replay the exact config overlay persisted by Gate. */
+    runAppliedConfigCheck(patch: MetaPatch, overlayPath: string): IsolationResult | null;
     /** M4: deterministic load check for builder-drafted modules (fresh `node --check`). */
     runModuleLoadCheck(patch: MetaPatch): {
         passed: boolean;
@@ -86,6 +88,16 @@ export declare class Validator {
         probeExit?: number;
         probeTail?: string;
     } | null;
+    /** Cold-load an already installed skill from the Gate-owned root. */
+    runInstalledSkillCheck(patch: MetaPatch, installedRoot: string): {
+        passed: boolean;
+        file: string;
+        error?: string;
+        changedRows?: string[];
+        probeExit?: number;
+        probeTail?: string;
+    };
+    private probeSkillRoot;
     /** Public frame probe for skill patches: true when the staged skill loads in a real catalog. */
     probeSkillForFrames(patch: MetaPatch): {
         passed: boolean;

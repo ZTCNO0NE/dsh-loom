@@ -154,7 +154,7 @@ v1.2 不要求用户记住内部工具参数，也不把候选 workspace 或推�
 
 确认后，mini-SWE 才在隔离 workspace 生成 bundle；Verifier 再检查 catalog/load，Gate 冷安装并回滚。真实 refine skill 的独立证据已经覆盖：**Builder 生成 bundle → Verifier approved → Gate applied → cold Loader 读到 skill 正文 → Gate rollback 后正文不可再加载**。这证明的是 artifact 交付链，不是“任何模型都会照着 skill 做”的承诺。
 
-产品入口的 Config、Skill 各一条“Actor 自然语言请求 → 任务卡确认 → mini-SWE → Verifier/Gate → cold replay/rollback”真机 E2E 仍是发布门槛；在这两条记录补齐前，v1.2 只把该流程称为已实现控制面，不称为已发布体验。
+v1.2.30 已补齐两条 Windows 真机产品入口：Skill 任务完成 `mini-SWE → Verifier → Gate → cold-skill-load`，Config 任务完成真实 settings 安装、冷 Actor 使用、Actor 发起 Gate rollback，再由新冷会话确认恢复。Skill 的 Gate-owned 安装/冷加载/回滚仍由独立 refine 记录覆盖；产品卡暂不开放已安装 Skill 的一键回滚。版本证据、原始记录哈希与边界见 [v1.2.30 release evidence](docs/evidence/v1.2.30.md)。
 
 ### 案例 5：什么都不说，越用越懂你
 
@@ -333,7 +333,7 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 
 > **重要：Builder 默认复用 DSH 的同一份凭据。** 在 DSH 的 Settings/Models 凭据页，或 `$DSH_HOME/.credentials.yaml`（Windows 默认为 `%USERPROFILE%\.dsh\.credentials.yaml`）配置 `DEEPSEEK_API_KEY` 即可。Loom 会在每次 Builder、Review Gate 或 mini-SWE 调用前通过 DSH credentials service 重新读取它；更新文件后的下一次调用无需重启 Web。Actor 与 Builder 是独立角色，但不需要两套 key。缺失时 Web 与状态工具仍可用，`meta_auto` 会明确说明未配置且不会创建真实 proposal。密钥绝不能写入聊天、patch、workspace、任务卡或提交记录。
 
-mini-SWE 2.4.6 本体已经随 Loom npm 包提供，不要求你的镜像存在 `mini-swe-agent`。`setup` 会先检查 Python 版本，再创建隔离 venv；不会改 DSH checkout、生产 profile 或凭据。
+mini-SWE 2.4.6 本体已经随 Loom npm 包提供，不要求你的镜像存在 `mini-swe-agent`。`setup` 会先检查 Python 版本，再创建隔离 venv；同时创建 Gate 持有的 Skill 安装目录，并在 Web composition 中注册独立的 Loom Skill provider。通过 Gate 的 Skill 可被所有 Actor preset 正常发现，Web 运行中新增的 Skill 无需重启即可进入新会话 catalog。setup 不会改 DSH checkout、生产 profile 或凭据。
 
 ### Windows · PowerShell
 
@@ -350,7 +350,7 @@ pnpm dsh web
 
 ```powershell
 # 1. 安装 Loom 到 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.20
+pnpm dsh plugin --profile web add dsh-loom@1.2.30
 
 # 2. 检查插件确已加载；输出中必须有 meta-validate。
 pnpm dsh web --dump-config
@@ -378,7 +378,7 @@ pnpm dsh web --patch $patch
 export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
 
 # 1. 安装 Loom 并检查 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.20
+pnpm dsh plugin --profile web add dsh-loom@1.2.30
 pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
@@ -401,7 +401,7 @@ pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
 
 # 1. 安装 Loom 并检查 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.20
+pnpm dsh plugin --profile web add dsh-loom@1.2.30
 pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
@@ -443,7 +443,7 @@ pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 
 ### 高级：使用不同的 Builder 凭据或 Terra
 
-普通使用不需要本节。若确实要让 Builder 使用不同于默认 `DEEPSEEK_API_KEY` 的 DSH credential reference，在 Loom 配置中设置 `llm.credentialRef`，例如 `DSH_META_API_KEY`；该值是**引用名**，不是 key。只有显式把 `llm.provider` 设为 `gpt-5.6-terra` 时，Loom 才依次解析 `LOOM_TERRA_API_KEY`、兼容的 `DSH_TERRA_API_KEY`，并使用 `LOOM_TERRA_BASE_URL` 或 `DSH_TERRA_BASE_URL` 作为端点。所有引用仍由 DSH Settings 或 `.credentials.yaml` 管理。
+普通使用不需要本节。Loom 先按已选的 `llm.provider/model` 确定调用路由，再从 DSH credentials service 取该路由对应的 credential：`deepseek-official` 只取 `.credentials.yaml` 中的 `DEEPSEEK_API_KEY`；显式 `gpt-5.6-terra` 才取 `OPENAI_API_KEY`（兼容旧的 `LOOM_TERRA_API_KEY`、`DSH_TERRA_API_KEY`）。它不会因为某个 key 恰好存在就把 DeepSeek key 发给 GPT/OpenAI-compatible 路由，反之亦然。若确实要覆盖默认映射，在 Loom 配置中设置 `llm.credentialRef`；该值是**引用名**，不是 key。端点仍由 `LOOM_TERRA_BASE_URL` 或 `DSH_TERRA_BASE_URL` 设置。所有引用由 DSH Settings 或 `.credentials.yaml` 管理。
 
 ### 一次性 CLI（诊断/脚本）
 
@@ -454,9 +454,9 @@ pnpm dsh --profile headless --patch "$runtime_root/loom-active-evolution.patch.y
   "查看当前 Loom 状态并报告 Builder 是否已配置"
 ```
 
-从 GitHub 或 Loom 源码安装属于开发者路径；请改用 `pnpm dsh plugin --profile loom add "github:ZTCNO0NE/dsh-loom#main"` 或本地绝对路径，随后仍按你的系统块执行 setup 和启动。
+从 GitHub 或 Loom 源码安装属于开发者路径；请改用 `pnpm dsh plugin --profile web add "github:ZTCNO0NE/dsh-loom#main"` 或本地绝对路径，随后仍按你的系统块执行 setup 和启动。
 
-> **当前发布边界：** runtime bootstrap 已可分发；Config、Skill 两条 Actor 主入口真机 E2E 仍是产品发布门槛。在这两条记录补齐前，主动演进是可安装的预览控制面，不把它宣传为已发布体验。
+> **当前发布边界：** Config、Skill 只在用户明确委托后执行，且必须经过独立 Verifier/Gate。Skill 已覆盖 Windows 与 Linux 的真实冷加载、Windows Web 热发现和失败回滚；这证明交付链可用，不代表任意 Skill 都能改善任意任务，也不构成 Actor 整体性能声明。
 
 ### 3. 第一次真实对话：从需求到任务卡
 

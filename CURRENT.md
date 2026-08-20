@@ -1,13 +1,25 @@
 # CURRENT.md — 当前状态与交接
 
-## 2026-08-20 Builder 统一读取 DSH 用户凭据（待 Windows 真机 E2E 后发布）
+## 2026-08-20 Windows Config settings adapter + Gate rollback 真机 E2E（通过）
+
+- Windows 真机证明 loader overlay 不足以修改 `agent-default-model`：DSH `settings.yaml` 用户层优先于组合层，旧 `cold-config-overlay` 只证明可组合，不证明 Actor 真实使用新值。旧 approved record 保留为缺陷证据，不用于宣传。
+- 新增 `src/evolution/host-config.ts`：`agent-default-model` 通过 Cordis `ctx.get('agentDefaultModel')` 读写 DSH settings-backed 有效值；Gate 仍同时留下 overlay/harness state，失败时 adapter 与 overlay 共同恢复。其他 Config target 保持 loader adapter，不扫描或盲改 settings。
+- Windows PowerShell 5 会为 mini-SWE 写出的 JSON 加 UTF-8 BOM；`readJson()` 现仅剥离文件开头单个 U+FEFF，仍保持 JSON fail-closed。真实失败 run `builder-1787228059112-9d87961b` 因此修复从 compiler abort 进入后续裁决。
+- 新 immutable plan `evolution-1787230109885-juuho59t` 完成 Builder 修改、proposal、Verifier/Gate 与安装；DSH `settings.yaml` 的非敏感 model 字段真实变为 `deepseek-chat`。随后全新 Windows headless Actor 返回 `SETTINGS_ADAPTER_COLD_OK`，原始 session `session-fa230988-c0cd-4060-a4c9-0f585e5a7cf5` 的 `request/header`、`request/context`、`assistant/message` 均记录 `deepseek-official/deepseek-chat`。
+- 任务卡语义已锁定：Config approved 显示“待重启生效”，Skill approved 仍显示“已生效”，Gate rollback 后显示“已回滚”；旧持久记录缺少 `effective/restartRequired` 仍可读。
+- `meta_evolution_control(action=rollback_recent)` 已由真实 Windows Actor 调用。Gate 对当前 settings 与 installed after 做漂移检查后，经同一个 settings adapter 恢复 before 并精确 readback，receipt `builder-1787230144516-33ff7956.json` 为 `rolledBack:true`；history 为 `installed-rollback`，harness applied 列表为空，`settings.yaml` 恢复 `deepseek-v4-flash`。没有手工删除 overlay 冒充 rollback。
+- 新冷 Actor session `session-3194fa19-fe76-4aa4-ae6e-7aafc46175c3` 返回 `SETTINGS_ROLLBACK_COLD_OK`，其 `request/header`、`request/context`、`assistant/message` 三处均记录 `deepseek-official/deepseek-v4-flash`。
+- 启动恢复已把 stale `job-1787230144504-64tjei` 按 completed plan 对账为 `finished`。Windows Web 使用本地 `1.2.30` tarball 返回 HTTP 200；Linux 隔离冷安装同一 tarball，mini-SWE 2.4.6、setup patch、Loom composition 和 Web HTTP 200 均通过。
+- 发布前验证已完成：`npm test` **261/261**、`npm run check`、`npm run build`、`git diff --check`、`npm pack --dry-run` 全通过。证据索引：`docs/evidence/v1.2.30.md`；原始记录在 `/chenzute/dsh-src/eval/run-records/2026-08-20-{windows-config-rollback,windows-skill-product-e2e,linux-1.2.30-smoke}/`。剩余动作只有 commit/push/tag/GitHub release/npm publish 与 registry 核验。
+
+## 2026-08-20 Builder 统一读取 DSH 用户凭据（Windows 真机通过，待发布）
 
 - Loom 不再以 `process.env` 作为产品路径的 Builder 凭据来源：`src/index.ts` 注入 DSH `credentials` service，`BuilderCredentialResolver` 在每次 Builder/Review Gate LLM 请求及每次 mini-SWE spawn 前动态 `resolve()`。
-- 默认官方 Builder 只解析 DSH 用户凭据 `DEEPSEEK_API_KEY`；`llm.credentialRef` 是高级、仅存 reference 的覆盖入口（可填兼容的 `DSH_META_API_KEY`）。只有显式 `llm.provider: gpt-5.6-terra` 才解析 `LOOM_TERRA_API_KEY → DSH_TERRA_API_KEY`。
+- 凭据选择先由上层已选的 `llm.provider/model` 决定，而非扫描到任意 key 就使用：`deepseek-official → DEEPSEEK_API_KEY`；显式 `gpt-5.6-terra → OPENAI_API_KEY`（兼容旧 `LOOM_TERRA_API_KEY → DSH_TERRA_API_KEY`）。`llm.credentialRef` 是最高优先级的高级覆盖入口；所有 ref 再由 DSH credentials service 从 `.credentials.yaml`（或它自身的优先级来源）动态解析。
 - mini-SWE 子进程仅得到临时 `OPENAI_API_KEY`，会删除父环境中的 provider key aliases；secret 不进入 config/prompt/journal/evidence/status。`meta_status` 只投影 provider/model/ref/configured/source。
 - README 与 `docs/USAGE.md` 已改为默认在 DSH Settings/Models 或 `$DSH_HOME/.credentials.yaml` 配置一次 `DEEPSEEK_API_KEY`；不再要求用户每个 shell 设置 Builder 专属变量。
 - 定向和全量验证：`npm test` **242/242**、`npm run check`、`npm run build`、`git diff --check` 通过；另以隔离 `DSH_HOME` 的真实 `pnpm dsh web --patch cordis.patch.yml --dump-config` 确认 Web composition 含 `credentials-local` 且 Loom row 正确加载。
-- 下一步：在 Windows Web 使用**仅** `%USERPROFILE%\.dsh\.credentials.yaml` 的 `DEEPSEEK_API_KEY`（不设进程 key）启动，检查 `meta_status` 为 `credentialConfigured:true, credentialSource:file`，再完成一次 `meta_auto(plan)` readiness；通过后再决定版本号、npm 发布与 Git tag。
+- Windows Web 已使用 DSH credentials service 完成真实 Skill 与 Config 产品入口的 mini-SWE Builder 调用；未要求为 Builder 单独注入进程 key。`meta_status` 的脱敏投影与凭据优先级有确定性回归，发布版本固定为 `1.2.30`。
 - 追加修复（尚未发布）：`PLUGIN_ROOT` 曾从 installed `dist/index.js` 错退两级到 profile `node_modules`，导致 vendored `runtime/mini-swe-agent-v2.4.6.yaml` 被误判缺失（`configPresent:false`）；改为退一级至实际 `dsh-loom` 包根。该问题与用户 setup 无关。
 - Windows product E2E 又暴露了第二个真实路径问题：ActorEvolutionGateway 用 `${sessionId}:actor-evolution` 作为持久 Builder workspace 目录，Windows 禁止 `:`。已将持久角色 scope 统一为跨平台 `--`（同时覆盖 loop exploration）；旧失败 run 保留，只能通过 redo 建立新 immutable run。新增 protocol 回归断言 Windows 保留字符不会进入 scope。
 

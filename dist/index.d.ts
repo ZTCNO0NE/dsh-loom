@@ -1,8 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
 import { type LockedTargetPolicy } from './policy.js';
+/** Resolve the package root from an entry such as `dsh-loom/dist/index.js`. */
+export declare function pluginRootFromModuleUrl(moduleUrl: string): string;
 export declare const name = "dsh-meta-validate";
-export declare const inject: readonly ["tools", "agents", "loader"];
+export declare const inject: readonly ["tools", "agents", "loader", "credentials", "agentDefaultModel"];
 export interface MetaValidateConfig {
     mode: 'observe' | 'propose' | 'apply';
     /** Scheduled background refine: meta tools return immediately, completion is injected. */
@@ -22,6 +24,8 @@ export interface MetaValidateConfig {
     llm: {
         provider: string;
         model: string;
+        /** Advanced: a DSH credential reference, never a secret value. */
+        credentialRef: string;
     };
     builder: {
         maxModelTurns: number;

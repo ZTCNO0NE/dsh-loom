@@ -31,12 +31,14 @@ import { childEnv } from './isolation/runner.js'
 import { officialDeepSeekLlm, terraLlm } from './llm/official.js'
 import { BuilderCredentialResolver, type CredentialServiceLike } from './llm/credentials.js'
 import { LoopCandidateGateway } from './candidates/gateway.js'
-import { miniSweChildEnv } from './builder/mini-swe-env.js'
+import { miniSweChildEnv, miniSweModelName } from './builder/mini-swe-env.js'
 import { bundledMiniSwePaths } from './builder/bundled-mini-swe.js'
 import { ActorEvolutionGateway } from './candidates/actor-gateway.js'
 import { UserEvolutionController, type UserEvolutionPlan, type UserEvolutionTargetKind } from './evolution/controller.js'
 import { userEvolutionTaskCard } from './evolution/presentation.js'
 import { EvolutionTaskSessionStore } from './evolution/task-session.js'
+import { agentDefaultModelServiceOf, effectiveHostConfig, writeEffectiveHostConfig } from './evolution/host-config.js'
+import { terminalJobFromPlan } from './evolution/job-recovery.js'
 import { CandidateImporter, CandidateRegistry, type CandidateManifest, type ContractEvidence, type LoopInstallReport } from './candidates/index.js'
 import { profileGateOps } from './candidates/profile-gate.js'
 import { createCandidateProfile } from './candidates/profile.js'
@@ -69,7 +71,7 @@ export const name = 'dsh-meta-validate'
 
 // DSH owns secrets and their hot-reload lifecycle. Loom consumes only this
 // service seam; it never reads or persists the credentials document itself.
-export const inject = ['tools', 'agents', 'loader', 'credentials'] as const
+export const inject = ['tools', 'agents', 'loader', 'credentials', 'agentDefaultModel'] as const
 
 export interface MetaValidateConfig {
   mode: 'observe' | 'propose' | 'apply'
@@ -332,6 +334,15 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       const jobId = file.slice(0, -'.json'.length)
       const job = readJson<PersistedJob>(join(jobsDir, file))
       if (!job || (job.status !== 'scheduled' && job.status !== 'running')) continue
+      if (job.request?.kind === 'user-evolution' && typeof job.request.planId === 'string') {
+        const planPath = join(root, 'user-evolution', config.sessionId, `${job.request.planId}.json`)
+        const plan = readJson<UserEvolutionPlan>(planPath)
+        const terminal = plan ? terminalJobFromPlan(plan) : null
+        if (terminal) {
+          updateJob(jobId, { status: terminal.status, summary: terminal.summary, error: undefined })
+          continue
+        }
+      }
       updateJob(jobId, {
         status: 'interrupted',
         error: 'Builder job interrupted by host reload before its worker completed',
@@ -515,7 +526,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     sessionId: config.sessionId,
     llm: metaLlm,
     provider: config.llm.provider,
-    model: config.llm.model,
+    model: miniSweModelName(config.llm.provider, config.llm.model),
     maxTokens: config.allowLoopCandidates.maxTokens,
     buildDependencyRoot: config.allowLoopCandidates.buildDependencyRoot,
     builderMaxModelTurns: config.allowLoopCandidates.builderMaxModelTurns,
@@ -919,6 +930,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
           configPresent: existsSync(bundledRuntime.configPath),
           ready: bundledRuntime.ready,
           error: bundledRuntime.ready ? null : 'mini-SWE runtime is not ready at the configured runtimeRoot; rerun dsh-loom setup and launch with its generated patch',
+          restartRequired: readJson<HarnessStateRecord>(paths.harnessState(root, config.sessionId))?.restartRequired ?? false,
         },
         workspaceRoot: root,
         thresholds: config.thresholds,
@@ -1085,7 +1097,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     name: 'meta_evolution_control',
     description: 'Actor 对话任务卡的自然语言控制协议。用户只需说“查看进度”或“取消”；本工具不会暴露 planId、路径、快照或隐藏推理。确认与重做由 Actor 依据当前卡片调用 meta_auto 的受控 Plan/Execute 链。',
     parameters: {
-      action: { type: 'string', description: 'status 或 cancel_queued。Actor 根据用户自然语言选择。' },
+      action: { type: 'string', description: 'status、cancel_queued 或 rollback_recent。Actor 根据用户自然语言选择。' },
     },
     output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args) {
@@ -1108,6 +1120,42 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
         atomicWriteJson(planPath, plan)
         taskSession.finish(planId, 'cancelled')
         return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan), note: '已取消排队任务；未启动 Builder，未修改任何内容。' }) as unknown as JsonValue
+      }
+      if (args.action === 'rollback_recent') {
+        if (plan.state !== 'completed' || plan.target.kind !== 'config' || !plan.result?.applied || plan.result.rolledBack) {
+          return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: '只有已安装、尚未回滚的 Config 任务可执行 Gate rollback。' }) as unknown as JsonValue
+        }
+        const history = readJsonl<{ patchId?: string; action?: string; before?: unknown; after?: unknown }>(paths.history(root, config.sessionId))
+        const applied = [...history].reverse().find((entry) => entry.patchId === plan.result?.runId && entry.action === 'apply')
+        if (!applied || !applied.before || typeof applied.before !== 'object' || Array.isArray(applied.before) || !applied.after || typeof applied.after !== 'object' || Array.isArray(applied.after)) {
+          return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: 'Gate apply receipt 不完整，fail-closed 拒绝回滚。' }) as unknown as JsonValue
+        }
+        const patch: MetaPatch = {
+          id: plan.result.runId,
+          action: 'update',
+          targetId: plan.target.plan.targetId,
+          targetKind: 'config',
+          config: applied.after as Record<string, unknown>,
+          dependencies: [], rationale: 'Gate-owned rollback of the installed user evolution config',
+          expectedOutcome: 'Restore the exact Gate before snapshot', version: 1, createdAt: new Date().toISOString(),
+        }
+        const cases = await validator.loadRegressionCases()
+        const ops = buildApplyOps(ctx, validator, cases, { root, sessionId: config.sessionId, skillRoot: config.skillRoot }, baseline)
+        if (!ops) return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: 'Gate apply adapter 不可用。' }) as unknown as JsonValue
+        const receipt = await gate.rollbackInstalledConfig(patch, applied.before as Record<string, unknown>, ops)
+        if (!receipt.rolledBack) return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), rollback: { rolledBack: false, conflict: receipt.conflict ?? null, error: receipt.error ?? null } }) as unknown as JsonValue
+        plan.result = {
+          ...plan.result,
+          applied: false,
+          effective: false,
+          restartRequired: false,
+          rolledBack: true,
+          rollbackReceipt: paths.rollbackReceipt(root, config.sessionId, patch.id),
+          summary: '已通过 Gate 恢复安装前快照；回滚 receipt 已持久化',
+          limitations: [...plan.result.limitations, 'Rollback restores the Gate before snapshot; already-running Actor turns are not rewritten.'],
+        }
+        atomicWriteJson(planPath, plan)
+        return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan), rollback: { rolledBack: true, targetId: receipt.targetId } }) as unknown as JsonValue
       }
       return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan, session.active?.jobId ? readJson<PersistedJob>(jobPathFor(session.active.jobId))?.status : undefined) }) as unknown as JsonValue
     },
@@ -1189,7 +1237,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
         })
         const events = evidenceEventsOf(evidencePack)
         const evolutionGateway = new ActorEvolutionGateway({
-          root, sessionId: config.sessionId, model: config.llm.model,
+          root, sessionId: config.sessionId, model: miniSweModelName(config.llm.provider, config.llm.model),
           miniSwe: {
             executable: bundledRuntime.executable,
             configPath: bundledRuntime.configPath,
@@ -1262,7 +1310,26 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
               confirmation: '我已根据当前会话证据冻结这个候选。是否开始隔离实现，并交给独立 Verifier/Gate 裁决？',
             }), note: '方案已冻结但尚未执行。请向用户解释目标、风险和验收方式，等待明确确认。' }) as unknown as JsonValue
           }
-          const planId = typeof args.planId === 'string' ? args.planId : taskSession.read().pending?.planId ?? ''
+          // A redo never reopens the old immutable plan.  It first freezes a
+          // fresh plan from the prior user intent and target, then follows the
+          // same queue/execute path as an explicitly confirmed plan.
+          let planId = typeof args.planId === 'string' ? args.planId : taskSession.read().pending?.planId ?? ''
+          if (args.redo === true) {
+            if (!evolutionRequirements || !targetKind) {
+              return cleanToolResult({ accepted: false, mode: 'execute', error: '重做任务缺少原始目标或用户意图，无法安全创建新计划。' }) as unknown as JsonValue
+            }
+            if (taskSession.read().pending || taskSession.read().active) {
+              return cleanToolResult({ accepted: false, mode: 'execute', error: '该会话已有等待确认或进行中的任务；请先查看、取消或等待其结束。' }) as unknown as JsonValue
+            }
+            const retry = controller.plan(evolutionRequirements, targetKind)
+            taskSession.beginPending({
+              planId: retry.id,
+              userRequest: evolutionRequirements,
+              actorExplanation: `根据上一轮未完成任务创建新的 immutable 重做：${retry.target.summary}`,
+              suggestions: [{ key: 'redo', title: retry.target.summary, summary: retry.target.verification, target: { kind: retry.target.kind, id: retry.target.plan.targetId } }],
+            })
+            planId = retry.id
+          }
           if (!planId) return cleanToolResult({ accepted: false, mode: 'execute', error: '当前会话没有等待确认的任务；execute 不会猜测或创建旁路。' }) as unknown as JsonValue
           const queued = controller.queue(planId)
           const jobId = scheduleRefine({ tool: 'meta_auto', kind: 'user-evolution', planId }, async () => {
@@ -1271,7 +1338,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
             taskSession.finish(planId, complete.state === 'completed' ? 'completed' : complete.state === 'rejected' ? 'rejected' : 'aborted')
             const report = complete.result
             return {
-              summary: `用户委托 ${complete.target.kind}/${complete.target.plan.targetId}：${report?.applied ? '已生效' : complete.state}${report?.summary ? `；${report.summary}` : ''}`,
+              summary: `用户委托 ${complete.target.kind}/${complete.target.plan.targetId}：${report?.restartRequired ? '待重启生效' : report?.applied ? '已生效' : complete.state}${report?.summary ? `；${report.summary}` : ''}`,
             }
           })
           taskSession.beginActive(planId, jobId)
@@ -1842,6 +1909,9 @@ function currentConfigOf(
       merged[entry.options.id] = { name: entry.options.name ?? entry.options.id, config: { ...(entry.options.config ?? {}) } }
     }
   }
+  const modelService = agentDefaultModelServiceOf(ctx)
+  const modelRow = merged['agent-default-model']
+  if (modelRow) modelRow.config = effectiveHostConfig('agent-default-model', modelRow.config, modelService)
   const rows = Object.entries(merged).map(([id, row]) => ({ id, name: row.name, config: row.config }))
   const priority = ['agent', 'agent-default-model', 'llm-deepseek', 'llm-pi-ai', 'meta-validate', 'system-prompt']
   const rank = (row: { id: string }): number => {
@@ -1875,7 +1945,9 @@ function buildApplyOps(
     loader = undefined
   }
   if (!loader) return undefined
+  const modelService = agentDefaultModelServiceOf(ctx)
   const installedByTarget = new Map<string, { dir: string; entryId: string }>()
+  const appliedOverlays = new Map<string, string>()
   const entries = (): LoaderEntry[] => [...(loader.entries() as Iterable<LoaderEntry>)]
   const harnessStatePath = paths.harnessState(meta.root, meta.sessionId)
   const readHarnessState = (): HarnessStateRecord => readJson<HarnessStateRecord>(harnessStatePath)
@@ -1886,7 +1958,7 @@ function buildApplyOps(
   const updateHarnessState = (patch: MetaPatch, overlay: string, before: Record<string, unknown>): void => {
     const state = readHarnessState()
     state.restartRequired = true
-    state.applied = state.applied.filter((record) => record.patchId !== patch.id)
+    state.applied = state.applied.filter((record) => record.targetId !== patch.targetId)
     state.applied.push({
       patchId: patch.id,
       targetId: patch.targetId,
@@ -1900,20 +1972,21 @@ function buildApplyOps(
   }
   const removeHarnessState = (patch: MetaPatch): void => {
     const state = readHarnessState()
-    state.applied = state.applied.filter((record) => record.patchId !== patch.id)
+    state.applied = state.applied.filter((record) => record.targetId !== patch.targetId)
     state.restartRequired = state.applied.length > 0
     writeHarnessState(state)
   }
   return {
     readConfig: (targetId) => {
-      if (baseline.rows[targetId]) return baseline.rows[targetId]?.config ?? {}
+      if (baseline.rows[targetId]) return effectiveHostConfig(targetId, baseline.rows[targetId]?.config ?? {}, modelService)
       const live = entries().find((entry) => entry.options.id === targetId)
-      return live?.options.config ?? {}
+      return effectiveHostConfig(targetId, live?.options.config ?? {}, modelService)
     },
-    writeConfig: (targetId, config, patch) => {
+    writeConfig: async (targetId, config, patch) => {
       const all = entries()
       const entry = all.find((item) => item.options.id === targetId)
       const name = entry?.options.name ?? baseline.rows[targetId]?.name ?? patch.targetId
+      const before = effectiveHostConfig(targetId, entry?.options.config ?? baseline.rows[targetId]?.config ?? {}, modelService)
       const overlay = paths.overlayFile(meta.root, meta.sessionId, patch.id)
       const lines = [
         `- id: ${patch.targetId}`,
@@ -1923,17 +1996,48 @@ function buildApplyOps(
       ]
       mkdirSync(paths.overlays(meta.root, meta.sessionId), { recursive: true })
       writeFileSync(overlay, `${lines.join('\n')}\n`, 'utf8')
+      await writeEffectiveHostConfig(targetId, config, modelService)
+      appliedOverlays.set(patch.id, overlay)
       baseline.set(patch.targetId, name, config)
-      updateHarnessState(patch, overlay, entry?.options.config ?? baseline.rows[patch.targetId]?.config ?? {})
+      updateHarnessState(patch, overlay, before)
       return overlay
     },
-    restoreConfig: (_targetId, _before, patch) => {
+    restoreConfig: async (_targetId, _before, patch) => {
+      await writeEffectiveHostConfig(_targetId, _before, modelService)
       const overlay = paths.overlayFile(meta.root, meta.sessionId, patch.id)
       rmSync(overlay, { force: true })
+      appliedOverlays.delete(patch.id)
       baseline.set(patch.targetId, baseline.rows[patch.targetId]?.name, _before)
       removeHarnessState(patch)
     },
-    smoke: (patch) => validator.runSmoke(patch, cases),
+    smoke: async (patch) => {
+      const report = await validator.runSmoke(patch, cases)
+      if (patch.targetKind === 'config') {
+        const overlay = appliedOverlays.get(patch.id)
+        const cold = overlay ? validator.runAppliedConfigCheck(patch, overlay) : null
+        const passed = Boolean(cold?.composed && (!cold.probe || cold.probe.ran))
+        report.checks.push({
+          name: 'cold-config-overlay',
+          passed,
+          detail: passed ? undefined : cold?.dumpError ?? cold?.probe?.outputTail ?? 'Gate overlay was not cold-replayed',
+        })
+        report.passed = report.checks.every((check) => check.passed)
+        return report
+      }
+      if (patch.targetKind !== 'skill') return report
+      if (!meta.skillRoot) {
+        report.checks.push({ name: 'cold-skill-load', passed: false, detail: 'skillRoot not configured' })
+      } else {
+        const cold = validator.runInstalledSkillCheck(patch, meta.skillRoot)
+        report.checks.push({
+          name: 'cold-skill-load',
+          passed: cold.passed,
+          detail: cold.passed ? undefined : cold.error ?? cold.probeTail ?? 'installed skill did not load',
+        })
+      }
+      report.passed = report.checks.every((check) => check.passed)
+      return report
+    },
     rowExists: (id) => entries().some((entry) => entry.options.id === id),
     insertRow: async (patch) => {
       if (!patch.module) throw new Error('insert patch missing module')

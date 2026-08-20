@@ -5,6 +5,7 @@ import {
   findChangedRows,
   parseDump,
   runIsolation,
+  runOverlayIsolation,
 } from '../isolation/runner.js'
 import type { MetaPatch } from '../types.js'
 
@@ -81,6 +82,16 @@ describe('isolation runner', () => {
     expect(result.composed).toBe(true)
     expect(result.candidateRowPresent).toBe(true)
     expect(result.changedRows).toEqual([])
+  })
+
+  it('cold-replays the exact persisted Gate overlay', () => {
+    const overlay = '/state/overlays/s1/p1.yml'
+    const result = runOverlayIsolation(patch(), {
+      dshCommand: ['dsh'], cwd: '/tmp', profile: 'headless', baseOverlays: [],
+      dumpRunner: (overlays) => overlays.includes(overlay) ? PATCHED_OK : BASE,
+    }, overlay)
+    expect(result.composed).toBe(true)
+    expect(result.commands?.patchedDump).toContain(overlay)
   })
 
   it('composed=false when an unrelated row changed', () => {

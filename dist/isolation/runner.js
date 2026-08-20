@@ -84,6 +84,13 @@ export function runIsolation(patch, options) {
     const overlayDir = mkdtempSync(join(tmpdir(), 'dsh-mv-isolation-'));
     const overlayPath = join(overlayDir, 'candidate-overlay.yml');
     writeFileSync(overlayPath, buildCandidateOverlay(patch, options.stagingRoot ?? ''), 'utf8');
+    return runWithOverlay(patch, options, overlayPath);
+}
+/** Re-run isolation against the exact persisted Gate overlay artifact. */
+export function runOverlayIsolation(patch, options, overlayPath) {
+    return runWithOverlay(patch, options, overlayPath);
+}
+function runWithOverlay(patch, options, overlayPath) {
     const overlays = [...options.baseOverlays];
     const patchedOverlays = [...options.baseOverlays, overlayPath];
     const commands = {

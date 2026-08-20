@@ -50,7 +50,7 @@ export function userEvolutionTaskCard(plan, jobStatus, extras = {}) {
             { event: 'planned', at: plan.createdAt, label: '方案与证据已冻结' },
             ...(plan.execution ? [{ event: 'started', at: plan.execution.at, label: '已进入隔离实现' }] : []),
             ...(plan.state === 'verifying' ? [{ event: 'verifying', label: '独立裁决中' }] : []),
-            ...(result ? [{ event: 'finished', label: result.applied ? '裁决完成，已生效' : '裁决完成，未生效' }] : []),
+            ...(result ? [{ event: 'finished', label: result.rolledBack ? '已通过 Gate 回滚' : result.restartRequired ? '裁决完成，待重启生效' : result.applied ? '裁决完成，已生效' : '裁决完成，未生效' }] : []),
         ],
         retryable: phase === 'not_applied' || phase === 'not_completed' || phase === 'cancelled',
         ...(result ? { result: presentResult(result) } : {}),
@@ -58,7 +58,7 @@ export function userEvolutionTaskCard(plan, jobStatus, extras = {}) {
 }
 function presentResult(result) {
     return {
-        outcome: result.applied ? '已生效' : result.summary.includes('取消') ? '已取消' : result.verdict === 'aborted' ? '未完成' : '未生效',
+        outcome: result.rolledBack ? '已回滚' : result.restartRequired ? '待重启生效' : result.applied ? '已生效' : result.summary.includes('取消') ? '已取消' : result.verdict === 'aborted' ? '未完成' : '未生效',
         verdict: result.verdict, summary: result.summary, limitations: result.limitations,
     };
 }

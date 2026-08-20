@@ -13,6 +13,16 @@ export function metaRoot() {
 export function workspaceDir(root, sessionId) {
     return join(root, 'workspace', sessionId);
 }
+/**
+ * A filesystem-safe child session namespace for Builder-owned workspaces.
+ * Colons are useful in trace labels but illegal in Windows path components;
+ * use this fixed portable delimiter for all persisted role scopes instead.
+ */
+export function scopedSessionId(sessionId, scope) {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(scope))
+        throw new Error(`invalid Builder session scope: ${scope}`);
+    return `${sessionId}--${scope}`;
+}
 export function patchDir(root, sessionId, patchId) {
     return join(workspaceDir(root, sessionId), 'patches', patchId);
 }
@@ -41,7 +51,11 @@ export function readJson(path) {
     if (!existsSync(path))
         return null;
     try {
-        return JSON.parse(readFileSync(path, 'utf8'));
+        const text = readFileSync(path, 'utf8');
+        // Windows PowerShell 5 writes UTF-8 text with a BOM by default. External
+        // Builder runtimes may therefore produce a valid JSON object prefixed by
+        // U+FEFF even though Loom's own atomic writer never does.
+        return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
     }
     catch {
         return null;
@@ -103,6 +117,7 @@ export const paths = {
     growthPreferences: (root, sessionId) => join(root, 'growth', sessionId, 'preferences.json'),
     growthReport: (root, sessionId) => join(root, 'growth', sessionId, 'report.md'),
     harnessState: (root, sessionId) => join(workspaceDir(root, sessionId), 'harness-state.json'),
+    rollbackReceipt: (root, sessionId, patchId) => join(workspaceDir(root, sessionId), 'rollbacks', `${patchId}.json`),
     overlays: (root, sessionId) => join(root, 'overlays', sessionId),
     overlayFile: (root, sessionId, patchId) => join(root, 'overlays', sessionId, `${patchId}.yml`),
     staging: (root, sessionId, patchId) => join(workspaceDir(root, sessionId), 'builder', 'staging', patchId),

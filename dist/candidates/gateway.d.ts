@@ -119,6 +119,7 @@ export declare class LoopCandidateGateway {
     private readonly runtimes;
     constructor(options: LoopCandidateGatewayOptions);
     private kernel;
+    private builderSessionId;
     /** Create a durable run before it enters the background queue. */
     startExploration(requirements: string, context?: Record<string, unknown>): LoopExplorationStart;
     /**

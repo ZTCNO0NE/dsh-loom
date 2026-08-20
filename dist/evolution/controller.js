@@ -103,17 +103,21 @@ export class UserEvolutionController {
     }
     report(plan, runId, verdict, applied, summary) {
         const targetId = plan.target.plan.targetId;
+        const restartRequired = applied && plan.target.kind === 'config';
         return {
             runId,
             targetKind: plan.target.kind,
             targetId,
             verdict,
             applied,
-            summary,
+            effective: applied && !restartRequired,
+            restartRequired,
+            summary: restartRequired ? `${summary}；配置 overlay 已通过冷启动验证，宿主重启后生效` : summary,
             limitations: [
                 'Only the host-selected target and isolated workspace are mutable.',
                 'Verifier and Gate remain independent final authorities.',
                 'A successful install does not by itself prove general task improvement.',
+                ...(restartRequired ? ['The verified config overlay requires a cold host restart before it affects Actor sessions.'] : []),
             ],
         };
     }

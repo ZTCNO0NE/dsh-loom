@@ -24,6 +24,19 @@ export interface CredentialServiceLike {
 
 export type BuilderProvider = 'deepseek-official' | 'gpt-5.6-terra'
 
+/**
+ * Credentials are selected by the already-selected model route, never by
+ * whichever secret happens to be available.  This prevents a DeepSeek key
+ * from being sent to an OpenAI-compatible endpoint (and vice versa).
+ */
+export function defaultCredentialRefs(provider: string): string[] {
+  if (provider === 'deepseek-official') return ['DEEPSEEK_API_KEY']
+  // OPENAI_API_KEY is the normal DSH/OpenAI credential reference.  The two
+  // Loom-era aliases remain only as migration fallbacks for explicit Terra.
+  if (provider === 'gpt-5.6-terra') return ['OPENAI_API_KEY', 'LOOM_TERRA_API_KEY', 'DSH_TERRA_API_KEY']
+  return []
+}
+
 export class BuilderCredentialResolver {
   constructor(
     private readonly credentials: CredentialServiceLike | undefined,
@@ -33,9 +46,7 @@ export class BuilderCredentialResolver {
 
   private refs(): string[] {
     if (this.explicitRef) return [this.explicitRef]
-    if (this.provider === 'deepseek-official') return ['DEEPSEEK_API_KEY']
-    if (this.provider === 'gpt-5.6-terra') return ['LOOM_TERRA_API_KEY', 'DSH_TERRA_API_KEY']
-    return []
+    return defaultCredentialRefs(this.provider)
   }
 
   async resolve(): Promise<CredentialResolution | undefined> {

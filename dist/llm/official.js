@@ -9,6 +9,7 @@ export function officialDeepSeekLlm(options = {}) {
         baseURL: options.baseURL ?? process.env.DSH_META_BASE_URL ?? process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
         apiKey: options.apiKey ?? process.env.DSH_META_API_KEY ?? process.env.DEEPSEEK_API_KEY,
         apiKeyEnv: 'DEEPSEEK_API_KEY',
+        resolveApiKey: options.resolveApiKey,
         includeThinking: true,
     }, options);
 }
@@ -21,7 +22,10 @@ export function openAiCompatibleLlm(options, deepSeekOptions = {}) {
     return {
         async *stream(call) {
             const baseURL = options.baseURL.replace(/\/$/, '');
-            const apiKey = options.apiKey ?? process.env[options.apiKeyEnv] ?? '';
+            // When the host supplied a resolver, credential service is authoritative:
+            // do not silently fall through to an inherited shell variable.
+            const resolved = options.resolveApiKey ? await options.resolveApiKey() : undefined;
+            const apiKey = options.resolveApiKey ? resolved ?? '' : options.apiKey ?? process.env[options.apiKeyEnv] ?? '';
             if (!apiKey) {
                 throw new Error(`openAiCompatibleLlm: ${options.apiKeyEnv} missing`);
             }
@@ -157,6 +161,7 @@ export function terraLlm(options = {}) {
         // evaluation shells. Both are process-local only and never persisted.
         apiKey: options.apiKey ?? process.env.LOOM_TERRA_API_KEY,
         apiKeyEnv: 'DSH_TERRA_API_KEY',
+        resolveApiKey: options.resolveApiKey,
         includeThinking: false,
         stream: false,
         responseFormat: false,

@@ -7,10 +7,7 @@ export function miniSweChildEnv(provider: string, source: NodeJS.ProcessEnv = pr
   const isTerra = provider === 'gpt-5.6-terra'
   const baseURL = isTerra
     ? source.LOOM_TERRA_BASE_URL ?? source.DSH_TERRA_BASE_URL
-    : source.DSH_META_BASE_URL ?? source.DEEPSEEK_BASE_URL
-  const inheritedKey = isTerra
-    ? source.LOOM_TERRA_API_KEY ?? source.DSH_TERRA_API_KEY
-    : source.DSH_META_API_KEY ?? source.DEEPSEEK_API_KEY
+    : source.DSH_META_BASE_URL ?? source.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com/v1'
   // Do not forward provider-specific source variables in bulk. The resolved
   // credential is mapped to the one variable mini-SWE needs for this child.
   const child = { ...source }
@@ -18,10 +15,23 @@ export function miniSweChildEnv(provider: string, source: NodeJS.ProcessEnv = pr
   delete child.DEEPSEEK_API_KEY
   delete child.LOOM_TERRA_API_KEY
   delete child.DSH_TERRA_API_KEY
+  delete child.OPENAI_API_KEY
   return {
     ...child,
     MSWEA_CONFIGURED: 'true',
-    ...(baseURL ? { OPENAI_BASE_URL: baseURL } : {}),
-    ...(credential ?? inheritedKey ? { OPENAI_API_KEY: credential ?? inheritedKey } : {}),
+    // LiteLLM's OpenAI adapter consumes OPENAI_API_BASE.  Keep the common
+    // OPENAI_BASE_URL spelling too for runtimes that use the OpenAI SDK
+    // directly, but never fall back to api.openai.com for Loom providers.
+    ...(baseURL ? { OPENAI_API_BASE: baseURL, OPENAI_BASE_URL: baseURL } : {}),
+    ...(credential ? isTerra
+      ? { OPENAI_API_KEY: credential }
+      : { DEEPSEEK_API_KEY: credential }
+      : {}),
   }
+}
+
+/** Maps Loom's provider-neutral model name to mini-SWE/LiteLLM's provider route. */
+export function miniSweModelName(provider: string, model: string): string {
+  if (model.includes('/')) return model
+  return provider === 'deepseek-official' ? `deepseek/${model}` : `openai/${model}`
 }

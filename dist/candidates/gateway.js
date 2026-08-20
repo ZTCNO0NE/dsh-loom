@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { CandidateRegistry } from './index.js';
-import { atomicWriteJson, sha256 } from '../protocol/index.js';
+import { atomicWriteJson, scopedSessionId, sha256 } from '../protocol/index.js';
 import { BuilderDriver } from '../builder/driver.js';
 import { BuilderKernel, builderRunPaths } from '../builder/kernel.js';
 import { BuilderCapabilityRuntimeRegistry, LOOP_EVOLUTION_CAPABILITY, WORKSPACE_SIMULATION_CAPABILITY } from '../builder/capabilities.js';
@@ -81,8 +81,9 @@ export class LoopCandidateGateway {
         this.runtimes = options.capabilityRuntimes ?? new BuilderCapabilityRuntimeRegistry().register(createWorkspaceSimulationRuntime());
     }
     kernel() {
-        return new BuilderKernel(this.options.root, `${this.options.sessionId}:loop-exploration`, this.runtimes, this.options.builderKernelOptions);
+        return new BuilderKernel(this.options.root, this.builderSessionId(), this.runtimes, this.options.builderKernelOptions);
     }
+    builderSessionId() { return scopedSessionId(this.options.sessionId, 'loop-exploration'); }
     /** Create a durable run before it enters the background queue. */
     startExploration(requirements, context = {}) {
         if (!this.options.enabled)
@@ -168,7 +169,7 @@ export class LoopCandidateGateway {
             const mini = this.options.miniSwe;
             if (!mini)
                 throw new Error('mini-SWE runtime is selected but not configured');
-            const paths = builderRunPaths(this.options.root, `${this.options.sessionId}:loop-exploration`, runId);
+            const paths = builderRunPaths(this.options.root, this.builderSessionId(), runId);
             const execution = await runMiniSwe({
                 ...mini,
                 model: this.options.model,
@@ -385,7 +386,7 @@ export class LoopCandidateGateway {
         return next.id;
     }
     materializeMiniWorkspace(kernel, runId, mini, baselineCommit) {
-        const paths = builderRunPaths(this.options.root, `${this.options.sessionId}:loop-exploration`, runId);
+        const paths = builderRunPaths(this.options.root, this.builderSessionId(), runId);
         materializeMiniSweWorkspace({
             baselineRoot: mini.baselineRoot,
             dependencySnapshot: mini.dependencySnapshot,

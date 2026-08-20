@@ -24,6 +24,21 @@ const option = (name) => {
   return index >= 0 ? process.argv[index + 1] : undefined
 }
 
+function findSourceDshRoot() {
+  const candidates = []
+  if (process.env.DSH_ROOT) candidates.push(resolve(process.env.DSH_ROOT))
+  let cursor = resolve(process.cwd())
+  for (let depth = 0; depth < 6; depth += 1) {
+    candidates.push(cursor)
+    const parent = dirname(cursor)
+    if (parent === cursor) break
+    cursor = parent
+  }
+  return candidates.find((candidate) =>
+    existsSync(join(candidate, 'apps', 'cli', 'package.json'))
+      && existsSync(join(candidate, 'packages', 'core', 'tools', 'package.json')))
+}
+
 function bootstrapRuntime() {
   const runtimeRoot = option('--runtime-root') ?? process.env.DSH_LOOM_RUNTIME_ROOT ?? join(root, 'runtime', `mini-swe-agent-${MINI_SWE_VERSION}`)
   const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -77,13 +92,44 @@ function bootstrapRuntime() {
   // environment variable. Both durable workspace and runtime therefore come
   // from the same setup-owned cache, not from process environment luck.
   const workspaceRoot = dirname(dirname(runtimeRoot))
+  const skillRoot = join(workspaceRoot, 'skills')
+  // The Web profile's host skill-filesystem row is intentionally disabled;
+  // presets own their local discovery layer. Loom contributes a separate
+  // deployment-level provider below, so every preset can see Gate-installed
+  // skills through the registry's normal global→preset scope chain.
+  mkdirSync(skillRoot, { recursive: true })
+  // Skill validation deliberately boots a separate cold DSH process.  Setup
+  // owns this command because source checkouts need tsx + their checkout cwd,
+  // whereas installed CLIs can use the ordinary dsh executable.
+  const sourceDshRoot = findSourceDshRoot()
+  const isolationCommand = sourceDshRoot
+    ? [process.execPath, '--import', 'tsx/esm', 'apps/cli/src/bin.ts']
+    : [process.env.DSH_COMMAND ?? 'dsh']
+  const isolationCwd = sourceDshRoot ?? process.cwd()
   writeFileSync(patch, [
     '- id: meta-validate',
     '  config:',
     `    workspaceRoot: ${JSON.stringify(workspaceRoot)}`,
+    `    skillRoot: ${JSON.stringify(skillRoot)}`,
     '    activeEvolution:',
     '      enabled: true',
     `      runtimeRoot: ${JSON.stringify(runtimeRoot)}`,
+    `    skillStagingRoot: ${JSON.stringify(join(workspaceRoot, 'skill-staging'))}`,
+    '    isolation:',
+    '      enabled: true',
+    `      dshCommand: ${JSON.stringify(isolationCommand)}`,
+    `      cwd: ${JSON.stringify(isolationCwd)}`,
+    '      profile: headless',
+    '      baseOverlays: []',
+    '      probe: "reply with ok"',
+    '      probeTimeoutMs: 120000',
+    '- insert:',
+    '    - id: loom-skill-filesystem',
+    "      name: '@deepseek-ai/dsh-skill-filesystem'",
+    '      config:',
+    '        providerName: loom',
+    '        includeDefaultRoots: false',
+    `        customSkillDirs: [${JSON.stringify(skillRoot)}]`,
     '',
   ].join('\n'))
   return { runtimeRoot, mini, patch }
@@ -95,18 +141,7 @@ function bootstrapRuntime() {
 // Repair only this known source-mode gap; published DSH installations are left
 // untouched. A real directory at the target is never overwritten.
 function repairSourceDshHostFallback() {
-  const candidates = []
-  if (process.env.DSH_ROOT) candidates.push(resolve(process.env.DSH_ROOT))
-  let cursor = resolve(process.cwd())
-  for (let depth = 0; depth < 6; depth += 1) {
-    candidates.push(cursor)
-    const parent = dirname(cursor)
-    if (parent === cursor) break
-    cursor = parent
-  }
-  const sourceRoot = candidates.find((candidate) =>
-    existsSync(join(candidate, 'apps', 'cli', 'package.json'))
-      && existsSync(join(candidate, 'packages', 'core', 'tools', 'package.json')))
+  const sourceRoot = findSourceDshRoot()
   if (!sourceRoot) return undefined
   const cliManifestPath = join(sourceRoot, 'apps', 'cli', 'package.json')
   const cliManifest = JSON.parse(readFileSync(cliManifestPath, 'utf8'))
@@ -214,13 +249,13 @@ if (command === 'setup') {
   const { runtimeRoot, mini, patch } = bootstrapRuntime()
   console.log(`✅ mini-SWE ${MINI_SWE_VERSION} 已安装：${mini}`)
   console.log(`✅ 主动演进 patch 已生成：${patch}`)
-  console.log('启动 DSH 时追加：dsh --profile loom --patch "' + patch + '"')
+  console.log('启动 DSH 时追加：dsh web --patch "' + patch + '"')
   process.exit(0)
 }
 
 if (command === 'start') {
   const { patch } = bootstrapRuntime()
-  const profile = option('--profile') ?? 'loom'
+  const profile = option('--profile') ?? 'web'
   const passthrough = []
   for (let index = 3; index < process.argv.length; index += 1) {
     const arg = process.argv[index]
@@ -228,19 +263,19 @@ if (command === 'start') {
     passthrough.push(arg)
   }
   const [, ...surfaceArgs] = passthrough
-  // `web` is DSH's fixed --profile web alias. A custom Loom profile must use
-  // the root options directly; never compose `web --profile loom`.
-  const dshArgs = ['--profile', profile, '--patch', patch, ...surfaceArgs]
+  const dshArgs = profile === 'web'
+    ? ['web', '--patch', patch, ...surfaceArgs]
+    : ['--profile', profile, '--patch', patch, ...surfaceArgs]
   const result = spawnSync(process.env.DSH_COMMAND ?? 'dsh', dshArgs, { stdio: 'inherit', shell: process.platform === 'win32' })
   if (result.error) {
     console.error(`❌ 无法启动 DSH：${result.error.message}`)
-    console.error('源码 checkout 请使用 pnpm dsh --profile loom --patch <patch>。')
+    console.error('源码 checkout 请使用 pnpm dsh web --patch <patch>。')
   }
   process.exit(result.status ?? 1)
 }
 
 if (command !== 'try') {
-  console.log('用法：dsh-loom setup [--runtime-root <dir>] | dsh-loom start [--profile <name>] [web] | dsh-loom try')
+  console.log('用法：dsh-loom setup [--runtime-root <dir>] | dsh-loom start [--profile <name>] | dsh-loom try')
   process.exit(command ? 1 : 0)
 }
 const ws = join(root, 'workspace', session)

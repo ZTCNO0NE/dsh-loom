@@ -11,7 +11,7 @@ import type {
   SmokeReport,
   ValidationReport,
 } from '../types.js'
-import { runIsolation, type IsolationOptions, type IsolationResult } from '../isolation/runner.js'
+import { runIsolation, runOverlayIsolation, type IsolationOptions, type IsolationResult } from '../isolation/runner.js'
 import { parseDump, findChangedRows, childEnv } from '../isolation/runner.js'
 
 export interface ValidatorOptions {
@@ -279,8 +279,24 @@ export class Validator {
 
   /** M2.6 belongs to the verifier: candidate composition/load check before behavior alignment. */
   runIsolationCheck(patch: MetaPatch): IsolationResult | null {
+    // A skill bundle is data consumed by the skill-filesystem provider, not a
+    // Cordis plugin entry.  Sending its SKILL.md through the generic insert
+    // isolation path creates a loader row whose `name` is the Markdown path;
+    // a real cold boot then (correctly) rejects that path as an invalid module
+    // specifier before the dedicated catalog/load verifier can run.
+    //
+    // Skills have their own fail-closed isolation boundary below
+    // (`runSkillIsolationCheck`), which mounts only the verifier-owned skill
+    // root through dsh-skill-filesystem and performs a real cold Actor load.
+    if (patch.targetKind === 'skill') return null
     if (!this.options.isolation) return null
     return runIsolation(patch, this.options.isolation)
+  }
+
+  /** Cold-replay the exact config overlay persisted by Gate. */
+  runAppliedConfigCheck(patch: MetaPatch, overlayPath: string): IsolationResult | null {
+    if (patch.targetKind !== 'config' || !this.options.isolation) return null
+    return runOverlayIsolation(patch, this.options.isolation, overlayPath)
   }
 
   /** M4: deterministic load check for builder-drafted modules (fresh `node --check`). */
@@ -341,14 +357,44 @@ export class Validator {
     mkdirSync(join(staging, name), { recursive: true })
     writeFileSync(join(staging, skillFile.path), skillFile.content, 'utf8')
 
-    const probeOverlay = join(staging, 'probe-overlay.yml')
+    return this.probeSkillRoot(name, staging, staging)
+  }
+
+  /** Cold-load an already installed skill from the Gate-owned root. */
+  runInstalledSkillCheck(patch: MetaPatch, installedRoot: string): {
+    passed: boolean
+    file: string
+    error?: string
+    changedRows?: string[]
+    probeExit?: number
+    probeTail?: string
+  } {
+    const opts = this.options.skillIsolation
+    if (!opts) return { passed: false, file: 'skill-isolation', error: 'skillIsolation not configured' }
+    const probeDir = join(opts.stagingRoot, `${patch.id}-installed`)
+    mkdirSync(probeDir, { recursive: true })
+    return this.probeSkillRoot(patch.targetId, installedRoot, probeDir)
+  }
+
+  private probeSkillRoot(name: string, skillRoot: string, probeDir: string): {
+    passed: boolean
+    file: string
+    error?: string
+    changedRows?: string[]
+    probeExit?: number
+    probeTail?: string
+  } {
+    const opts = this.options.skillIsolation
+    if (!opts) return { passed: false, file: 'skill-isolation', error: 'skillIsolation not configured' }
+
+    const probeOverlay = join(probeDir, 'probe-overlay.yml')
     writeFileSync(probeOverlay, [
       '- id: skill-filesystem',
       "  name: '@deepseek-ai/dsh-skill-filesystem'",
       '  config:',
       '    providerName: filesystem',
       '    includeDefaultRoots: false',
-      `    customSkillDirs: [${JSON.stringify(staging)}]`,
+      `    customSkillDirs: [${JSON.stringify(skillRoot)}]`,
     ].join('\n') + '\n', 'utf8')
 
     const dump = opts.dumpRunner ?? ((overlays: string[]) => execFileSync(
@@ -369,7 +415,10 @@ export class Validator {
         return { out: String(e.stdout ?? e.stderr ?? e.message ?? ''), exit: e.status ?? -1 }
       }
     })
-    const result = probe([...opts.baseOverlays, probeOverlay], task)
+    // The default probe runner appends probeOverlay itself. Passing it here as
+    // well applies the same loader patch twice, which is not idempotent on the
+    // Windows Cordis loader path.
+    const result = probe(opts.baseOverlays, task)
     const passed = changedRows.length === 0 && result.exit === 0 && result.out.includes(name) && !result.out.includes('不存在')
     return {
       passed,

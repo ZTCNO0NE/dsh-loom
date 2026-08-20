@@ -37,7 +37,16 @@ export interface UserEvolutionReport {
     targetKind: UserEvolutionTargetKind;
     targetId: string;
     verdict: 'approved' | 'rejected' | 'aborted';
+    /** Gate artifact was installed. Config artifacts may still await a cold host restart. */
     applied: boolean;
+    /** The change is visible to the running Actor process. */
+    effective?: boolean;
+    /** A verified config overlay is installed but requires a cold host restart. */
+    restartRequired?: boolean;
+    /** A later Gate-owned receipt restored the original before snapshot. */
+    rolledBack?: boolean;
+    /** Internal evidence location; presentation must not expose this path. */
+    rollbackReceipt?: string;
     summary: string;
     limitations: string[];
 }

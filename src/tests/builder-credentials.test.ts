@@ -39,9 +39,9 @@ describe('BuilderCredentialResolver', () => {
     await expect(resolver.resolve()).resolves.toEqual({ ref: 'DSH_META_API_KEY', value: 'override-secret', source: 'env' })
   })
 
-  it('uses Terra references only for the explicit Terra provider and preserves its compatibility fallback', async () => {
-    const service = credentials({ DSH_TERRA_API_KEY: { value: 'terra-secret', source: 'env' } })
-    await expect(new BuilderCredentialResolver(service, 'gpt-5.6-terra').describe()).resolves.toEqual({ ref: 'DSH_TERRA_API_KEY', configured: true, source: 'env' })
+  it('uses the OpenAI credential only for the explicit GPT/Terra route, then preserves migration fallbacks', async () => {
+    const service = credentials({ OPENAI_API_KEY: { value: 'gpt-secret', source: 'file' }, DSH_TERRA_API_KEY: { value: 'terra-secret', source: 'env' } })
+    await expect(new BuilderCredentialResolver(service, 'gpt-5.6-terra').describe()).resolves.toEqual({ ref: 'OPENAI_API_KEY', configured: true, source: 'file' })
     await expect(new BuilderCredentialResolver(service, 'deepseek-official').describe()).resolves.toEqual({ ref: 'DEEPSEEK_API_KEY', configured: false })
   })
 

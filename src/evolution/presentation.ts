@@ -20,7 +20,7 @@ export interface EvolutionTaskCard {
   actions: Array<'confirm_execute' | 'view_status' | 'view_evidence'>
   timeline: Array<{ event: 'planned' | 'started' | 'verifying' | 'finished'; at?: string; label: string }>
   retryable: boolean
-  result?: { outcome: '已生效' | '未生效' | '未完成' | '已取消'; verdict: UserEvolutionReport['verdict']; summary: string; limitations: string[] }
+  result?: { outcome: '已生效' | '待重启生效' | '已回滚' | '未生效' | '未完成' | '已取消'; verdict: UserEvolutionReport['verdict']; summary: string; limitations: string[] }
 }
 
 export interface EvolutionTaskCardExtras {
@@ -80,7 +80,7 @@ export function userEvolutionTaskCard(plan: UserEvolutionPlan, jobStatus?: strin
       { event: 'planned', at: plan.createdAt, label: '方案与证据已冻结' },
       ...(plan.execution ? [{ event: 'started' as const, at: plan.execution.at, label: '已进入隔离实现' }] : []),
       ...(plan.state === 'verifying' ? [{ event: 'verifying' as const, label: '独立裁决中' }] : []),
-      ...(result ? [{ event: 'finished' as const, label: result.applied ? '裁决完成，已生效' : '裁决完成，未生效' }] : []),
+      ...(result ? [{ event: 'finished' as const, label: result.rolledBack ? '已通过 Gate 回滚' : result.restartRequired ? '裁决完成，待重启生效' : result.applied ? '裁决完成，已生效' : '裁决完成，未生效' }] : []),
     ],
     retryable: phase === 'not_applied' || phase === 'not_completed' || phase === 'cancelled',
     ...(result ? { result: presentResult(result) } : {}),
@@ -89,7 +89,7 @@ export function userEvolutionTaskCard(plan: UserEvolutionPlan, jobStatus?: strin
 
 function presentResult(result: UserEvolutionReport): EvolutionTaskCard['result'] {
   return {
-    outcome: result.applied ? '已生效' : result.summary.includes('取消') ? '已取消' : result.verdict === 'aborted' ? '未完成' : '未生效',
+    outcome: result.rolledBack ? '已回滚' : result.restartRequired ? '待重启生效' : result.applied ? '已生效' : result.summary.includes('取消') ? '已取消' : result.verdict === 'aborted' ? '未完成' : '未生效',
     verdict: result.verdict, summary: result.summary, limitations: result.limitations,
   }
 }

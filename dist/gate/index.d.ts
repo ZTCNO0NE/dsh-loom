@@ -21,6 +21,18 @@ export interface ApplyResult extends AppliedMetaPatch {
     /** Persisted overlay path for config-update patches (cold-apply artifact). */
     overlay?: string;
 }
+export interface ConfigRollbackReceipt {
+    schemaVersion: number;
+    patchId: string;
+    targetId: string;
+    action: 'rollback-installed-config';
+    rolledBack: boolean;
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+    conflict?: string;
+    error?: string;
+    at: string;
+}
 export declare class Gate {
     private ctx;
     private meta;
@@ -38,6 +50,8 @@ export declare class Gate {
      * atomic write -> smoke -> rollback on failure. History is append-only.
      */
     applyWithRollback(patch: MetaPatch, ops: ApplyOps): Promise<ApplyResult>;
+    /** Roll back one already-installed config patch from its Gate-owned before snapshot. */
+    rollbackInstalledConfig(patch: MetaPatch, installedBefore: Record<string, unknown>, ops: ApplyOps): Promise<ConfigRollbackReceipt>;
     private applyInsert;
     /** M4: skill patches install SKILL.md files into a skill root (no loader row). */
     private applyInsertSkill;

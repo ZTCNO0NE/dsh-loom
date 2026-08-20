@@ -65,7 +65,11 @@ export function appendJsonl(path: string, record: unknown): void {
 export function readJson<T>(path: string): T | null {
   if (!existsSync(path)) return null
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as T
+    const text = readFileSync(path, 'utf8')
+    // Windows PowerShell 5 writes UTF-8 text with a BOM by default. External
+    // Builder runtimes may therefore produce a valid JSON object prefixed by
+    // U+FEFF even though Loom's own atomic writer never does.
+    return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) as T
   } catch {
     return null
   }
@@ -131,6 +135,8 @@ export const paths = {
   growthPreferences: (root: string, sessionId: string) => join(root, 'growth', sessionId, 'preferences.json'),
   growthReport: (root: string, sessionId: string) => join(root, 'growth', sessionId, 'report.md'),
   harnessState: (root: string, sessionId: string) => join(workspaceDir(root, sessionId), 'harness-state.json'),
+  rollbackReceipt: (root: string, sessionId: string, patchId: string) =>
+    join(workspaceDir(root, sessionId), 'rollbacks', `${patchId}.json`),
   overlays: (root: string, sessionId: string) => join(root, 'overlays', sessionId),
   overlayFile: (root: string, sessionId: string, patchId: string) =>
     join(root, 'overlays', sessionId, `${patchId}.yml`),

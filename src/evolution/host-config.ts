@@ -1,0 +1,53 @@
+/** DSH config rows whose effective value is owned by a runtime service. */
+export const AGENT_DEFAULT_MODEL_TARGET = 'agent-default-model'
+
+export interface AgentDefaultModelServiceLike {
+  currentSelection(): { provider: string; model: string; reasoningEffort?: unknown }
+  saveSelection(next: { provider: string; model: string; reasoningEffort?: unknown }): Promise<void>
+}
+
+/** Resolve the optional DSH default-model service without coupling Loom to its package implementation. */
+export function agentDefaultModelServiceOf(host: unknown): AgentDefaultModelServiceLike | undefined {
+  try {
+    const contextual = host as {
+      get?: (name: string) => unknown
+      agentDefaultModel?: AgentDefaultModelServiceLike
+    }
+    const service = (typeof contextual.get === 'function'
+      ? contextual.get('agentDefaultModel')
+      : contextual.agentDefaultModel) as AgentDefaultModelServiceLike | undefined
+    return service && typeof service.currentSelection === 'function' && typeof service.saveSelection === 'function'
+      ? service
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Return the host-effective config rather than a lower-priority loader default. */
+export function effectiveHostConfig(
+  targetId: string,
+  fallback: Record<string, unknown>,
+  service: AgentDefaultModelServiceLike | undefined,
+): Record<string, unknown> {
+  if (targetId !== AGENT_DEFAULT_MODEL_TARGET || !service) return { ...fallback }
+  return { ...service.currentSelection() }
+}
+
+/** Persist a settings-backed config through its owning DSH service. */
+export async function writeEffectiveHostConfig(
+  targetId: string,
+  config: Record<string, unknown>,
+  service: AgentDefaultModelServiceLike | undefined,
+): Promise<boolean> {
+  if (targetId !== AGENT_DEFAULT_MODEL_TARGET || !service) return false
+  if (typeof config.provider !== 'string' || typeof config.model !== 'string') {
+    throw new Error('agent-default-model requires string provider and model')
+  }
+  await service.saveSelection({
+    provider: config.provider,
+    model: config.model,
+    ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort }),
+  })
+  return true
+}

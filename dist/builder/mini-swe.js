@@ -28,18 +28,23 @@ export function materializeMiniSweWorkspace(options) {
 export async function runMiniSwe(options) {
     let error;
     try {
-        await execFileAsync(options.executable, [
-            '-m', options.model, '-y', '--exit-immediately', '-l', '0', '-o', options.trajectoryPath,
-            '-c', options.configPath,
-            '-c', `environment.cwd=${options.workspace}`,
-            '-c', `environment.timeout=${Math.ceil(options.timeoutMs / 1000)}`,
-            '-c', `agent.step_limit=${options.stepLimit}`,
-            '-t', options.task,
-        ], {
+        const env = options.resolveEnv ? await options.resolveEnv() : options.env;
+        const args = options.runnerPath
+            ? [options.runnerPath, '--model', options.model, '--output', options.trajectoryPath, '--config', options.configPath, '--workspace', options.workspace, '--timeout-seconds', String(Math.ceil(options.timeoutMs / 1000)), '--step-limit', String(options.stepLimit), '--task', options.task]
+            : [
+                '-m', options.model, '-y', '--exit-immediately', '-l', '0', '-o', options.trajectoryPath,
+                '-c', options.configPath,
+                '-c', `environment.cwd=${options.workspace}`,
+                '-c', `environment.timeout=${Math.ceil(options.timeoutMs / 1000)}`,
+                '-c', `agent.step_limit=${options.stepLimit}`,
+                '-t', options.task,
+            ];
+        const executable = options.runnerPath ? options.executable.replace(/mini(?:\.exe)?$/i, process.platform === 'win32' ? 'python.exe' : 'python') : options.executable;
+        await execFileAsync(executable, args, {
             cwd: options.workspace,
             timeout: options.timeoutMs,
             maxBuffer: 4 * 1024 * 1024,
-            ...(options.env ? { env: options.env } : {}),
+            ...(env ? { env } : {}),
         });
     }
     catch (caught) {

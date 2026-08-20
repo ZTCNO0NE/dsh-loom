@@ -1361,6 +1361,12 @@ export class BuilderKernel {
     visit(root)
     files.sort((left, right) => left.path.localeCompare(right.path))
     if (files.length === 0 || files.length > 16 || !files.some((file) => file.path === entry)) throw new Error('compiled module submission requires a bounded bundle containing its declared entry')
+    if (targetKind === 'skill') {
+      const skill = files.find((file) => file.path === entry)
+      if (!skill || !isValidSkillEntry(skill.content, targetId)) {
+        throw new Error(`compiled skill submission requires ${entry} YAML frontmatter with name: ${targetId} and a non-empty description`)
+      }
+    }
     const expectedTrajectory = target.expectedTrajectory
     if (expectedTrajectory !== undefined && (typeof expectedTrajectory !== 'object' || expectedTrajectory === null || Array.isArray(expectedTrajectory))) {
       throw new Error('compiled module submission expectedTrajectory must be an object')
@@ -1484,6 +1490,16 @@ export class BuilderKernel {
     if (relative(workspace, mapped).startsWith('..')) return null
     return mapped
   }
+}
+
+/** A skill bundle has an explicit DSH-compatible identity before verifier boot. */
+function isValidSkillEntry(content: string, targetId: string): boolean {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content)
+  if (!frontmatter) return false
+  const fields = frontmatter[1]!
+  const name = /^name:\s*([^\r\n#]+?)\s*$/m.exec(fields)?.[1]?.replace(/^['"]|['"]$/g, '')
+  const description = /^description:\s*(\S[\s\S]*?)\s*$/m.exec(fields)?.[1]
+  return name === targetId && Boolean(description)
 }
 
 function readTarget(result: Record<string, unknown> | undefined): string | undefined {

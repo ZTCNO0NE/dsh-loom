@@ -113,6 +113,33 @@ describe('gate A4', () => {
     expect(restored).toEqual(['row-a'])
   })
 
+  it('rolls back an installed config only when the current value still matches the Gate after snapshot', async () => {
+    const { root, sessionId, gate, ops } = setup()
+    const candidate = patch()
+    const applied = await gate.applyWithRollback(candidate, ops)
+    expect(applied.applied).toBe(true)
+    ops.restoreConfig = async (id, value, source) => { await ops.writeConfig(id, value, source) }
+    const receipt = await gate.rollbackInstalledConfig(candidate, applied.before, ops)
+    expect(receipt).toMatchObject({ rolledBack: true, before: { timeoutMs: 30000 }, after: { timeoutMs: 5000 } })
+    expect(readJsonl<{ action: string }>(paths.history(root, sessionId)).some((entry) => entry.action === 'installed-rollback')).toBe(true)
+    expect(readJsonl(paths.history(root, sessionId))).not.toHaveLength(0)
+  })
+
+  it('refuses installed rollback after the config has drifted', async () => {
+    let stored: Record<string, unknown> = { timeoutMs: 99999 }
+    const { root, sessionId, gate } = setup()
+    const candidate = patch()
+    const receipt = await gate.rollbackInstalledConfig(candidate, { timeoutMs: 5000 }, {
+      readConfig: () => stored,
+      writeConfig: (_id, value) => { stored = value },
+      restoreConfig: (_id, value) => { stored = value },
+      smoke: () => ({ schemaVersion: 1, patchId: candidate.id, passed: true, checks: [], ranAt: new Date().toISOString() }),
+    })
+    expect(receipt).toMatchObject({ rolledBack: false, conflict: 'installed config changed after Gate apply' })
+    expect(stored).toEqual({ timeoutMs: 99999 })
+    expect(readJsonl<{ action: string }>(paths.history(root, sessionId)).some((entry) => entry.action === 'installed-rollback-conflict')).toBe(true)
+  })
+
   it('rejects on baseline conflict without writing', async () => {
     const { gate, ops, writes } = setup({ baseline: { timeoutMs: 9999 } })
     const result = await gate.applyWithRollback(patch(), ops)
@@ -205,8 +232,9 @@ describe('gate A4', () => {
     const result = await gate.applyWithRollback(skillPatch, ops)
     expect(result.applied).toBe(true)
     expect(installed).toEqual(['row-a'])
-    const history = readJsonl<{ action: string }>(paths.history(root, sessionId))
-    expect(history.some((record) => record.action === 'skill-insert')).toBe(true)
+    const history = readJsonl<{ action: string; smoke?: SmokeReport }>(paths.history(root, sessionId))
+    const receipt = history.find((record) => record.action === 'skill-insert')
+    expect(receipt?.smoke?.passed).toBe(true)
   })
 
   it('rolls back a skill when smoke fails (M4 skill)', async () => {
@@ -225,8 +253,9 @@ describe('gate A4', () => {
     const result = await gate.applyWithRollback(skillPatch, ops)
     expect(result.applied).toBe(false)
     expect(removed).toEqual(['row-a'])
-    const history = readJsonl<{ action: string }>(paths.history(root, sessionId))
-    expect(history.some((record) => record.action === 'skill-insert-rollback')).toBe(true)
+    const history = readJsonl<{ action: string; smoke?: SmokeReport }>(paths.history(root, sessionId))
+    const receipt = history.find((record) => record.action === 'skill-insert-rollback')
+    expect(receipt?.smoke?.checks[0]?.name).toBe('x')
   })
 
   it('rejects skill install when the skill already exists (M4 skill)', async () => {

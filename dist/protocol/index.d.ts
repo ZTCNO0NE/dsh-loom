@@ -5,6 +5,12 @@
 export declare const PROTOCOL_VERSION = 1;
 export declare function metaRoot(): string;
 export declare function workspaceDir(root: string, sessionId: string): string;
+/**
+ * A filesystem-safe child session namespace for Builder-owned workspaces.
+ * Colons are useful in trace labels but illegal in Windows path components;
+ * use this fixed portable delimiter for all persisted role scopes instead.
+ */
+export declare function scopedSessionId(sessionId: string, scope: string): string;
 export declare function patchDir(root: string, sessionId: string, patchId: string): string;
 export declare function sha256(value: unknown): string;
 export declare function atomicWriteJson(path: string, value: unknown): void;
@@ -47,6 +53,7 @@ export declare const paths: {
     readonly growthPreferences: (root: string, sessionId: string) => string;
     readonly growthReport: (root: string, sessionId: string) => string;
     readonly harnessState: (root: string, sessionId: string) => string;
+    readonly rollbackReceipt: (root: string, sessionId: string, patchId: string) => string;
     readonly overlays: (root: string, sessionId: string) => string;
     readonly overlayFile: (root: string, sessionId: string, patchId: string) => string;
     readonly staging: (root: string, sessionId: string, patchId: string) => string;

@@ -10,18 +10,18 @@
 
 Actor 的 provider 配置不等于 Builder 角色，但默认不需要再配置第二份 key：Loom 默认把 DeepSeek V4 Flash 的 Builder/Review Gate 凭据解析为 DSH 用户凭据 `DEEPSEEK_API_KEY`。请在 DSH Settings/Models 或 `$DSH_HOME/.credentials.yaml` 配置它。DSH credentials service 每次调用动态解析，外部更新文件后的下一次 Builder 调用自动使用新值。缺失时，状态和历史查询仍可用，但 `meta_auto` 不会进入真实 Builder proposal；`meta_status` 只显示 ref、configured 与来源（file/env），从不显示值。
 
-需要不同 key 的高级用户可将 Loom `llm.credentialRef` 设为另一个 DSH credential ref（例如兼容的 `DSH_META_API_KEY`）；不要把 key 放进 Loom config。Terra 仅在显式 `llm.provider: gpt-5.6-terra` 时解析 `LOOM_TERRA_API_KEY`，再兼容 `DSH_TERRA_API_KEY`。
+凭据由已选的 `llm.provider` 决定：`deepseek-official` 只解析 `DEEPSEEK_API_KEY`；显式 `gpt-5.6-terra` 才解析 `OPENAI_API_KEY`（兼容旧的 `LOOM_TERRA_API_KEY`、`DSH_TERRA_API_KEY`）。不会因为某个 key 恰好存在就跨 provider 使用它。需要不同 key 的高级用户可将 Loom `llm.credentialRef` 设为任一个 DSH credential ref；不要把 key 放进 Loom config。
 
 | 阶段 | 你能做什么 | 不会发生什么 |
 | --- | --- | --- |
 | DSH + Loom 已安装 | 启动 DSH，检查 `meta-validate` bundle 是否在 `--dump-config` 中 | 不会自动修改配置、技能或模型 |
 | 宿主启用 `activeEvolution` | 对话中委托明确的 Config / Skill 演进 | 用户不接触内部 ID、路径、before snapshot；运行中的 pass 不强杀 |
 
-`activeEvolution` 默认关闭。`dsh-loom setup` 会在用户自己的 Loom 状态目录安装固定版本 mini-SWE；mini-SWE 的 MIT 源码包已随 npm 包 vendored，不依赖你的 PyPI 镜像提供该项目本体。普通用户不需要填写 executable/config path。首次安装仍需要 **Python >= 3.10**、可访问的依赖包源和已配置的 DSH 模型 provider；CLI 会在创建 venv 前验证 Python 版本。高级部署仍可显式覆盖路径或使用 `--source`。
+`activeEvolution` 默认关闭。`dsh-loom setup` 会在用户自己的 Loom 状态目录安装固定版本 mini-SWE；mini-SWE 的 MIT 源码包已随 npm 包 vendored，不依赖你的 PyPI 镜像提供该项目本体。setup 同时创建 Gate-owned Skill root，并注册独立的 deployment-level Loom Skill provider，使通过 Gate 的 Skill 能沿 DSH 的 global→preset scope chain 被 Web Actor 发现。普通用户不需要填写 executable/config path。首次安装仍需要 **Python >= 3.10**、可访问的依赖包源和已配置的 DSH 模型 provider；CLI 会在创建 venv 前验证 Python 版本。高级部署仍可显式覆盖路径或使用 `--source`。
 
 bootstrap 会自动适配平台：Linux/macOS 使用 `python3` 与 `bin/mini`，Windows 使用 `python` 与 `Scripts\mini.exe`。包内提供 `bin/setup-windows.ps1` 和 `bin/setup-unix.sh`；快速开始已按 Windows、macOS、Linux 分块，避免要求用户猜测 PATH、shell 或 venv 布局。失败时 CLI 会打印具体的 Python/venv/pip 错误。
 
-从 DSH 源码 checkout 使用 `pnpm dsh` 的用户，应先单独确认 DSH 自身可以启动，再执行 README 对应平台的 profile wrapper。请显式传入 `--runtime-root` 并把 setup 输出的绝对 patch 路径原样传给 `pnpm dsh --profile loom --patch ...`。不要写成 `pnpm dsh web --profile loom ...`：`web` 是固定的 `--profile web` 别名，不能与 Loom profile 叠加；也不要把 `%USERPROFILE%\\.dsh\\meta-validate` 误写成当前工作目录的相对 `.meta-validate`，更不要把 Loom 安装问题与 DSH 的 `tsx/esm` 或构建产物问题混为一谈。
+从 DSH 源码 checkout 使用 `pnpm dsh` 的用户，应先单独确认 DSH 自身可以启动，再执行 README 对应平台的 profile wrapper。请显式传入 `--runtime-root` 并把 setup 输出的绝对 patch 路径原样传给 `pnpm dsh web --patch ...`。不要写成 `pnpm dsh web --profile loom ...`：`web` 是固定的 `--profile web` 别名，不能与另一个 profile 叠加；也不要把 `%USERPROFILE%\\.dsh\\meta-validate` 误写成当前工作目录的相对 `.meta-validate`，更不要把 Loom 安装问题与 DSH 的 `tsx/esm` 或构建产物问题混为一谈。
 
 源码 checkout 还有一个宿主依赖差异：部分 DSH 运行时包位于 CLI 的开发依赖，旧版 profile fallback 不会自动链接它们。Loom setup 会在当前目录（或 `DSH_ROOT`）识别 DSH 源码，扫描完整依赖闭包并一次性建立安全的 host fallback；缺少 `lib` 时自动执行 DSH 根目录 `pnpm run build:lib:host` 与 `pnpm run build:lib:client`。已发布的 DSH CLI 不需要这一步。
 
