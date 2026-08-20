@@ -344,7 +344,6 @@ mini-SWE 2.4.6 本体已经随 Loom npm 包提供，不要求你的镜像存在 
 ### Windows · PowerShell
 
 在 **DeepSeek Harness 源码根目录** 打开 PowerShell。先确认 DSH 本身能启动；Loom 不负责修复 DSH checkout 的构建或 `tsx/esm` 环境问题：
-
 ```powershell
 pnpm dsh web
 ```
@@ -415,7 +414,36 @@ pnpm dsh --profile loom --patch "$runtime_root/loom-active-evolution.patch.yml"
 
 ```bash
 dsh-loom setup
-dsh-loom start --profile loom web
+dsh-loom start --profile web
+```
+
+### 持久 Web 对话（推荐）
+
+Web 是长驻服务，适合任务卡、Builder 后台进度、确认、取消、重做和跨回合查看状态。源码 checkout 用户在 DSH 根目录执行：
+
+```powershell
+# Windows PowerShell
+$env:DSH_META_API_KEY = "<你的 Builder key>"
+$patch = "$runtimeRoot\loom-active-evolution.patch.yml"
+pnpm dsh web --patch $patch
+```
+
+macOS/Linux：
+
+```bash
+export DSH_META_API_KEY="<你的 Builder key>"
+pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
+```
+
+保持进程运行，然后打开 `http://localhost:3080`。用户直接提出需求、确认任务卡、询问演进进度，不需要填写 planId 或调用内部工具名。
+
+### 一次性 CLI（诊断/脚本）
+
+headless 只执行一轮任务并退出，适合健康检查或自动化，不提供持久 Web 对话：
+
+```bash
+pnpm dsh --profile headless --patch "$runtime_root/loom-active-evolution.patch.yml" \
+  "查看当前 Loom 状态并报告 Builder 是否已配置"
 ```
 
 从 GitHub 或 Loom 源码安装属于开发者路径；请改用 `pnpm dsh plugin --profile loom add "github:ZTCNO0NE/dsh-loom#main"` 或本地绝对路径，随后仍按你的系统块执行 setup 和启动。
