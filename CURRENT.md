@@ -1,5 +1,15 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-21 Qwen3.6-35B-A3B Q6 独立 runtime canary 已启动
+
+- 为隔离 scheduler、LiteLLM 与 9B helper 的延迟，已停止 `qwen36-agent-pool-gateway.service`；服务当前为 `inactive`，其 9B llama.cpp 子进程已退出。生产 4000/4010 未改配置、未重启，但 12341 停止期间不应作为推理入口。
+- Q6 模型以 transient user service `qwen36-35b-a3b-canary.service` 启动在 `127.0.0.1:12424`：128K context、parallel=1、batch/ubatch=2048/512、layer split=0.70/0.30、Q8 KV、Flash Attention、全 GPU offload、无 slot-save/cache-ram。
+- 精简 Codex Responses adapter 以 `qwen36-35b-a3b-adapter-canary-4021.service` 启动在 `127.0.0.1:4021`，上游直连 12424；narrator、terminal semantic judge、Smart Progress 模型调用和 sidecar 均关闭。4011/4012 已被既有本地服务占用，因此未使用。
+- 直连稳定短请求 decode 85.27 tok/s；原生 Responses 流式总时长 7.31s、adapter 内部 TTFT 426ms、尾处理 1ms，对应 llama decode 45.14 tok/s。后一个数据受 GPU1 外部训练 99–100% 利用污染，不作为最终 27B/35B 对比结论。
+- 原生 Responses 非流式返回最终文本；结构化工具 smoke 在 3.18s 内产出 `function_call add({"a":17,"b":25})`。完整参数、原始响应、停止/恢复命令见 `/chenzute/dsh-src/eval/run-records/2026-08-21-qwen36-35b-a3b-q6-runtime-canary/report.md`。
+- 新增持续维护的推理加速手册 `docs/research/inference-acceleration-field-guide.md`，统一解释算子/硬件、MoE 架构、runtime 与服务链路四层瓶颈，并明确 GPU 满载、长上下文、多卡 layer split 对 decode 的影响和 claim 边界。配套 canonical 采集脚本与固定 prompt 在 `docs/research/tools/`，eval 目录保留可执行副本；工具输出原请求、逐轮响应、llama timing、curl 时间与 200ms GPU 样本，并拒绝覆盖已有 run。
+- 已用固定 prompt 完成 GPU1 contention 下 `2 warm-up + 5 measured`：每轮 48/52 prompt tokens cached、256 decode tokens；decode 为 44.55/44.58/52.22/54.70/74.69 token/s，中位 52.22，GPU1 的 163 个 200ms 时间点平均 utilization 约 97.27%。记录在 `/chenzute/dsh-src/eval/run-records/2026-08-21-qwen35-q6-decode-gpu1-contention-v1/`；在外部训练停止后须以同命令复跑，当前不得宣称 52.22 是空闲性能或训练净损失。
+
 ## 2026-08-21 Loom Benchmark 计划冻结与首个候选模型落地
 
 - 本地 Benchmark 与模型筛选计划已冻结到 `docs/research/loom-benchmark-localization-plan.md`（commit `0b7a599`）。首轮主表固定为 Terminal-Bench 2.1、SWE-bench Verified 与 SkillsBench v1.1；benchmark 仓库、metadata 与 Docker 镜像下载暂缓，未执行 Docker prune。
