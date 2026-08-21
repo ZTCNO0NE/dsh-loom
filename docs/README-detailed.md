@@ -4,6 +4,8 @@
 
 **让 agent 的演进先经过独立验证，再决定是否冷应用。v1.2 的产品承诺是“用户可委托的 Config / Skill 演进”；Loop 则以公开成功率和失败轨迹的研究方式继续推进。**
 
+> **v1.3 Preview**：项目首页已把下一阶段主线调整为“多插件协同演进 + 通用插件生命周期 + 原子组合激活”。本手册保留 v1.0–v1.2 的单项演进、refine 和 Loop 实验作为历史证据；它们不再代表首页的产品主叙事。v1.3 未完成跨平台事务 E2E 前仍是 Preview，详见[项目首页](../README.md)与[视觉交接](visuals/v1.3-readme/README.md)。
+
 [ZTCNO0NE/dsh-loom](https://github.com/ZTCNO0NE/dsh-loom)（对外品牌 **Loom · 织机**：把你的使用、纠正与失败"织"进 agent 的能力里）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的插件。你可以把它理解为**给你的 agent 配了一个"外部教练团队"**：
 
 - **Actor / 编排层**：接住用户需求、整理会话证据、提出候选并解释进度；

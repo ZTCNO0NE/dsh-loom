@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Loom v1.3 能力场景地图</title>
+  <desc id="desc">Loom 控制面连接多插件协同、通用插件管理、Harness 自演进与 Loop 更换，并区分 Preview、Verified Foundation 和 Research 状态。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#061221"/>
+      <stop offset="0.5" stop-color="#0b1b32"/>
+      <stop offset="1" stop-color="#11142c"/>
+    </linearGradient>
+    <radialGradient id="core" cx="50%" cy="40%" r="65%">
+      <stop offset="0" stop-color="#164e63"/>
+      <stop offset="0.55" stop-color="#172554"/>
+      <stop offset="1" stop-color="#101a36"/>
+    </radialGradient>
+    <pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#93c5fd" opacity="0.12"/>
+    </pattern>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .cn{font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif}
+      .h1{font-size:42px;font-weight:760;fill:#f8fafc}
+      .lead{font-size:18px;fill:#9fb4ca}
+      .card-title{font-size:24px;font-weight:720;fill:#f1f5f9}
+      .copy{font-size:16px;fill:#b6c6d7}
+      .step{font-size:14px;fill:#8ba4bd}
+      .status{font-size:13px;font-weight:760;letter-spacing:.5px}
+      .line{fill:none;stroke-width:3}
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <rect width="1600" height="900" fill="url(#dots)"/>
+  <g class="cn">
+    <text x="76" y="84" class="h1">一个控制面，管理一组协同能力</text>
+    <text x="76" y="118" class="lead">确定性生命周期不浪费 Builder；需要改变行为时，才进入隔离实现与独立裁决。</text>
+
+    <!-- connectors behind cards -->
+    <path d="M650 385C570 350 532 307 482 270" class="line" stroke="#22d3ee" opacity="0.75"/>
+    <path d="M950 385C1038 346 1069 307 1118 270" class="line" stroke="#a78bfa" opacity="0.75"/>
+    <path d="M650 515C570 552 532 594 482 636" class="line" stroke="#34d399" opacity="0.75"/>
+    <path d="M950 515C1038 552 1069 594 1118 636" class="line" stroke="#fb923c" opacity="0.75"/>
+    <circle cx="650" cy="385" r="6" fill="#22d3ee" filter="url(#glow)"/>
+    <circle cx="950" cy="385" r="6" fill="#a78bfa" filter="url(#glow)"/>
+    <circle cx="650" cy="515" r="6" fill="#34d399" filter="url(#glow)"/>
+    <circle cx="950" cy="515" r="6" fill="#fb923c" filter="url(#glow)"/>
+
+    <!-- core -->
+    <g transform="translate(620 288)">
+      <circle cx="180" cy="162" r="154" fill="url(#core)" stroke="#67e8f9" stroke-width="2.5"/>
+      <circle cx="180" cy="162" r="126" fill="none" stroke="#a78bfa" stroke-opacity="0.25" stroke-dasharray="5 9"/>
+      <circle cx="180" cy="162" r="92" fill="#091d35" stroke="#3b82f6" stroke-opacity="0.5"/>
+      <path d="M180 82v26M180 216v26M100 162h26M234 162h26" stroke="#67e8f9" stroke-width="4" stroke-linecap="round"/>
+      <path d="M125 107l18 18M217 199l18 18M235 107l-18 18M143 199l-18 18" stroke="#a78bfa" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="180" cy="162" r="42" fill="#0e7490" opacity="0.32" stroke="#67e8f9" filter="url(#glow)"/>
+      <text x="180" y="156" text-anchor="middle" class="card-title">Loom</text>
+      <text x="180" y="184" text-anchor="middle" class="step">演进控制面</text>
+      <text x="180" y="346" text-anchor="middle" class="copy">Actor 接住用户 · Builder 隔离实现</text>
+      <text x="180" y="370" text-anchor="middle" class="copy">Verifier/Gate 独立裁决</text>
+    </g>
+
+    <!-- top left -->
+    <g transform="translate(78 168)">
+      <rect width="510" height="224" rx="28" fill="#082638" stroke="#22d3ee" stroke-width="2"/>
+      <rect x="24" y="22" width="126" height="32" rx="16" fill="#22d3ee" opacity="0.16" stroke="#22d3ee"/>
+      <text x="87" y="43" text-anchor="middle" class="status" fill="#a5f3fc">v1.3 PREVIEW</text>
+      <text x="28" y="92" class="card-title">多插件协同</text>
+      <text x="28" y="124" class="copy">一个用户目标，同时修改一组插件。</text>
+      <g transform="translate(28 150)">
+        <rect width="128" height="42" rx="13" fill="#0d3547"/><text x="64" y="27" text-anchor="middle" class="step">成本统计</text>
+        <rect x="145" width="128" height="42" rx="13" fill="#0d3547"/><text x="209" y="27" text-anchor="middle" class="step">模型路由</text>
+        <rect x="290" width="128" height="42" rx="13" fill="#0d3547"/><text x="354" y="27" text-anchor="middle" class="step">结果通知</text>
+      </g>
+      <path d="M447 76v105M432 92h30M432 164h30" stroke="#67e8f9" stroke-width="2.5" stroke-linecap="round"/>
+    </g>
+
+    <!-- top right -->
+    <g transform="translate(1012 168)">
+      <rect width="510" height="224" rx="28" fill="#1d1c3e" stroke="#a78bfa" stroke-width="2"/>
+      <rect x="24" y="22" width="126" height="32" rx="16" fill="#a78bfa" opacity="0.16" stroke="#a78bfa"/>
+      <text x="87" y="43" text-anchor="middle" class="status" fill="#ddd6fe">v1.3 PREVIEW</text>
+      <text x="28" y="92" class="card-title">通用插件管理</text>
+      <text x="28" y="124" class="copy">确定性操作不调用 Builder。</text>
+      <text x="28" y="164" class="step">安装 → 锁定 → 更新 → 恢复</text>
+      <path d="M432 78h42v34h-42zM420 128h66v42h-66z" fill="none" stroke="#a78bfa" stroke-width="2.5"/>
+      <path d="M441 95h24M433 149h40" stroke="#a78bfa" stroke-width="2"/>
+    </g>
+
+    <!-- bottom left -->
+    <g transform="translate(78 554)">
+      <rect width="510" height="224" rx="28" fill="#0f3029" stroke="#34d399" stroke-width="2"/>
+      <rect x="24" y="22" width="190" height="32" rx="16" fill="#34d399" opacity="0.14" stroke="#34d399"/>
+      <text x="119" y="43" text-anchor="middle" class="status" fill="#a7f3d0">VERIFIED FOUNDATION</text>
+      <text x="28" y="92" class="card-title">Harness 自演进</text>
+      <text x="28" y="124" class="copy">不是 Loom 自改，也不是模型自批。</text>
+      <text x="28" y="164" class="step">证据 → 诊断 → 用户确认 → 改进</text>
+      <path d="M432 94a28 28 0 1 1 18 26M450 120v26h26" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="432" cy="94" r="7" fill="#34d399"/>
+    </g>
+
+    <!-- bottom right -->
+    <g transform="translate(1012 554)">
+      <rect width="510" height="224" rx="28" fill="#38221d" stroke="#fb923c" stroke-width="2"/>
+      <rect x="24" y="22" width="96" height="32" rx="16" fill="#fb923c" opacity="0.14" stroke="#fb923c"/>
+      <text x="72" y="43" text-anchor="middle" class="status" fill="#fed7aa">RESEARCH</text>
+      <text x="28" y="92" class="card-title">Loop 更换</text>
+      <text x="28" y="124" class="copy">复杂源码重构只按公开证据前进。</text>
+      <text x="28" y="164" class="step">新基座 → 契约 → 冷验证 → 回滚</text>
+      <path d="M428 84h48v48h-48zM440 96h24v24h-24zM452 132v27" fill="none" stroke="#fb923c" stroke-width="2.5"/>
+      <path d="M438 156h28" stroke="#fb923c" stroke-width="2.5"/>
+    </g>
+
+    <g transform="translate(76 830)">
+      <text class="step">能力状态必须与证据同步：</text>
+      <circle cx="190" cy="-5" r="6" fill="#34d399"/><text x="205" class="step">Verified</text>
+      <circle cx="304" cy="-5" r="6" fill="#a78bfa"/><text x="319" class="step">Preview</text>
+      <circle cx="410" cy="-5" r="6" fill="#fb923c"/><text x="425" class="step">Research</text>
+      <text x="1450" text-anchor="end" class="step">dsh-loom · Harness Evolution Distribution</text>
+    </g>
+  </g>
+</svg>
