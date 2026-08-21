@@ -1,5 +1,14 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-22 v1.3.0 Preview 发布候选
+
+- 新增独立 `plugin-evolution` capability：Actor 从当前 Profile inventory 冻结 1–3 个已安装插件与可信源码；mini-SWE 只在隔离副本中改源码；宿主重跑 build/test；Verifier 校验 provenance/diff/package/supply-chain；package-aware transaction 一次安装整组 tar 到 Shadow Profile，并经 cold Loader、组合 probe 和启动前 Gate 整体激活或恢复。
+- 普通 install/exact update/remove/restore 走同一 staging/receipt/activation 底座但不调用 Builder。`dsh-loom`、DSH host、Agent Loop、credentials、Verifier/Gate 和底层框架包保持 protected。
+- 真实证据已完成：Linux 双插件完整闭环；同一 tar 的 Windows 原子激活/恢复与 stale-lock recovery；公开 `dsh-find-plugin@0.3.7` 的 pinned-source Builder 闭环；公开 registry 插件的无 Builder 生命周期闭环。索引见 `docs/evidence/v1.3.0.md`，原始记录保留在 `/chenzute/dsh-src/eval/run-records/2026-08-21-plugin-*v13*/`。
+- 发布审计额外修复：setup 默认 Profile 从错误的 `loom` 对齐文档 `web`；Profile drift 在 mutation 前拒绝且不覆盖外部变更；源码 checkout 的 `dsh-loom start` 自动调用源码 CLI并在启动前提交 pending transaction。无真实 cold Loader 的 standalone/global 环境明确保持 `pluginEvolution.enabled=false`，Config/Skill 能力不受影响。
+- README 的 Qwen Hero/context raster 图继续保持 HTML 空位；候选图与生成脚本不进入 v1.3.0 发布。两张精确 SVG 仍用于架构与能力边界。
+- npm `dsh-loom@1.3.0` 已发布；registry 回拉 tar 与本地验收包 byte-identical，SHA-256 `8b7f765baf5a6419694c772b824406426b85a4ccdb221ca70d9e7d57bcd2578f`。定向插件回归 23/23、TypeScript check、全量 **311/311**、build、diff-check 与 pack dry-run 均通过；Git commit/tag/push 仍待完成。
+
 ## 2026-08-21 v1.3 README 产品门面与视觉交接（已发布到 GitHub main）
 
 - 根 README 的产品主线已从单一 Config/Skill/refine 案例调整为“多插件协同演进 + 通用插件生命周期 + 原子组合激活”。所有能力逐项标记为 `Verified / v1.3 Preview / Research`：v1.2.33 的对话委托和只读 Builder 诊断仍是当前稳定能力；多插件源码协同尚未冒充已发布；复杂 Loop 继续保留研究边界。

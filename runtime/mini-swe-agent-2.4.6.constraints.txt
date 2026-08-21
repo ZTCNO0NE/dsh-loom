@@ -1,0 +1,6 @@
+# Known-compatible transitive runtime set for Loom's mini-SWE 2.4.6 adapter.
+# Upstream's open-ended ranges resolved to LiteLLM 1.97.0 + Pydantic 2.13.4
+# on 2026-08-21, which crashes before the first API response is constructed.
+litellm==1.81.9
+pydantic==2.12.5
+openai==2.54.0

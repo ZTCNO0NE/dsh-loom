@@ -9,7 +9,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { writeFileSync, mkdtempSync, readFileSync, existsSync, mkdirSync, rmSync, readdirSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 
 const command = process.argv[2]
 
@@ -39,10 +39,26 @@ function findSourceDshRoot() {
       && existsSync(join(candidate, 'packages', 'core', 'tools', 'package.json')))
 }
 
-function bootstrapRuntime() {
+function resolvePnpmCommand() {
+  if (process.env.DSH_PNPM_COMMAND) return resolve(process.env.DSH_PNPM_COMMAND)
+  const finder = process.platform === 'win32' ? 'where.exe' : 'which'
+  const located = spawnSync(finder, ['pnpm'], { encoding: 'utf8', windowsHide: true })
+  const candidate = String(located.stdout ?? '').split(/\r?\n/).map((item) => item.trim()).find(Boolean)
+  if (located.status === 0 && candidate && existsSync(candidate)) return resolve(candidate)
+  const invokedBy = process.env.npm_execpath
+  if (invokedBy && /pnpm/i.test(invokedBy) && existsSync(invokedBy)) return resolve(invokedBy)
+  return 'pnpm'
+}
+
+function bootstrapRuntime(profileOverride) {
   const runtimeRoot = option('--runtime-root') ?? process.env.DSH_LOOM_RUNTIME_ROOT ?? join(root, 'runtime', `mini-swe-agent-${MINI_SWE_VERSION}`)
   const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
   const bundledSource = join(packageRoot, 'runtime', `mini-swe-agent-${MINI_SWE_VERSION}.tar.gz`)
+  const bundledConstraints = join(packageRoot, 'runtime', `mini-swe-agent-${MINI_SWE_VERSION}.constraints.txt`)
+  if (!existsSync(bundledConstraints)) {
+    console.error(`❌ mini-SWE runtime constraints 缺失：${bundledConstraints}`)
+    process.exit(1)
+  }
   const source = option('--source') ?? (existsSync(bundledSource) ? bundledSource : `mini-swe-agent==${MINI_SWE_VERSION}`)
   const isWindows = process.platform === 'win32'
   const binDir = isWindows ? 'Scripts' : 'bin'
@@ -75,7 +91,7 @@ function bootstrapRuntime() {
       console.error(`❌ Python venv 创建失败（exit ${venv.status ?? 'unknown'}）：${runtimeRoot}`)
       process.exit(venv.status ?? 1)
     }
-    const install = spawnSync(join(runtimeRoot, binDir, pythonName), ['-m', 'pip', 'install', '--disable-pip-version-check', source], { stdio: 'inherit' })
+    const install = spawnSync(join(runtimeRoot, binDir, pythonName), ['-m', 'pip', 'install', '--disable-pip-version-check', '--constraint', bundledConstraints, source], { stdio: 'inherit' })
     if (install.error) {
       console.error(`❌ 无法执行 venv Python：${install.error.message}`)
       process.exit(1)
@@ -83,6 +99,30 @@ function bootstrapRuntime() {
     if (install.status !== 0) {
       console.error(`❌ mini-SWE 安装失败（exit ${install.status ?? 'unknown'}）：${source}`)
       process.exit(install.status ?? 1)
+    }
+  }
+  const runtimePython = join(runtimeRoot, binDir, pythonName)
+  const runtimeSmoke = spawnSync(runtimePython, ['-c', [
+    'import importlib.metadata as m',
+    'expected={"litellm":"1.81.9","pydantic":"2.12.5","openai":"2.54.0"}',
+    'assert all(m.version(k)==v for k,v in expected.items())',
+    'from litellm.types.utils import ModelResponse',
+    'ModelResponse()',
+  ].join(';')], { encoding: 'utf8', env: { ...process.env, LITELLM_LOCAL_MODEL_COST_MAP: 'true' } })
+  if (runtimeSmoke.error || runtimeSmoke.status !== 0) {
+    console.log('ℹ️ 正在修复 mini-SWE 固定传递依赖…')
+    const repair = spawnSync(runtimePython, [
+      '-m', 'pip', 'install', '--disable-pip-version-check', '--constraint', bundledConstraints,
+      'litellm==1.81.9', 'pydantic==2.12.5', 'openai==2.54.0',
+    ], { stdio: 'inherit' })
+    if (repair.error || repair.status !== 0) {
+      console.error(`❌ mini-SWE 传递依赖修复失败（exit ${repair.status ?? 'unknown'}）`)
+      process.exit(repair.status ?? 1)
+    }
+    const verified = spawnSync(runtimePython, ['-c', 'from litellm.types.utils import ModelResponse; ModelResponse()'], { encoding: 'utf8', env: { ...process.env, LITELLM_LOCAL_MODEL_COST_MAP: 'true' } })
+    if (verified.error || verified.status !== 0) {
+      console.error('❌ mini-SWE runtime smoke 失败；不会生成可启动 patch。')
+      process.exit(1)
     }
   }
   const patch = join(runtimeRoot, 'loom-active-evolution.patch.yml')
@@ -106,6 +146,15 @@ function bootstrapRuntime() {
     ? [process.execPath, '--import', 'tsx/esm', 'apps/cli/src/bin.ts']
     : [process.env.DSH_COMMAND ?? 'dsh']
   const isolationCwd = sourceDshRoot ?? process.cwd()
+  const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  // `dsh web` is the documented product entry and installs Loom into the web
+  // profile. Keep setup and start bound to the same profile unless the
+  // operator explicitly selects another one.
+  const pluginProfile = profileOverride ?? option('--profile') ?? 'web'
+  const pnpmCommand = resolvePnpmCommand()
+  const coldBootProbe = sourceDshRoot
+    ? [process.execPath, '--import', 'tsx/esm', join(packageRoot, 'runtime', 'loom-dsh-cold-profile.mjs'), '--dsh-root', sourceDshRoot, '--profile', pluginProfile]
+    : []
   writeFileSync(patch, [
     '- id: meta-validate',
     '  config:',
@@ -114,6 +163,15 @@ function bootstrapRuntime() {
     '    activeEvolution:',
     '      enabled: true',
     `      runtimeRoot: ${JSON.stringify(runtimeRoot)}`,
+    '    pluginEvolution:',
+    `      enabled: ${coldBootProbe.length > 0 ? 'true' : 'false'}`,
+    `      dshHome: ${JSON.stringify(dshHome)}`,
+    `      profile: ${JSON.stringify(pluginProfile)}`,
+    `      profileDir: ${JSON.stringify(join(dshHome, 'profiles', pluginProfile))}`,
+    `      dshCommand: ${JSON.stringify(isolationCommand)}`,
+    `      dshCwd: ${JSON.stringify(isolationCwd)}`,
+    `      pnpmCommand: ${JSON.stringify(pnpmCommand)}`,
+    `      coldBootCommand: ${JSON.stringify(coldBootProbe)}`,
     `    skillStagingRoot: ${JSON.stringify(join(workspaceRoot, 'skill-staging'))}`,
     '    isolation:',
     '      enabled: true',
@@ -132,7 +190,29 @@ function bootstrapRuntime() {
     `        customSkillDirs: [${JSON.stringify(skillRoot)}]`,
     '',
   ].join('\n'))
-  return { runtimeRoot, mini, patch }
+  return { runtimeRoot, mini, patch, coldBootAvailable: coldBootProbe.length > 0 }
+}
+
+async function activatePendingPluginTransactions() {
+  const moduleUrl = new URL('../dist/plugin-evolution/transaction.js', import.meta.url)
+  if (!existsSync(fileURLToPath(moduleUrl))) {
+    console.error('❌ dsh-loom build 缺少 plugin transaction runtime；请重新安装或构建当前版本。')
+    return false
+  }
+  const { activatePendingPluginTransactions: activate } = await import(moduleUrl.href)
+  const records = activate(root)
+  for (const record of records) {
+    if (record.state !== 'completed') {
+      console.error(`❌ 插件组合事务未能激活：${record.rollback?.succeeded ? '已恢复旧组合' : '恢复未确认'}。DSH 本次不会启动。`)
+      return false
+    }
+    console.log(record.kind === 'restore'
+      ? '✅ 上一插件组合已整体恢复并通过冷验证'
+      : record.kind === 'lifecycle'
+        ? `✅ 确定性插件${record.lifecycle?.operation ?? '操作'}已整体生效并通过冷验证：${record.lifecycle?.packageName ?? '目标插件'}`
+        : `✅ 插件组合事务已整体激活并通过冷验证：${record.artifacts.length} 个包`)
+  }
+  return true
 }
 
 // Source checkouts of DSH keep @deepseek-ai/dsh-tools in apps/cli's
@@ -246,16 +326,20 @@ function repairSourceDshHostFallback() {
 if (command === 'setup') {
   const hostRepair = repairSourceDshHostFallback()
   if (hostRepair === false) process.exit(1)
-  const { runtimeRoot, mini, patch } = bootstrapRuntime()
+  const { runtimeRoot, mini, patch, coldBootAvailable } = bootstrapRuntime()
   console.log(`✅ mini-SWE ${MINI_SWE_VERSION} 已安装：${mini}`)
   console.log(`✅ 主动演进 patch 已生成：${patch}`)
+  if (!coldBootAvailable) {
+    console.log('ℹ️ 当前不是可识别的 DSH 源码 checkout：Config/Skill 演进可用，v1.3 插件事务保持关闭（缺少真实 cold Loader probe）。')
+  }
   console.log('启动 DSH 时追加：dsh web --patch "' + patch + '"')
   process.exit(0)
 }
 
 if (command === 'start') {
-  const { patch } = bootstrapRuntime()
   const profile = option('--profile') ?? 'web'
+  const { patch } = bootstrapRuntime(profile)
+  if (!await activatePendingPluginTransactions()) process.exit(1)
   const passthrough = []
   for (let index = 3; index < process.argv.length; index += 1) {
     const arg = process.argv[index]
@@ -266,7 +350,17 @@ if (command === 'start') {
   const dshArgs = profile === 'web'
     ? ['web', '--patch', patch, ...surfaceArgs]
     : ['--profile', profile, '--patch', patch, ...surfaceArgs]
-  const result = spawnSync(process.env.DSH_COMMAND ?? 'dsh', dshArgs, { stdio: 'inherit', shell: process.platform === 'win32' })
+  const sourceDshRoot = findSourceDshRoot()
+  const launch = sourceDshRoot
+    ? [process.execPath, '--import', 'tsx/esm', 'apps/cli/src/bin.ts']
+    : [process.env.DSH_COMMAND ?? 'dsh']
+  const result = spawnSync(launch[0], [...launch.slice(1), ...dshArgs], {
+    cwd: sourceDshRoot ?? process.cwd(),
+    stdio: 'inherit',
+    // Node is executed directly in source mode. Published Windows shims still
+    // need cmd.exe unless DSH_COMMAND points at a native executable.
+    shell: !sourceDshRoot && process.platform === 'win32',
+  })
   if (result.error) {
     console.error(`❌ 无法启动 DSH：${result.error.message}`)
     console.error('源码 checkout 请使用 pnpm dsh web --patch <patch>。')

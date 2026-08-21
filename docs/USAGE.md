@@ -21,7 +21,7 @@ Actor 的 provider 配置不等于 Builder 角色，但默认不需要再配置�
 
 bootstrap 会自动适配平台：Linux/macOS 使用 `python3` 与 `bin/mini`，Windows 使用 `python` 与 `Scripts\mini.exe`。包内提供 `bin/setup-windows.ps1` 和 `bin/setup-unix.sh`；快速开始已按 Windows、macOS、Linux 分块，避免要求用户猜测 PATH、shell 或 venv 布局。失败时 CLI 会打印具体的 Python/venv/pip 错误。
 
-从 DSH 源码 checkout 使用 `pnpm dsh` 的用户，应先单独确认 DSH 自身可以启动，再执行 README 对应平台的 profile wrapper。请显式传入 `--runtime-root` 并把 setup 输出的绝对 patch 路径原样传给 `pnpm dsh web --patch ...`。不要写成 `pnpm dsh web --profile loom ...`：`web` 是固定的 `--profile web` 别名，不能与另一个 profile 叠加；也不要把 `%USERPROFILE%\\.dsh\\meta-validate` 误写成当前工作目录的相对 `.meta-validate`，更不要把 Loom 安装问题与 DSH 的 `tsx/esm` 或构建产物问题混为一谈。
+从 DSH 源码 checkout 使用 `pnpm dsh` 的用户，应先单独确认 DSH 自身可以启动，再执行 README 对应平台的 profile wrapper。setup 后应使用 profile 内的 `dsh-loom start --profile web --runtime-root <绝对路径>` 启动：它会先提交已经通过验证的 v1.3 pending 插件事务，再自动调用源码 CLI 并携带同一 patch。直接运行 `pnpm dsh web --patch ...` 仍可启动 v1.2 Config/Skill 能力，但会绕过 v1.3 的启动前原子激活钩子。不要写成 `pnpm dsh web --profile loom ...`：`web` 是固定的 `--profile web` 别名；也不要把 `%USERPROFILE%\\.dsh\\meta-validate` 误写成当前工作目录的相对 `.meta-validate`。
 
 源码 checkout 还有一个宿主依赖差异：部分 DSH 运行时包位于 CLI 的开发依赖，旧版 profile fallback 不会自动链接它们。Loom setup 会在当前目录（或 `DSH_ROOT`）识别 DSH 源码，扫描完整依赖闭包并一次性建立安全的 host fallback；缺少 `lib` 时自动执行 DSH 根目录 `pnpm run build:lib:host` 与 `pnpm run build:lib:client`。已发布的 DSH CLI 不需要这一步。
 

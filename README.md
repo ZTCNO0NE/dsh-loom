@@ -6,25 +6,25 @@
 
   <p>
     <img src="https://img.shields.io/badge/v1.2-stable-22c55e?style=flat-square" alt="v1.2 stable" />
-    <img src="https://img.shields.io/badge/v1.3-preview-8b5cf6?style=flat-square" alt="v1.3 preview" />
+    <img src="https://img.shields.io/badge/v1.3.0-preview-8b5cf6?style=flat-square" alt="v1.3.0 preview" />
     <a href="#三分钟开始"><strong>三分钟开始</strong></a>
     ·
     <a href="docs/README-detailed.md"><strong>完整手册</strong></a>
     ·
-    <a href="docs/evidence/v1.2.33.md"><strong>真实证据</strong></a>
+    <a href="docs/evidence/v1.3.0.md"><strong>真实证据</strong></a>
   </p>
 
   <p>
     <a href="https://www.npmjs.com/package/dsh-loom"><img src="https://img.shields.io/npm/v/dsh-loom?style=flat-square&label=npm" alt="npm version" /></a>
     <a href="https://github.com/ZTCNO0NE/dsh-loom/releases"><img src="https://img.shields.io/github/v/release/ZTCNO0NE/dsh-loom?style=flat-square" alt="GitHub release" /></a>
-    <img src="https://img.shields.io/badge/tests-288%2F288-22c55e?style=flat-square" alt="288/288 tests" />
+    <img src="https://img.shields.io/badge/tests-311%2F311-22c55e?style=flat-square" alt="311/311 tests" />
     <a href="LICENSE"><img src="https://img.shields.io/github/license/ZTCNO0NE/dsh-loom?style=flat-square" alt="MIT license" /></a>
   </p>
 </div>
 
 <!-- QWEN_IMAGE_01: 验收通过后在此插入 docs/figures/fig-v13-plugin-loom-hero.png。生成与验收规格见 docs/visuals/v1.3-readme/。 -->
 
-> **当前版本边界**：v1.2.33 已发布的是自然语言委托、Config/新 Skill 演进、只读 Builder 诊断和独立 Verifier/Gate。多插件源码协同、通用插件生命周期与原子组合激活是 **v1.3 Preview**；复杂 Loop 更换继续以 **Research** 方式公开证据和失败。
+> **当前版本边界**：v1.3.0 Preview 已发布自然语言插件委托、最多三个插件联合源码演进、确定性插件生命周期与 package-aware 原子激活/恢复；Linux、Windows 和公开源码插件闭环见[发布证据](docs/evidence/v1.3.0.md)。首发插件事务只在可识别的 DSH 源码 checkout 中启用真实 cold Loader；普通全局 CLI 安装继续提供 v1.2 Config/Skill 能力，但不会假装插件事务 ready。复杂 Loop 更换仍是 **Research**。
 
 ---
 
@@ -81,7 +81,7 @@ Loom 把两种状态分开：
 
 > “最近复杂任务总在提交前耗尽回合，找出是哪一层的问题，再让我决定怎么改。”
 
-v1.2.33 已证明 Actor 可以把模糊症状交给只读 Builder 诊断，再由用户选择 Config、Skill、Loop 或暂不修改。v1.3 将把已安装插件及其组合加入可选目标。
+v1.2.33 已证明 Actor 可以把模糊症状交给只读 Builder 诊断，再由用户选择 Config、Skill、Loop 或暂不修改。v1.3.0 Preview 已把已安装插件及其组合加入受控目标。
 
 这里的自演进指 **Harness 演进受控插件、Config 和 Loop**；不允许 Loom、Verifier 或 Gate 修改自己并批准自己。
 
@@ -133,9 +133,9 @@ Gate：整体激活 / 保持旧版本 / 记录恢复 receipt
 | Actor 自然语言 Plan/Execute 与持久任务卡 | **Verified** | [v1.2.33 release evidence](docs/evidence/v1.2.33.md) |
 | Config/新 Skill 隔离实现与独立裁决 | **Verified** | Linux/Windows cold E2E 与既有 release records |
 | Builder 只读方向诊断 | **Verified** | Linux 真模型运行、Windows 3/3、无 workspace/proposal/submission |
-| 工程回归 | **Verified** | **288/288** |
-| 多插件源码协同与原子 Profile 激活 | **v1.3 Preview** | 完成双平台事务 E2E 后才升级状态 |
-| 通用插件安装、更新、移除与恢复 | **v1.3 Preview** | 完成生命周期 E2E 后才升级状态 |
+| 工程回归 | **Verified** | **311/311**（发布前全量；最终数字以 release evidence 为准） |
+| 多插件源码协同与原子 Profile 激活 | **v1.3 Preview · Verified E2E** | [Linux/Windows 同 tar 原子激活与恢复](docs/evidence/v1.3.0.md) |
+| 通用插件安装、更新、移除与恢复 | **v1.3 Preview · Verified E2E** | [registry 生命周期、cold Loader 与恢复](docs/evidence/v1.3.0.md) |
 | 复杂 Loop 基座更换 | **Research** | 只按公开 contract/workload/raw records 描述 |
 
 这些证据证明受测链路，不证明任意模型、任意插件源码或复杂 Loop 重构必然成功。
@@ -147,7 +147,7 @@ Gate：整体激活 / 保持旧版本 / 记录恢复 receipt
 ### 1. 安装并检查 Loom
 
 ```bash
-pnpm dsh plugin --profile web add dsh-loom@1.2.33
+pnpm dsh plugin --profile web add dsh-loom@1.3.0
 pnpm dsh web --dump-config
 ```
 
@@ -166,8 +166,7 @@ powershell -ExecutionPolicy Bypass `
   -File "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-loom\bin\setup-windows.ps1" `
   --runtime-root $runtimeRoot
 
-$patch = Join-Path $runtimeRoot "loom-active-evolution.patch.yml"
-pnpm dsh web --patch $patch
+node "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-loom\bin\dsh-loom.mjs" start --profile web --runtime-root $runtimeRoot
 ```
 
 </details>
@@ -182,7 +181,8 @@ runtime_root="$HOME/.dsh/meta-validate/runtime/mini-swe-agent-2.4.6"
 sh "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/setup-unix.sh" \
   --runtime-root "$runtime_root"
 
-pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
+node "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/dsh-loom.mjs" \
+  start --profile web --runtime-root "$runtime_root"
 ```
 
 </details>
@@ -202,7 +202,7 @@ Actor：后台隔离实现 → Verifier/Gate 裁决 → 返回已生效或未生
 Actor：返回当前任务卡，不暴露凭据、绝对路径或隐藏推理。
 ```
 
-v1.3 多插件对话示例是 Preview，尚不能用上述稳定版本执行。Windows 源码 checkout、凭据覆盖、取消与重做见[详细快速开始](docs/README-detailed.md#快速开始从零启动-dsh到第一次任务卡)。
+v1.3 Preview 在上述 **DSH 源码 checkout + `dsh-loom start`** 路径启用。你可以说：“列出当前插件”“把 dsh-cost 的统计增加模型维度，先给计划”“让 cost 与 notify 联动，组合验收后再整体生效”“恢复上一插件组合”。多插件任务还需要宿主预先配置独立 `integrationCommand`，Actor 不会让 Builder 自己发明验收。凭据覆盖、取消与重做见[详细快速开始](docs/README-detailed.md#快速开始从零启动-dsh到第一次任务卡)。
 
 ## 路线与边界
 

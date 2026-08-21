@@ -40,6 +40,14 @@ import { EvolutionTaskSessionStore } from './evolution/task-session.js'
 import { directionDiagnosisCard, evolutionPlanningClarification, resolveEvolutionDirectionSelection, routeEvolutionDirection, type EvolutionDirectionMode } from './evolution/planning.js'
 import { agentDefaultModelServiceOf, effectiveHostConfig, writeEffectiveHostConfig } from './evolution/host-config.js'
 import { terminalJobFromPlan } from './evolution/job-recovery.js'
+import { PluginEvolutionController } from './plugin-evolution/controller.js'
+import { PluginLifecycleController } from './plugin-evolution/lifecycle.js'
+import { PluginEvolutionGateway } from './plugin-evolution/gateway.js'
+import { isPluginEvolutionIntent, listProfilePlugins, resolveProfilePluginSource } from './plugin-evolution/inventory.js'
+import { pluginEvolutionTaskCard, pluginLifecycleCard, pluginRestoreCard } from './plugin-evolution/presentation.js'
+import { PluginEvolutionSessionStore } from './plugin-evolution/session.js'
+import { PluginTransactionManager } from './plugin-evolution/transaction.js'
+import type { PluginSourceRequest } from './plugin-evolution/types.js'
 import { CandidateImporter, CandidateRegistry, type CandidateManifest, type ContractEvidence, type LoopInstallReport } from './candidates/index.js'
 import { profileGateOps } from './candidates/profile-gate.js'
 import { createCandidateProfile } from './candidates/profile.js'
@@ -166,6 +174,20 @@ export interface MetaValidateConfig {
     miniSweStepLimit: number
     timeoutMs: number
   }
+  /** v1.3 source-level changes for 1-3 installed DSH plugins. */
+  pluginEvolution: {
+    enabled: boolean
+    dshHome: string
+    profile: string
+    profileDir: string
+    dshCommand: string[]
+    dshCwd: string
+    pnpmCommand: string
+    coldBootCommand: string[]
+    /** Host-owned integration command; required for multi-plugin plans. */
+    integrationCommand: string[]
+    integrationCwd: string
+  }
   lockedTargets: LockedTargetPolicy
 }
 
@@ -261,6 +283,18 @@ export const Config: Schema<MetaValidateConfig> = Schema.object({
     miniSweConfigPath: Schema.string().default(''),
     miniSweStepLimit: Schema.number().default(40),
     timeoutMs: Schema.number().default(600000),
+  }),
+  pluginEvolution: Schema.object({
+    enabled: Schema.boolean().default(false),
+    dshHome: Schema.string().default(''),
+    profile: Schema.string().default('loom'),
+    profileDir: Schema.string().default(''),
+    dshCommand: Schema.array(Schema.string()).default(['dsh']),
+    dshCwd: Schema.string().default('.'),
+    pnpmCommand: Schema.string().default('pnpm'),
+    coldBootCommand: Schema.array(Schema.string()).default([]),
+    integrationCommand: Schema.array(Schema.string()).default([]),
+    integrationCwd: Schema.string().default('.'),
   }),
   lockedTargets: Schema.object({
     ids: Schema.array(Schema.string()).default(DEFAULT_LOCKED_TARGETS.ids),
@@ -604,6 +638,53 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
     onUsage: recordUsage('builder-direction-diagnosis'),
     executionRuntime: 'loom-native',
   })
+  const pluginEvolutionLocation = (): { dshHome: string; profileDir: string } => {
+    const dshHome = config.pluginEvolution.dshHome || process.env.DSH_HOME || ''
+    if (!dshHome) throw new Error('plugin evolution requires a configured DSH_HOME')
+    const profileDir = config.pluginEvolution.profileDir || join(dshHome, 'profiles', config.pluginEvolution.profile)
+    return { dshHome, profileDir }
+  }
+  const createPluginTransactions = (): PluginTransactionManager => {
+    const { dshHome } = pluginEvolutionLocation()
+    return new PluginTransactionManager({
+      root, dshHome, profile: config.pluginEvolution.profile,
+      dshCommand: config.pluginEvolution.dshCommand,
+      dshCwd: config.pluginEvolution.dshCwd,
+      pnpmCommand: config.pluginEvolution.pnpmCommand,
+      coldBootCommand: config.pluginEvolution.coldBootCommand,
+      integrationCwd: config.pluginEvolution.integrationCwd || undefined,
+    })
+  }
+  const createPluginEvolutionController = (): PluginEvolutionController => {
+    const { profileDir } = pluginEvolutionLocation()
+    const runtime = bundledMiniSwePaths({
+      metaRoot: root, packageRoot: PLUGIN_ROOT,
+      runtimeRoot: config.activeEvolution.runtimeRoot,
+      executable: config.activeEvolution.miniSweExecutable,
+      configPath: config.activeEvolution.miniSweConfigPath,
+    })
+    const gateway = new PluginEvolutionGateway({
+      root, sessionId: config.sessionId, model: miniSweModelName(config.llm.provider, config.llm.model),
+      miniSwe: {
+        executable: runtime.executable, configPath: runtime.configPath, runnerPath: runtime.runnerPath,
+        stepLimit: config.activeEvolution.miniSweStepLimit, timeoutMs: config.activeEvolution.timeoutMs,
+        resolveEnv: async () => {
+          const credential = await builderCredentials.require()
+          return miniSweChildEnv(config.llm.provider, process.env, credential.value)
+        },
+      },
+    })
+    const transactions = createPluginTransactions()
+    return new PluginEvolutionController({ root, sessionId: config.sessionId, profile: config.pluginEvolution.profile, profileDir, gateway, transactions })
+  }
+  const createPluginLifecycleController = (): PluginLifecycleController => {
+    const { profileDir } = pluginEvolutionLocation()
+    return new PluginLifecycleController({
+      root, sessionId: config.sessionId, profile: config.pluginEvolution.profile, profileDir,
+      pnpmCommand: config.pluginEvolution.pnpmCommand,
+      transactions: createPluginTransactions(),
+    })
+  }
   const loopJobRunners = new Map<string, (jobId: string) => Promise<{ summary: string; status?: 'finished' | 'paused' | 'cancelled' | 'waiting_for_input' }>>()
   const loopRunHolders = new Map<string, { runId: string; runner: (jobId: string) => Promise<{ summary: string; status?: 'finished' | 'paused' | 'cancelled' | 'waiting_for_input' }>; request: Record<string, unknown>; holder?: { runId: string } }>()
   const builderRunFor = (jobId: string | undefined, explicitRunId: string | undefined): { jobId?: string; runId?: string; error?: string } => {
@@ -941,7 +1022,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
 
   ctx.tools.register(defineTool({
     name: 'meta_status',
-    description: '查询优化进度：当前后台优化任务（job）状态、最近进化次数、工作区与阈值。用户问"优化进度怎么样"时用它。',
+    description: '查询 Loom 全局运行健康与旧优化 job；不用于已安装插件演进任务卡。用户问插件任务是否生效、插件恢复或跨插件状态时必须调用 meta_plugin_evolution(status)。',
     parameters: {},
     output: {
       schema: { type: 'object', additionalProperties: true },
@@ -1122,8 +1203,190 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
   }))
 
   ctx.tools.register(defineTool({
+    name: 'meta_plugin_evolution',
+    description: 'v1.3 对话式插件管理与源码演进入口。用户提到已安装插件、npm 包、插件源码、两个或多个插件联动时必须使用本工具，禁止改投 meta_auto。源码行为修改走 plan/execute + Builder；普通安装、精确更新、移除走 lifecycle_plan/lifecycle_execute，确定性 staging 不调用 Builder。所有生效与恢复都经过 Shadow Profile、冷 Loader 和启动前原子事务。向用户展示任务卡时不得复述 sourceLocation/localTarPath、本机路径、plan/transaction/job id 或 hash。',
+    parameters: {
+      action: { type: 'string', description: '源码演进：list、plan、execute、status、cancel、cancel_ready、restore。确定性部署：lifecycle_plan、lifecycle_execute、lifecycle_status、lifecycle_cancel、lifecycle_restore。普通用户无需提供内部 id。' },
+      operation: { type: 'string', description: 'lifecycle_plan 使用：install、update 或 remove。' },
+      packageName: { type: 'string', description: 'lifecycle_plan 使用：当前 Profile 的精确 npm package name；install 时为待安装包。' },
+      versionSpec: { type: 'string', description: 'registry install/update 的版本或简单 dist-tag；Plan 阶段解析并冻结 exact version + integrity。' },
+      localTarPath: { type: 'string', description: '高级本地安装/update：用户明确提供的 .tgz；仅用于冻结 hash，不得向用户回显。' },
+      requirements: { type: 'string', description: '希望改进的插件行为。plan 时必填。' },
+      expectedOutcome: { type: 'string', description: '可观察的验收结果。plan 时必填。' },
+      targets: {
+        type: 'array',
+        description: '1–3 个 Actor 从当前 inventory 确认的目标与可信源码；不得包含 Loom/DSH/Verifier。',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string', description: '本计划内简短标识，例如 cost。' },
+            packageName: { type: 'string', description: '当前 Profile 中的精确 npm package name。' },
+            dependsOn: { type: 'array', items: { type: 'string' }, description: '本计划内依赖的目标 id。' },
+            sourceKind: { type: 'string', description: '可选：local、managed 或 git。inventory 已有可信来源时无需填写。' },
+            sourceLocation: { type: 'string', description: '可选：用户明确提供的 checkout、Loom 管理快照或 Git URL。只用于冻结，不在任务卡展示。' },
+            commit: { type: 'string', description: 'git 必须为 40 位固定 commit。' },
+            expectedTreeHash: { type: 'string', description: 'managed source 必填的 SHA-256 tree hash。' },
+            packageDir: { type: 'string', description: 'monorepo 中 package 的相对目录；默认根目录。' },
+          },
+        },
+      },
+    },
+    output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+    async execute(args) {
+      try {
+        const action = typeof args.action === 'string' ? args.action : 'status'
+        const { profileDir } = pluginEvolutionLocation()
+        if (action === 'list') {
+          return cleanToolResult({
+            accepted: true,
+            profile: config.pluginEvolution.profile,
+            plugins: listProfilePlugins(profileDir).map(({ packageName, version, installed, evolvable, sourceMetadata }) => ({ packageName, version: version ?? null, installed, evolvable, sourceMetadata })),
+            note: '这是当前 Profile 的真实 dependency inventory；确定性生命周期操作不需要 Builder。',
+          }) as unknown as JsonValue
+        }
+        if (action.startsWith('lifecycle_')) {
+          if (!config.pluginEvolution.enabled) return cleanToolResult({ accepted: false, error: 'plugin lifecycle capability is disabled' }) as unknown as JsonValue
+          const lifecycle = createPluginLifecycleController()
+          if (action === 'lifecycle_plan') {
+            const operation = args.operation === 'install' || args.operation === 'update' || args.operation === 'remove' ? args.operation : undefined
+            const packageName = typeof args.packageName === 'string' ? args.packageName : ''
+            if (!operation || !packageName) return cleanToolResult({ accepted: false, needsClarification: true, error: '请选择 install、update 或 remove，并确认精确插件包名。' }) as unknown as JsonValue
+            const plan = lifecycle.plan({
+              operation, packageName,
+              ...(typeof args.versionSpec === 'string' && args.versionSpec ? { versionSpec: args.versionSpec } : {}),
+              ...(typeof args.localTarPath === 'string' && args.localTarPath ? { localTarPath: args.localTarPath } : {}),
+            })
+            return cleanToolResult({ accepted: true, task: pluginLifecycleCard(plan), note: '版本/完整性与 Profile before 已冻结；等待用户确认，尚未调用 Builder，也未修改 live Profile。' }) as unknown as JsonValue
+          }
+          if (action === 'lifecycle_execute') {
+            const plan = lifecycle.execute()
+            return cleanToolResult({ accepted: plan.state === 'ready_to_activate', task: pluginLifecycleCard(plan), note: plan.state === 'ready_to_activate' ? '确定性 Shadow staging 已通过；不调用 Builder。' : 'staging 未通过；live Profile 未改变。' }) as unknown as JsonValue
+          }
+          if (action === 'lifecycle_cancel') {
+            const plan = lifecycle.cancel()
+            return cleanToolResult({ accepted: true, task: pluginLifecycleCard(plan) }) as unknown as JsonValue
+          }
+          if (action === 'lifecycle_restore') {
+            const restored = lifecycle.restore()
+            return cleanToolResult({ accepted: true, restore: pluginRestoreCard(restored), note: '恢复是新的 immutable 冷启动事务，不调用 Builder。' }) as unknown as JsonValue
+          }
+          const status = lifecycle.status()
+          return cleanToolResult({
+            accepted: Boolean(status.plan || status.restore),
+            ...(status.plan ? { task: pluginLifecycleCard(status.plan) } : {}),
+            ...(status.restore ? { restore: pluginRestoreCard(status.restore) } : {}),
+            ...(!status.plan && !status.restore ? { error: '当前会话没有插件生命周期任务' } : {}),
+          }) as unknown as JsonValue
+        }
+        const controller = createPluginEvolutionController()
+        const session = new PluginEvolutionSessionStore(root, config.sessionId)
+        const current = session.read()
+        if (action === 'plan') {
+          if (!config.pluginEvolution.enabled) return cleanToolResult({ accepted: false, error: 'plugin-evolution capability is disabled' }) as unknown as JsonValue
+          if (current.currentPlanId) {
+            const existing = controller.reconcile(current.currentPlanId)
+            if (['planned', 'implementing', 'verifying', 'ready_to_activate'].includes(existing.state)) {
+              return cleanToolResult({ accepted: false, task: pluginEvolutionTaskCard(existing), error: '当前会话已有待确认或进行中的插件演进；不能覆盖。' }) as unknown as JsonValue
+            }
+            session.clear()
+          }
+          const rawTargets = Array.isArray(args.targets) ? args.targets as unknown[] : []
+          if (rawTargets.length < 1 || rawTargets.length > 3) return cleanToolResult({ accepted: false, error: 'plan requires 1-3 confirmed plugin targets' }) as unknown as JsonValue
+          const targets = rawTargets.map((raw, index) => {
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`target ${index + 1} is invalid`)
+            const value = raw as Record<string, unknown>
+            const packageName = String(value.packageName ?? '')
+            const kind = value.sourceKind
+            let source: PluginSourceRequest | null = null
+            if (kind === 'local' || kind === 'managed' || kind === 'git') {
+              source = {
+                kind, location: String(value.sourceLocation ?? ''), attestedBy: kind === 'managed' ? 'loom' : 'user',
+                ...(typeof value.commit === 'string' && value.commit ? { commit: value.commit } : {}),
+                ...(typeof value.expectedTreeHash === 'string' && value.expectedTreeHash ? { expectedTreeHash: value.expectedTreeHash } : {}),
+              }
+            } else if (kind !== undefined && kind !== '') throw new Error(`target ${index + 1} sourceKind is invalid`)
+            else source = resolveProfilePluginSource(profileDir, packageName, config.pluginEvolution.pnpmCommand)
+            if (!source) throw new Error(`target ${packageName || index + 1} has no pinned trusted source; provide an explicit local checkout`)
+            return {
+              id: String(value.id ?? ''), packageName,
+              dependsOn: Array.isArray(value.dependsOn) ? value.dependsOn.map(String) : [], source,
+              ...(typeof value.packageDir === 'string' && value.packageDir ? { packageDir: value.packageDir } : {}),
+            }
+          })
+          if (targets.length > 1 && config.pluginEvolution.integrationCommand.length === 0) {
+            return cleanToolResult({ accepted: false, needsClarification: true, error: '多插件演进必须先由宿主配置独立 integrationCommand；不能用每插件测试冒充组合验收。' }) as unknown as JsonValue
+          }
+          const requirements = typeof args.requirements === 'string' ? args.requirements : ''
+          const expectedOutcome = typeof args.expectedOutcome === 'string' ? args.expectedOutcome : ''
+          const integration = config.pluginEvolution.integrationCommand
+          const plan = controller.plan({
+            requirements, expectedOutcome, targets,
+            ...(integration.length > 0 ? { integrationCommand: { command: integration[0]!, args: integration.slice(1), cwd: config.pluginEvolution.integrationCwd } } : {}),
+          })
+          session.setPlan(plan.id)
+          return cleanToolResult({ accepted: true, task: pluginEvolutionTaskCard(plan), note: '已冻结真实 inventory、源码副本和验收合同；等待用户确认，尚未启动 Builder。' }) as unknown as JsonValue
+        }
+        if (!current.currentPlanId) return cleanToolResult({ accepted: false, error: '当前会话没有插件演进任务' }) as unknown as JsonValue
+        if (action === 'execute') {
+          if (!config.pluginEvolution.enabled || !config.activeEvolution.enabled) return cleanToolResult({ accepted: false, error: 'plugin evolution or mini-SWE active evolution is disabled' }) as unknown as JsonValue
+          const runtime = bundledMiniSwePaths({ metaRoot: root, packageRoot: PLUGIN_ROOT, runtimeRoot: config.activeEvolution.runtimeRoot, executable: config.activeEvolution.miniSweExecutable, configPath: config.activeEvolution.miniSweConfigPath })
+          if (!runtime.ready) return cleanToolResult({ accepted: false, error: 'mini-SWE runtime is not ready; rerun dsh-loom setup and launch with its generated patch' }) as unknown as JsonValue
+          const credential = await builderCredentials.describe()
+          if (!credential.configured) return cleanToolResult({ accepted: false, error: `Builder credential ${credential.ref} is not configured` }) as unknown as JsonValue
+          const plan = controller.read(current.currentPlanId)
+          if (plan.state !== 'planned') return cleanToolResult({ accepted: false, task: pluginEvolutionTaskCard(plan), error: `task cannot execute from ${plan.state}` }) as unknown as JsonValue
+          scheduleRefine({ tool: 'meta_plugin_evolution', kind: 'plugin-evolution', planId: plan.id }, async () => {
+            try {
+              const complete = await controller.execute(plan.id)
+              return { summary: complete.result?.summary ?? complete.state }
+            } catch {
+              controller.markAborted(plan.id)
+              throw new Error('plugin evolution implementation failed; details remain in the controlled run record')
+            }
+          })
+          return cleanToolResult({ accepted: true, scheduled: true, task: pluginEvolutionTaskCard(plan), job: { status: 'queued' }, note: '已后台排队；任务引用由会话保存，用户无需看到或记录内部 ID。' }) as unknown as JsonValue
+        }
+        if (action === 'cancel') {
+          const cancelled = controller.cancelPlanned(current.currentPlanId)
+          return cleanToolResult({ accepted: true, task: pluginEvolutionTaskCard(cancelled), note: '已在 Builder 启动前取消；没有创建可安装候选。' }) as unknown as JsonValue
+        }
+        if (action === 'cancel_ready') {
+          const cancelled = controller.cancelReady(current.currentPlanId)
+          return cleanToolResult({ accepted: true, task: pluginEvolutionTaskCard(cancelled), note: '已取消待激活事务；live Profile 从未改变。' }) as unknown as JsonValue
+        }
+        if (action === 'restore') {
+          const sourcePlan = controller.reconcile(current.currentPlanId)
+          const lifecycle = createPluginLifecycleController()
+          const lifecycleStatus = lifecycle.status()
+          const sourceEffective = sourcePlan.state === 'completed' && sourcePlan.result?.effective === true
+          const lifecycleEffective = lifecycleStatus.plan?.state === 'completed' && lifecycleStatus.plan.result?.effective === true
+          if (sourceEffective && lifecycleEffective) {
+            return cleanToolResult({ accepted: false, needsClarification: true, error: '源码演进与确定性生命周期均有已生效任务；请确认恢复哪一条。' }) as unknown as JsonValue
+          }
+          if (lifecycleEffective) {
+            const lifecycleRestore = lifecycle.restore()
+            return cleanToolResult({ accepted: true, restore: pluginRestoreCard(lifecycleRestore), note: '已按最近生效的确定性插件操作创建 immutable 恢复事务；尚未改变 live Profile。' }) as unknown as JsonValue
+          }
+          const restored = controller.prepareRestore(sourcePlan.id)
+          session.setRestore(restored.id)
+          return cleanToolResult({ accepted: true, restore: pluginRestoreCard(restored), note: '恢复是新的 immutable 冷启动事务，不会改写旧演进记录。' }) as unknown as JsonValue
+        }
+        const plan = controller.reconcile(current.currentPlanId)
+        const refreshed = session.read()
+        const restore = refreshed.restoreTransactionId
+          ? pluginRestoreCard(createPluginTransactions().read(refreshed.restoreTransactionId))
+          : undefined
+        return cleanToolResult({ accepted: true, task: pluginEvolutionTaskCard(plan), ...(restore ? { restore } : {}) }) as unknown as JsonValue
+      } catch (error) {
+        return cleanToolResult({ accepted: false, error: String(error) }) as unknown as JsonValue
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'meta_evolution_status',
-    description: '查询用户主动 Config/Skill 演进的易懂状态。只读取 immutable plan 与后台 job；不会唤起 Builder、修改目标或安装任何候选。',
+    description: '仅查询 Config/Skill 演进状态，不处理已安装插件或跨插件任务。插件任务状态必须调用 meta_plugin_evolution(status)。本工具只读取 immutable plan 与后台 job；不会唤起 Builder、修改目标或安装任何候选。',
     parameters: {
       jobId: { type: 'string', description: '内部关联字段；普通对话无需提供。' },
       planId: { type: 'string', description: '内部关联字段；普通对话无需提供。' },
@@ -1173,7 +1436,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
 
   ctx.tools.register(defineTool({
     name: 'meta_evolution_control',
-    description: 'Actor 对话任务卡的自然语言控制协议。用户只需说“查看进度”“查看证据”“查看历史”“取消诊断/任务”或“回滚”；本工具不会暴露内部 run/plan id、路径、快照、凭据或隐藏推理。',
+    description: '仅控制 Config/Skill/Loop 对话任务卡，不处理已安装插件或跨插件任务；插件的状态、取消和恢复必须调用 meta_plugin_evolution。本工具不会暴露内部 run/plan id、路径、快照、凭据或隐藏推理。',
     parameters: {
       action: { type: 'string', description: 'status、view_evidence、history、cancel（兼容 cancel_diagnosis/cancel_pending/cancel_queued）或 rollback_recent。Actor 根据用户自然语言和当前卡片选择。' },
     },
@@ -1302,7 +1565,7 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
 
   ctx.tools.register(defineTool({
     name: 'meta_auto',
-    description: 'Actor 的用户主动演进入口。明确且低风险的 Config/Skill 目标直接 plan；模糊、跨层、Loop 或失败后的问题先交给只读 Builder 形成 1–3 个方向，Actor 向用户解释并等待选择。选择后才创建新的 immutable implementation plan；实现固定走 mini-SWE 与独立 Verifier/Gate。',
+    description: 'Actor 的 Config/Skill/Loop 用户主动演进入口；不处理已安装插件、npm 包、插件源码或跨插件联动，这些请求必须使用 meta_plugin_evolution。明确且低风险的 Config/Skill 目标直接 plan；模糊、跨层、Loop 或失败后的问题先交给只读 Builder形成 1–3 个方向，Actor 向用户解释并等待选择。选择后才创建新的 immutable implementation plan；实现固定走 mini-SWE 与独立 Verifier/Gate。',
     parameters: {
       turn: { type: 'number', description: '当前回合号（宿主回合边界传入）' },
       requirements: { type: 'string', description: '用户需求原文（可选）' },
@@ -1338,6 +1601,14 @@ export function apply(ctx: Context, config: MetaValidateConfig) {
       const requirements = args.requirements
         ? String(args.requirements)
         : typeof priorRequirements === 'string' ? priorRequirements : undefined
+      if (requirements && config.pluginEvolution.enabled && isPluginEvolutionIntent(requirements)) {
+        return cleanToolResult({
+          accepted: false,
+          route: 'meta_plugin_evolution',
+          nextAction: 'list',
+          error: '已安装插件、插件源码与跨插件联动不属于 Config/Skill 演进；请改用 meta_plugin_evolution，并先读取当前 Profile inventory。',
+        }) as unknown as JsonValue
+      }
       const actorAssessment = typeof args.actorAssessment === 'string' ? args.actorAssessment : undefined
       if (requirements) {
         observer.persistTrigger('user', 'meta_auto')

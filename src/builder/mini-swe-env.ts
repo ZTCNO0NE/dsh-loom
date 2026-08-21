@@ -19,6 +19,13 @@ export function miniSweChildEnv(provider: string, source: NodeJS.ProcessEnv = pr
   return {
     ...child,
     MSWEA_CONFIGURED: 'true',
+    // Loom accepts provider/model names that are newer than LiteLLM's bundled
+    // static price table. Cost lookup is observability, not an implementation
+    // precondition: an otherwise valid response must not abort before the
+    // first tool action merely because its price is unknown. Preserve an
+    // explicit operator policy, otherwise retain calls/tokens and ignore only
+    // price-mapping errors.
+    MSWEA_COST_TRACKING: source.MSWEA_COST_TRACKING ?? 'ignore_errors',
     // LiteLLM's OpenAI adapter consumes OPENAI_API_BASE.  Keep the common
     // OPENAI_BASE_URL spelling too for runtimes that use the OpenAI SDK
     // directly, but never fall back to api.openai.com for Loom providers.

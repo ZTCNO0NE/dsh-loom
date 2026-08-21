@@ -1,0 +1,3 @@
+- insert:
+    - id: loom-fixture-audit
+      name: dsh-loom-fixture-audit

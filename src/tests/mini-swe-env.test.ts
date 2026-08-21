@@ -15,6 +15,12 @@ describe('mini-SWE child environment bridge', () => {
   it('uses the official DeepSeek endpoint when the host leaves its default implicit', () => {
     const child = miniSweChildEnv('deepseek-official', { DEEPSEEK_API_KEY: 'test-official-secret' })
     expect(child.OPENAI_API_BASE).toBe('https://api.deepseek.com/v1')
+    expect(child.MSWEA_COST_TRACKING).toBe('ignore_errors')
+  })
+
+  it('preserves an explicit mini-SWE cost tracking policy', () => {
+    const child = miniSweChildEnv('deepseek-official', { MSWEA_COST_TRACKING: 'default' })
+    expect(child.MSWEA_COST_TRACKING).toBe('default')
   })
 
   it('forwards only the resolved credential to mini-SWE, not provider-specific parent variables', () => {

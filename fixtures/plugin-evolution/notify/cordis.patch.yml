@@ -1,0 +1,3 @@
+- insert:
+    - id: loom-fixture-notify
+      name: dsh-loom-fixture-notify

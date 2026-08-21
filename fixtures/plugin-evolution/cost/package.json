@@ -1,0 +1,16 @@
+{
+  "name": "dsh-loom-fixture-cost",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.mjs",
+  "files": ["dist", "cordis.patch.yml"],
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

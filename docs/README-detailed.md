@@ -4,7 +4,7 @@
 
 **让 agent 的演进先经过独立验证，再决定是否冷应用。v1.2 的产品承诺是“用户可委托的 Config / Skill 演进”；Loop 则以公开成功率和失败轨迹的研究方式继续推进。**
 
-> **v1.3 Preview**：项目首页已把下一阶段主线调整为“多插件协同演进 + 通用插件生命周期 + 原子组合激活”。本手册保留 v1.0–v1.2 的单项演进、refine 和 Loop 实验作为历史证据；它们不再代表首页的产品主叙事。v1.3 未完成跨平台事务 E2E 前仍是 Preview，详见[项目首页](../README.md)与[视觉交接](visuals/v1.3-readme/README.md)。
+> **v1.3.0 Preview**：多插件协同演进、通用插件生命周期与原子组合激活已完成 Linux/Windows/公开源码插件 E2E，并以 Preview 发布。本手册保留 v1.0–v1.2 的单项演进、refine 和 Loop 实验作为历史证据；它们不再代表首页的产品主叙事。首发插件事务要求从可识别的 DSH 源码 checkout 运行 setup/start，以获得真实 cold Loader；详见[项目首页](../README.md)与[发布证据](evidence/v1.3.0.md)。
 
 [ZTCNO0NE/dsh-loom](https://github.com/ZTCNO0NE/dsh-loom)（对外品牌 **Loom · 织机**：把你的使用、纠正与失败"织"进 agent 的能力里）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的插件。你可以把它理解为**给你的 agent 配了一个"外部教练团队"**：
 
@@ -359,7 +359,7 @@ pnpm dsh web
 
 ```powershell
 # 1. 安装 Loom 到 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.33
+pnpm dsh plugin --profile web add dsh-loom@1.3.0
 
 # 2. 检查插件确已加载；输出中必须有 meta-validate。
 pnpm dsh web --dump-config
@@ -369,8 +369,7 @@ $runtimeRoot = Join-Path $env:USERPROFILE ".dsh\meta-validate\runtime\mini-swe-a
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-loom\bin\setup-windows.ps1" --runtime-root $runtimeRoot
 
 # 4. 使用同一个绝对 patch 路径启动；不要改成相对 .meta-validate 路径。
-$patch = Join-Path $runtimeRoot "loom-active-evolution.patch.yml"
-pnpm dsh web --patch $patch
+node "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-loom\bin\dsh-loom.mjs" start --profile web --runtime-root $runtimeRoot
 ```
 
 此路径专门处理 Windows 的 `Scripts\\python.exe` / `Scripts\\mini.exe` 和 profile bin 不进入 PowerShell `PATH` 的差异。若 `python --version` 小于 3.10 或找不到命令，安装 Python 3.10+ 并勾选 **Add Python to PATH**；conda/pyenv 用户可先设置 `$env:PYTHON` 为所需解释器。
@@ -387,7 +386,7 @@ pnpm dsh web --patch $patch
 export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
 
 # 1. 安装 Loom 并检查 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.33
+pnpm dsh plugin --profile web add dsh-loom@1.3.0
 pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
@@ -395,7 +394,7 @@ runtime_root="$HOME/.dsh/meta-validate/runtime/mini-swe-agent-2.4.6"
 sh "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/setup-unix.sh" --runtime-root "$runtime_root"
 
 # 3. 启动 Web 对话。
-pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
+node "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/dsh-loom.mjs" start --profile web --runtime-root "$runtime_root"
 ```
 
 需要 `python3 --version` 为 3.10 或更高；没有时可使用 `brew install python`。Apple Silicon 与 Intel 均使用这一段命令。
@@ -410,7 +409,7 @@ pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
 export DSH_META_VALIDATE_ROOT="$HOME/.dsh/meta-validate"
 
 # 1. 安装 Loom 并检查 Web profile。
-pnpm dsh plugin --profile web add dsh-loom@1.2.33
+pnpm dsh plugin --profile web add dsh-loom@1.3.0
 pnpm dsh web --dump-config
 
 # 2. 安装 runtime；显式目录确保 patch 路径可直接复用。
@@ -418,7 +417,7 @@ runtime_root="$HOME/.dsh/meta-validate/runtime/mini-swe-agent-2.4.6"
 sh "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/setup-unix.sh" --runtime-root "$runtime_root"
 
 # 3. 启动 Web 对话。
-pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
+node "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/dsh-loom.mjs" start --profile web --runtime-root "$runtime_root"
 ```
 
 需要 `python3 >= 3.10` 和 venv 支持；Debian/Ubuntu 常用 `sudo apt install python3-venv`。若内部镜像缺少某个依赖，可临时切换官方 PyPI 或配置 wheelhouse。
@@ -438,17 +437,16 @@ Web 是长驻服务，适合任务卡、Builder 后台进度、确认、取消�
 
 ```powershell
 # Windows PowerShell
-$patch = "$runtimeRoot\loom-active-evolution.patch.yml"
-pnpm dsh web --patch $patch
+node "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-loom\bin\dsh-loom.mjs" start --profile web --runtime-root $runtimeRoot
 ```
 
 macOS/Linux：
 
 ```bash
-pnpm dsh web --patch "$runtime_root/loom-active-evolution.patch.yml"
+node "$HOME/.dsh/profiles/web/node_modules/dsh-loom/bin/dsh-loom.mjs" start --profile web --runtime-root "$runtime_root"
 ```
 
-保持进程运行，然后打开 `http://localhost:3080`。用户直接提出需求、确认任务卡、询问演进进度，不需要填写 planId 或调用内部工具名。
+保持进程运行，然后打开 `http://localhost:3080`。`dsh-loom start` 不只是启动别名：它会在宿主启动前提交已经通过验证的 pending 插件事务；直接运行 `pnpm dsh web --patch ...` 会绕过这一步。用户直接提出需求、确认任务卡、询问演进进度，不需要填写 planId 或调用内部工具名。
 
 ### 高级：使用不同的 Builder 凭据或 Terra
 
