@@ -1,6 +1,6 @@
 # CURRENT.md — 当前状态与交接
 
-## 2026-08-21 Actor + Builder 协作分诊（真实双平台验收完成，待发布）
+## 2026-08-21 v1.2.33 已发布：Actor + Builder 协作分诊
 
 - `meta_auto(plan)` 现按证据确定路由：Actor 已确认一个安全的 Config/Skill `targetKind + targetId` 时直接 Plan；模糊症状、跨层目标、Loop、显式 diagnose 或前次失败进入独立 Builder 方向诊断。Actor 负责接住用户、分诊和解释，Builder 只在方向不明确时承担技术诊断，不重复审核明确目标。
 - 方向诊断复用现有 durable `BuilderKernel/Driver`，但启用新的 read-only diagnosis 权限：只允许 read/search/inspect/trace、公开 world-model/plan、Actor 通讯与 `write_diagnosis_report`；workspace 写入、patch、命令、simulation capability、proposal/compiler/submit 均由 Kernel 拒绝，并从 native schema 与文本协议中隐藏。
@@ -8,7 +8,8 @@
 - 用户选 Config/Skill 后仍必须由 Actor 确认宿主拥有的安全 target，Builder 不能发明 target identity；成功选择会原子替换为新的 immutable pending plan。Loop 方向必须二次确认研究级成本后才进入 mini-SWE + 专用 Verifier/Gate；`no_change` 不创建 plan/workspace/proposal。
 - 真实模型暴露并修复三类单测未覆盖的问题：SSE transport 忽略 native `tool_calls`；V4 Flash 无视 `parallel_tool_calls=false` 批量发出推测性调用；Kernel checkpoint 错误拒绝诊断报告且 compact prompt 缺完整 schema。官方 transport 现使用单一 `builder_decision` envelope，每轮只把最低 index 的一个决策交给 Kernel，其余推测性调用丢弃；expanded 模式多调用仍 fail closed。
 - 最终 `1.2.33` tarball 在 Linux 冷 profile 安装/setup/Web HTTP 200 后，官方 V4 Flash 以 **7 model turns / 7 tool steps** 形成 Config/Skill/Loop 方向并停在 `waiting_for_input`，无 workspace/proposal/submission；同一 tarball 在 Windows 隔离 profile 安装、普通控制台冷 Web HTTP 200，真模型诊断以 **3/3** 完成同一边界。另一次隔离 DSH home 的真实 Actor 主入口完成“自然语言 → `meta_auto` → 后台 Builder → durable task card → 下一 Actor 回合展示三个选择”，同样没有实现产物。
-- README、详细手册与 USAGE 已同步。Python compile、TypeScript check、全量 **288/288**、build、diff-check、pack 与最终同一 tarball 的双平台复装均通过；release evidence 为 `docs/evidence/v1.2.33.md`。尚未 npm/GitHub 发布。
+- README、详细手册与 USAGE 已同步。Python compile、TypeScript check、全量 **288/288**、build、diff-check、pack 与最终同一 tarball 的双平台复装均通过；release evidence 为 `docs/evidence/v1.2.33.md`。
+- npm `dsh-loom@1.2.33` 已发布；registry SHA-1 `ecf88d3e07435a08d4d71f07ffa87005f4e847f4`，重新从 registry 下载的 tar 与双平台实测 tar 字节相同（SHA-256 `e77fc1bb3355ff29656cc3da9d2e879e971b9f921878fdd18b8be3a57e7d3075`）。DSH `minimumReleaseAge` 年龄窗口保持不变，不能把立即 registry profile 安装策略拒绝误判为包故障。
 
 ## 2026-08-21 Qwen3.6 27B Q4 vs 35B-A3B Q6 探索性对照
 
