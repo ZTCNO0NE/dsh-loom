@@ -1,5 +1,12 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-21 README 双层门面
+
+- 参考 Reactive Resume 的公开首页信息架构，将原根 README 迁到 `docs/README-detailed.md`，保留全部案例、系统安装、架构、实验与边界；迁移后的图片/文档相对链接已同步改写。
+- 新根 README 聚焦 Hero、一句话价值、CTA、一个插件/一套演进栈、三分钟跨平台启动、第一次自然语言任务卡、5 项真实证据和文档索引。品牌定位为 **Harness Evolution Distribution / Agent 演进整合包**，不是单一 Skill。
+- 对外边界：可称统一演进控制面，当前稳定管理明确委托的新 Skill bundle 与既有 Config；不能称通用包管理器，也不宣称已支持任意已安装 Skill 的原位版本升级。开放 catalog、SemVer 依赖/冲突、来源签名、组合原子事务与团队 Skill catalog 列为下一阶段。
+- 详细手册中已将工程回归更新为 266/266，并把 Config/Skill 产品主入口从“待补”修正为已完成真实 Windows 闭环。尚未更改 package 版本或发布。
+
 ## 2026-08-21 v1.2.32 已发布：mini-SWE 弹性预算与通用 runtime profile
 
 - 失败 run `builder-1787264098546-4cbde99f` 已完成完整 Skill 内容与结构检查，但把 30 次模型调用全部耗尽，终态 `LimitsExceeded`，因此没有 submission、Verifier 或 Gate。它不是空白 JSON 问题。
