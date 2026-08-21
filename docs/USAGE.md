@@ -31,12 +31,13 @@ bootstrap 会自动适配平台：Linux/macOS 使用 `python3` 与 `bin/mini`，
 2. Actor 返回候选、风险、验收方式与确认问题；此时没有改动。
 3. 用户确认后，mini-SWE 在隔离 workspace 实现候选。
 4. Verifier/Gate 独立决定已生效、未生效或未完成；Actor 只解释真实状态。
-5. queued 阶段可取消；running/verifying 不强杀；终态重做永远是新的 immutable plan。
+5. waiting-for-confirmation 可放弃，queued 可取消；running/verifying 不强杀；终态重做永远是新的 immutable plan。
+6. 用户可随时要求“查看这次用了哪些证据”或“查看演进历史”：前者只展示冻结来源的类型、数量和裁决状态，后者只展示最近任务的时间、目标与结果；两者都不返回内部 ID、路径、原始转录、凭据或隐藏推理。
 
 ## 常见问题
 
 - **为什么安装后没有自动进化？** 这是 v1.2 的安全边界。默认关闭、用户确认、独立验证，避免旧版“自动自治”叙事掩盖未完成的产品验证。
-- **为什么没有 `planId`？** 它是内部不可变记录；用户只通过任务卡确认、查看状态、取消或重做。
+- **为什么没有 `planId`？** 它是内部不可变记录；用户只通过任务卡确认、查看状态/证据/历史、取消或重做。
 - **为什么需要 mini-SWE runtime？** Loom 负责证据、会话与裁决编排；明确实现 pass 交给成熟 coding runtime。运行一次 `dsh-loom setup` 即可安装；没有 runtime 不会回退为直接修改宿主。
 - **成功是否表示 Agent 整体变强？** 不表示。已安装只表示该候选通过了本次独立验证。性能主张仅限已测 scheduler prepare-overlap workload。
 - **如何关闭？** 不启用 `activeEvolution`，或从 profile 移除 Loom bundle。不要删除已产生的审计记录来伪造不存在过的任务。

@@ -15,7 +15,7 @@
   <p>
     <a href="https://www.npmjs.com/package/dsh-loom"><img src="https://img.shields.io/npm/v/dsh-loom?style=flat-square&label=npm" alt="npm version" /></a>
     <a href="https://github.com/ZTCNO0NE/dsh-loom/releases"><img src="https://img.shields.io/github/v/release/ZTCNO0NE/dsh-loom?style=flat-square" alt="GitHub release" /></a>
-    <img src="https://img.shields.io/badge/tests-266%2F266-22c55e?style=flat-square" alt="266/266 tests" />
+    <img src="https://img.shields.io/badge/tests-271%2F271-22c55e?style=flat-square" alt="271/271 tests" />
     <a href="LICENSE"><img src="https://img.shields.io/github/license/ZTCNO0NE/dsh-loom?style=flat-square" alt="MIT license" /></a>
   </p>
 </div>
@@ -141,6 +141,9 @@ Actor：后台隔离实现 → Verifier/Gate 裁决 → 告知已生效或未生
 
 你：演进进度怎么样？
 Actor：返回当前任务卡，不暴露凭据、绝对路径或隐藏推理。
+
+你：给我看这次用了哪些证据。／我之前有哪些演进任务？
+Actor：返回冻结证据的脱敏索引，或最近任务的结果历史；不返回原始转录、内部 ID 和隐藏推理。
 ```
 
 Windows 源码 checkout、Python、host fallback、凭据覆盖和取消/重做的完整说明见[详细快速开始](docs/README-detailed.md#快速开始从零启动-dsh到第一次任务卡)。
@@ -149,7 +152,7 @@ Windows 源码 checkout、Python、host fallback、凭据覆盖和取消/重做�
 
 | 验收项 | 当前结果 |
 | --- | --- |
-| 工程回归 | **266/266** |
+| 工程回归 | **271/271** |
 | Windows 独立 Skill 演进 | **6/6** 完成 `submit → verify → gate → cold-load` |
 | 动态 runtime profile | 5–6 回合主动提交，0 环境探查、0 非零工具结果 |
 | 正式包冷启动 | Windows registry 安装，Web HTTP 200 |

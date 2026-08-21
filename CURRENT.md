@@ -1,5 +1,14 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-21 Actor 任务卡交互补全（待发布）
+
+- 修复任务卡宣称有 `view_evidence`、控制工具却没有真实分支的问题。用户现在可通过自然语言查看本轮 immutable evidence pack 的脱敏索引：帧/事件/来源数量、工具错误统计、信号类型和独立裁决状态；不返回原始内容、绝对路径、hash、凭据或隐藏推理，manifest 缺失时 fail closed，不拿实时会话冒充冻结证据。
+- 修复 `jobStatus=running` 遮蔽 `plan.state=verifying`：任务卡与超时进度通知以 immutable plan 阶段为权威，能真实区分 Builder 隔离实现和 Verifier/Gate 裁决；仍只发低频关键节点，不广播普通工具步骤。
+- 补齐 waiting-for-confirmation 的安全取消。用户说“取消”会按阶段路由：未确认 plan 直接取消并释放会话；queued job 仍只在未被 worker 接手时取消；implementing/verifying 继续拒绝强杀。旧 plan/evidence 保持只读，后续可创建新任务。
+- 持久任务卡现在能跨轮恢复用户安全的候选标题、验收摘要和确认问题，不恢复内部 target 路由、用户原文或 Actor 隐藏解释。新增最近任务历史视图，只显示时间、目标、阶段、outcome 与 verdict，不返回 plan/job/run ID。
+- 新 plan 现在会在任何写盘前同时检查 pending 与 active 会话锁；进行中任务不会被覆盖，也不会先生成一条随后才被拒绝的孤儿 immutable plan。
+- 定向 12/12、全量 **271/271**、TypeScript check、build 与 diff-check 均通过。当前改动尚未发 npm/GitHub 版本；Benchmark 下载/运行保持暂停，不与另一条执行计划争用范围。
+
 ## 2026-08-21 Qwen3.6-35B-A3B Q6 独立 runtime canary 已启动
 
 - 为隔离 scheduler、LiteLLM 与 9B helper 的延迟，已停止 `qwen36-agent-pool-gateway.service`；服务当前为 `inactive`，其 9B llama.cpp 子进程已退出。生产 4000/4010 未改配置、未重启，但 12341 停止期间不应作为推理入口。

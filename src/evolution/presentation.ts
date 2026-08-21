@@ -1,4 +1,6 @@
 import type { UserEvolutionPlan, UserEvolutionReport } from './controller.js'
+import type { ActorEvidencePack } from '../evidence/index.js'
+import type { EvolutionTaskSession } from './task-session.js'
 
 export type EvolutionTaskPhase = 'waiting_for_confirmation' | 'queued' | 'implementing' | 'verifying' | 'completed' | 'not_applied' | 'not_completed' | 'cancelled'
 
@@ -15,7 +17,7 @@ export interface EvolutionTaskCard {
   evidence: { summary: string; artifactCount: number }
   suggestions?: Array<{ key: string; title: string; summary: string }>
   confirmation?: string
-  controls: Array<'confirm' | 'cancel_queued' | 'view_status' | 'view_evidence' | 'redo'>
+  controls: Array<'confirm' | 'cancel_pending' | 'cancel_queued' | 'view_status' | 'view_evidence' | 'redo'>
   /** Compatibility alias for earlier Actor integrations. */
   actions: Array<'confirm_execute' | 'view_status' | 'view_evidence'>
   timeline: Array<{ event: 'planned' | 'started' | 'verifying' | 'finished'; at?: string; label: string }>
@@ -28,24 +30,96 @@ export interface EvolutionTaskCardExtras {
   confirmation?: string
 }
 
+export interface EvolutionProgressNotice {
+  text: string
+  summary: string
+}
+
+export interface EvolutionHistoryEntry {
+  createdAt: string
+  headline: string
+  phase: EvolutionTaskPhase
+  outcome: NonNullable<EvolutionTaskCard['result']>['outcome'] | '尚未裁决'
+  verdict: UserEvolutionReport['verdict'] | null
+}
+
+/** Restore safe confirmation context after another turn or host interaction. */
+export function evolutionTaskCardExtras(session: EvolutionTaskSession, planId: string): EvolutionTaskCardExtras {
+  if (session.pending?.planId !== planId) return {}
+  return {
+    suggestions: session.pending.suggestions.map(({ key, title, summary }) => ({ key, title, summary })),
+    confirmation: '这个候选仍在等待确认。是否开始隔离实现，并交给独立 Verifier/Gate 裁决？',
+  }
+}
+
+/** Latest immutable tasks, stripped of all routing ids and filesystem details. */
+export function userEvolutionHistoryView(plans: UserEvolutionPlan[], limit = 5): EvolutionHistoryEntry[] {
+  return [...plans]
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .slice(0, Math.max(0, limit))
+    .map((plan) => {
+      const card = userEvolutionTaskCard(plan)
+      return {
+        createdAt: plan.createdAt,
+        headline: card.headline,
+        phase: card.phase,
+        outcome: card.result?.outcome ?? '尚未裁决',
+        verdict: card.result?.verdict ?? null,
+      }
+    })
+}
+
+export interface EvolutionEvidenceView {
+  schemaVersion: 1
+  frozen: true
+  frozenAt: string
+  target: string
+  coverage: {
+    actorFrames: number
+    actorEvents: number
+    lastFrameAt: string | null
+    sources: Array<{ name: string; present: boolean; lineCount: number }>
+  }
+  observations: {
+    turns: number
+    toolCalls: number
+    toolErrors: number
+    toolErrorRate: number | null
+    signals: string[]
+    actorAssessmentIncluded: boolean
+  }
+  adjudication?: {
+    verdict: UserEvolutionReport['verdict']
+    applied: boolean
+    effective: boolean | null
+    restartRequired: boolean
+    rolledBack: boolean
+  }
+  privacy: string
+}
+
 /** Stable Actor-facing task card; it deliberately excludes before snapshots and raw paths. */
 export function userEvolutionTaskCard(plan: UserEvolutionPlan, jobStatus?: string, extras: EvolutionTaskCardExtras = {}): EvolutionTaskCard {
   const result = plan.result
   const phase: EvolutionTaskPhase = plan.state === 'planned'
     ? 'waiting_for_confirmation'
-    : plan.state === 'queued' || jobStatus === 'scheduled'
+    : plan.state === 'queued'
       ? 'queued'
-        : plan.state === 'executing' || jobStatus === 'running'
+      : plan.state === 'verifying'
+        ? 'verifying'
+        : plan.state === 'executing'
           ? 'implementing'
-          : plan.state === 'verifying'
-            ? 'verifying'
           : plan.state === 'completed'
             ? 'completed'
             : plan.state === 'cancelled'
               ? 'cancelled'
             : plan.state === 'aborted' || plan.state === 'interrupted'
               ? 'not_completed'
-            : 'not_applied'
+              : jobStatus === 'scheduled'
+                ? 'queued'
+                : jobStatus === 'running'
+                  ? 'implementing'
+                  : 'not_applied'
   const progress = phase === 'waiting_for_confirmation'
     ? { current: '方案与证据已冻结，尚未修改任何内容。', next: '等待用户确认执行。' }
     : phase === 'queued'
@@ -64,7 +138,7 @@ export function userEvolutionTaskCard(plan: UserEvolutionPlan, jobStatus?: strin
               ? { current: '任务在开始实现前已取消。', next: '如仍需要，可基于原请求创建新的 immutable 任务。' }
               : { current: '候选未获独立裁决放行。', next: '查看拒绝原因；不会静默绕过或重试。' }
   const controls: EvolutionTaskCard['controls'] = phase === 'waiting_for_confirmation'
-    ? ['confirm', 'view_evidence']
+    ? ['confirm', 'cancel_pending', 'view_evidence']
     : phase === 'queued' ? ['cancel_queued', 'view_status', 'view_evidence']
       : phase === 'not_applied' || phase === 'not_completed' || phase === 'cancelled'
         ? ['redo', 'view_status', 'view_evidence'] : ['view_status', 'view_evidence']
@@ -86,6 +160,54 @@ export function userEvolutionTaskCard(plan: UserEvolutionPlan, jobStatus?: strin
     ],
     retryable: phase === 'not_applied' || phase === 'not_completed' || phase === 'cancelled',
     ...(result ? { result: presentResult(result) } : {}),
+  }
+}
+
+/**
+ * User-visible proof inventory. It reports what was frozen and what the
+ * independent boundary decided, while deliberately omitting raw content,
+ * hashes, local paths, snapshots, credentials, and hidden model reasoning.
+ */
+export function userEvolutionEvidenceView(plan: UserEvolutionPlan, pack: ActorEvidencePack): EvolutionEvidenceView {
+  const digest = pack.deterministicDigest
+  return {
+    schemaVersion: 1,
+    frozen: true,
+    frozenAt: pack.createdAt,
+    target: plan.target.summary,
+    coverage: {
+      actorFrames: pack.watermark.frameCount,
+      actorEvents: pack.watermark.eventCount,
+      lastFrameAt: pack.watermark.lastFrameAt,
+      sources: pack.rawRefs.map((ref) => ({ name: ref.name, present: ref.exists, lineCount: ref.lineCount })),
+    },
+    observations: {
+      turns: digest.turns,
+      toolCalls: digest.toolCalls,
+      toolErrors: digest.toolErrors,
+      toolErrorRate: digest.toolErrorRate,
+      signals: [...new Set(digest.signals.map((signal) => signal.kind))],
+      actorAssessmentIncluded: pack.actorHandoff.supplied,
+    },
+    ...(plan.result ? {
+      adjudication: {
+        verdict: plan.result.verdict,
+        applied: plan.result.applied,
+        effective: plan.result.effective ?? null,
+        restartRequired: plan.result.restartRequired ?? false,
+        rolledBack: plan.result.rolledBack ?? false,
+      },
+    } : {}),
+    privacy: '这里只展示冻结证据的类型、数量和裁决状态；原始内容、绝对路径、快照、凭据及隐藏推理不会返回对话。',
+  }
+}
+
+/** One low-frequency, state-backed progress notice; never a model-authored claim. */
+export function userEvolutionProgressNotice(plan: UserEvolutionPlan, jobStatus?: string): EvolutionProgressNotice {
+  const card = userEvolutionTaskCard(plan, jobStatus)
+  return {
+    text: `演进仍在进行：${card.progress.current} 下一步：${card.progress.next}`,
+    summary: card.phase === 'verifying' ? '用户演进裁决中' : card.phase === 'queued' ? '用户演进排队中' : '用户演进实现中',
   }
 }
 

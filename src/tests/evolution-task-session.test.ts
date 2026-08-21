@@ -20,4 +20,13 @@ describe('evolution task session', () => {
     store.finish('plan-a', 'aborted')
     expect(store.read()).toMatchObject({ recent: { planId: 'plan-a', jobId: 'job-a', state: 'aborted' } })
   })
+
+  it('can release a pending conversation pointer without inventing a job', () => {
+    const store = new EvolutionTaskSessionStore(mkdtempSync(join(tmpdir(), 'dsh-loom-task-session-')), 'actor')
+    store.beginPending({ planId: 'plan-a', userRequest: 'first', actorExplanation: 'first direction', suggestions: [] })
+    store.finish('plan-a', 'cancelled')
+    expect(store.read()).toMatchObject({ recent: { planId: 'plan-a', state: 'cancelled' } })
+    expect(store.read().pending).toBeUndefined()
+    expect(() => store.beginPending({ planId: 'plan-b', userRequest: 'second', actorExplanation: 'second direction', suggestions: [] })).not.toThrow()
+  })
 })

@@ -23,7 +23,7 @@ import { miniSweChildEnv, miniSweModelName } from './builder/mini-swe-env.js';
 import { bundledMiniSwePaths } from './builder/bundled-mini-swe.js';
 import { ActorEvolutionGateway } from './candidates/actor-gateway.js';
 import { UserEvolutionController } from './evolution/controller.js';
-import { userEvolutionTaskCard } from './evolution/presentation.js';
+import { evolutionTaskCardExtras, userEvolutionEvidenceView, userEvolutionHistoryView, userEvolutionProgressNotice, userEvolutionTaskCard } from './evolution/presentation.js';
 import { EvolutionTaskSessionStore } from './evolution/task-session.js';
 import { agentDefaultModelServiceOf, effectiveHostConfig, writeEffectiveHostConfig } from './evolution/host-config.js';
 import { terminalJobFromPlan } from './evolution/job-recovery.js';
@@ -265,7 +265,15 @@ export function apply(ctx, config) {
         const progressTimer = config.notify.progress && config.notify.progressAfterMs > 0
             ? setTimeout(() => {
                 if (jobRunning && activeJobId === job.id) {
-                    injectNotice('优化仍在进行：已超过预估时间，正在补齐。你可以继续。', '优化进度');
+                    const evolutionPlanId = job.request.kind === 'user-evolution' && typeof job.request.planId === 'string' ? job.request.planId : undefined;
+                    const evolutionPlan = evolutionPlanId ? readJson(join(root, 'user-evolution', config.sessionId, `${evolutionPlanId}.json`)) : undefined;
+                    if (evolutionPlan) {
+                        const notice = userEvolutionProgressNotice(evolutionPlan, 'running');
+                        injectNotice(`${notice.text} 你可以继续当前对话。`, notice.summary);
+                    }
+                    else {
+                        injectNotice('优化仍在进行：已超过预估时间，正在补齐。你可以继续。', '优化进度');
+                    }
                 }
             }, config.notify.progressAfterMs)
             : null;
@@ -950,7 +958,8 @@ export function apply(ctx, config) {
         output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
         async execute(args) {
             const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
-            const jobId = typeof args.jobId === 'string' ? args.jobId : taskSession.read().active?.jobId;
+            const session = taskSession.read();
+            const jobId = typeof args.jobId === 'string' ? args.jobId : session.active?.jobId;
             const job = jobId ? readJson(jobPathFor(jobId)) : undefined;
             const planId = typeof args.planId === 'string' ? args.planId : typeof job?.request?.planId === 'string' ? job.request.planId : taskSession.currentPlanId();
             if (!planId)
@@ -960,7 +969,7 @@ export function apply(ctx, config) {
                 return { accepted: false, planId, error: 'unknown evolution plan' };
             return cleanToolResult({
                 accepted: true,
-                task: userEvolutionTaskCard(plan, job?.status),
+                task: userEvolutionTaskCard(plan, job?.status, evolutionTaskCardExtras(session, planId)),
                 note: plan.state === 'planned'
                     ? '等待用户确认；尚未启动执行。'
                     : plan.state === 'queued' || plan.state === 'executing'
@@ -977,14 +986,28 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'meta_evolution_control',
-        description: 'Actor 对话任务卡的自然语言控制协议。用户只需说“查看进度”或“取消”；本工具不会暴露 planId、路径、快照或隐藏推理。确认与重做由 Actor 依据当前卡片调用 meta_auto 的受控 Plan/Execute 链。',
+        description: 'Actor 对话任务卡的自然语言控制协议。用户只需说“查看进度”“查看证据”“查看历史”“取消”或“回滚”；本工具不会暴露 planId、路径、快照、凭据或隐藏推理。确认与重做由 Actor 依据当前卡片调用 meta_auto 的受控 Plan/Execute 链。',
         parameters: {
-            action: { type: 'string', description: 'status、cancel_queued 或 rollback_recent。Actor 根据用户自然语言选择。' },
+            action: { type: 'string', description: 'status、view_evidence、history、cancel（兼容 cancel_pending/cancel_queued）或 rollback_recent。Actor 根据用户自然语言和当前卡片选择。' },
         },
         output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
         async execute(args) {
             const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
             const session = taskSession.read();
+            if (args.action === 'history') {
+                const historyDir = join(root, 'user-evolution', config.sessionId);
+                const plans = existsSync(historyDir)
+                    ? readdirSync(historyDir)
+                        .filter((name) => name.startsWith('evolution-') && name.endsWith('.json'))
+                        .map((name) => readJson(join(historyDir, name)))
+                        .filter((plan) => Boolean(plan?.createdAt && plan?.target))
+                    : [];
+                return cleanToolResult({
+                    accepted: true,
+                    history: userEvolutionHistoryView(plans),
+                    note: plans.length > 0 ? '仅展示最近任务的脱敏结果；旧 plan/run 仍保持 immutable。' : '当前会话还没有演进任务历史。',
+                });
+            }
             const planId = session.pending?.planId ?? session.active?.planId ?? session.recent?.planId;
             if (!planId)
                 return cleanToolResult({ accepted: false, error: '当前会话没有演进任务' });
@@ -992,7 +1015,36 @@ export function apply(ctx, config) {
             const plan = readJson(planPath);
             if (!plan)
                 return cleanToolResult({ accepted: false, error: '当前任务记录不可用' });
-            if (args.action === 'cancel_queued') {
+            if (args.action === 'view_evidence') {
+                const manifest = plan.evidence.refs[0];
+                const pack = manifest ? readActorEvidencePack(manifest) : null;
+                if (!pack) {
+                    return cleanToolResult({
+                        accepted: false,
+                        task: userEvolutionTaskCard(plan, undefined, evolutionTaskCardExtras(session, planId)),
+                        error: '冻结证据清单不可用；为避免把实时状态冒充本轮证据，本工具不会回退读取当前会话。',
+                    });
+                }
+                return cleanToolResult({
+                    accepted: true,
+                    task: userEvolutionTaskCard(plan, session.active?.jobId ? readJson(jobPathFor(session.active.jobId))?.status : undefined, evolutionTaskCardExtras(session, planId)),
+                    evidence: userEvolutionEvidenceView(plan, pack),
+                    note: '这是本轮 immutable evidence pack 的脱敏索引，不是原始会话转录或隐藏推理。',
+                });
+            }
+            if (args.action === 'cancel' || args.action === 'cancel_pending' || args.action === 'cancel_queued') {
+                if (session.pending?.planId === planId && plan.state === 'planned') {
+                    plan.state = 'cancelled';
+                    plan.result = {
+                        runId: 'not-started', targetKind: plan.target.kind, targetId: plan.target.plan.targetId,
+                        verdict: 'aborted', applied: false, effective: false, restartRequired: false,
+                        summary: '用户在确认前取消了此任务',
+                        limitations: ['未启动 Builder、未创建可写实现 workspace、未修改任何宿主内容；原计划和证据保留为只读历史。'],
+                    };
+                    atomicWriteJson(planPath, plan);
+                    taskSession.finish(planId, 'cancelled');
+                    return cleanToolResult({ accepted: true, task: userEvolutionTaskCard(plan), note: '已取消待确认任务；现在可以提出新的演进请求。' });
+                }
                 if (!session.active || session.active.planId !== planId || session.active.cursor !== 'queued') {
                     return cleanToolResult({ accepted: false, task: userEvolutionTaskCard(plan), error: plan.state === 'executing' || plan.state === 'verifying' ? '本轮已经开始实现或裁决，不能强制中断；它会保留完整审计记录。' : '只有已排队、尚未开始的任务可以取消。' });
                 }
@@ -1193,10 +1245,19 @@ export function apply(ctx, config) {
                     if (evolutionMode === 'plan') {
                         if (!evolutionRequirements || !targetKind)
                             return cleanToolResult({ accepted: false, mode: 'plan', error: 'plan requires requirements and targetKind' });
-                        const existing = taskSession.read().pending;
-                        if (existing) {
-                            const prior = controller.read(existing.planId);
-                            return cleanToolResult({ accepted: false, mode: 'plan', task: userEvolutionTaskCard(prior), error: '该会话已有等待确认的任务；请保留、取消后替换，或先查看状态' });
+                        const currentSession = taskSession.read();
+                        const existingPlanId = currentSession.pending?.planId ?? currentSession.active?.planId;
+                        if (existingPlanId) {
+                            const prior = controller.read(existingPlanId);
+                            const activeJobStatus = currentSession.active?.jobId ? readJson(jobPathFor(currentSession.active.jobId))?.status : undefined;
+                            return cleanToolResult({
+                                accepted: false,
+                                mode: 'plan',
+                                task: userEvolutionTaskCard(prior, activeJobStatus, evolutionTaskCardExtras(currentSession, existingPlanId)),
+                                error: currentSession.pending
+                                    ? '该会话已有等待确认的任务；请保留、取消后替换，或先查看状态。'
+                                    : '该会话已有进行中的任务；不能用新请求覆盖，请先查看状态并等待本轮结束。',
+                            });
                         }
                         const plan = controller.plan(evolutionRequirements, targetKind);
                         taskSession.beginPending({

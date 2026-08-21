@@ -1,4 +1,6 @@
 import type { UserEvolutionPlan, UserEvolutionReport } from './controller.js';
+import type { ActorEvidencePack } from '../evidence/index.js';
+import type { EvolutionTaskSession } from './task-session.js';
 export type EvolutionTaskPhase = 'waiting_for_confirmation' | 'queued' | 'implementing' | 'verifying' | 'completed' | 'not_applied' | 'not_completed' | 'cancelled';
 export interface EvolutionTaskCard {
     schemaVersion: 1;
@@ -25,7 +27,7 @@ export interface EvolutionTaskCard {
         summary: string;
     }>;
     confirmation?: string;
-    controls: Array<'confirm' | 'cancel_queued' | 'view_status' | 'view_evidence' | 'redo'>;
+    controls: Array<'confirm' | 'cancel_pending' | 'cancel_queued' | 'view_status' | 'view_evidence' | 'redo'>;
     /** Compatibility alias for earlier Actor integrations. */
     actions: Array<'confirm_execute' | 'view_status' | 'view_evidence'>;
     timeline: Array<{
@@ -49,5 +51,60 @@ export interface EvolutionTaskCardExtras {
     }>;
     confirmation?: string;
 }
+export interface EvolutionProgressNotice {
+    text: string;
+    summary: string;
+}
+export interface EvolutionHistoryEntry {
+    createdAt: string;
+    headline: string;
+    phase: EvolutionTaskPhase;
+    outcome: NonNullable<EvolutionTaskCard['result']>['outcome'] | '尚未裁决';
+    verdict: UserEvolutionReport['verdict'] | null;
+}
+/** Restore safe confirmation context after another turn or host interaction. */
+export declare function evolutionTaskCardExtras(session: EvolutionTaskSession, planId: string): EvolutionTaskCardExtras;
+/** Latest immutable tasks, stripped of all routing ids and filesystem details. */
+export declare function userEvolutionHistoryView(plans: UserEvolutionPlan[], limit?: number): EvolutionHistoryEntry[];
+export interface EvolutionEvidenceView {
+    schemaVersion: 1;
+    frozen: true;
+    frozenAt: string;
+    target: string;
+    coverage: {
+        actorFrames: number;
+        actorEvents: number;
+        lastFrameAt: string | null;
+        sources: Array<{
+            name: string;
+            present: boolean;
+            lineCount: number;
+        }>;
+    };
+    observations: {
+        turns: number;
+        toolCalls: number;
+        toolErrors: number;
+        toolErrorRate: number | null;
+        signals: string[];
+        actorAssessmentIncluded: boolean;
+    };
+    adjudication?: {
+        verdict: UserEvolutionReport['verdict'];
+        applied: boolean;
+        effective: boolean | null;
+        restartRequired: boolean;
+        rolledBack: boolean;
+    };
+    privacy: string;
+}
 /** Stable Actor-facing task card; it deliberately excludes before snapshots and raw paths. */
 export declare function userEvolutionTaskCard(plan: UserEvolutionPlan, jobStatus?: string, extras?: EvolutionTaskCardExtras): EvolutionTaskCard;
+/**
+ * User-visible proof inventory. It reports what was frozen and what the
+ * independent boundary decided, while deliberately omitting raw content,
+ * hashes, local paths, snapshots, credentials, and hidden model reasoning.
+ */
+export declare function userEvolutionEvidenceView(plan: UserEvolutionPlan, pack: ActorEvidencePack): EvolutionEvidenceView;
+/** One low-frequency, state-backed progress notice; never a model-authored claim. */
+export declare function userEvolutionProgressNotice(plan: UserEvolutionPlan, jobStatus?: string): EvolutionProgressNotice;

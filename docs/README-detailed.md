@@ -29,7 +29,9 @@
 | “把这个配置调得更稳定” | 提出 Config 候选、风险与 cold replay/rollback 验收 | 只能改宿主已有且不含凭据的配置行 |
 | “给我加一个复盘失败的技能” | 提出 Skill 候选，确认后生成隔离 bundle | entry 由宿主固定；加载、使用、回滚均需独立验证 |
 | “确认执行” | 只确认当前会话的待确认任务 | 用户不需要 `planId`、路径、before snapshot 或隐藏推理 |
-| “先取消” | 取消仍在排队、尚未获得 workspace 的任务 | 已运行的 mini-SWE pass 不强杀，避免破坏审计边界 |
+| “先取消” | 等待确认时直接放弃 plan；排队后则只取消尚未获得 workspace 的 job | 已运行的 mini-SWE pass 不强杀，避免破坏审计边界 |
+| “看看这次用了哪些证据” | 展示冻结帧/事件/信号的类型、数量和裁决状态 | 不返回原始转录、绝对路径、凭据或隐藏推理 |
+| “之前有哪些演进任务” | 展示最近任务的时间、目标、阶段和结果 | 不返回 plan/job/run ID；旧记录保持 immutable |
 | “按刚才的任务重做” | 用原意图建立新的 immutable plan | 不重开旧 workspace，不修改旧记录 |
 
 当前实现的完整交互状态是：`等待确认 → 排队 → 隔离实现 → 独立裁决 → 已生效 / 未生效 / 未完成 / 已取消`。默认关闭主动演进；运行一次 `dsh-loom setup` 会在用户状态目录安装固定 mini-SWE runtime 并生成受控 patch，系统不会退化为直接改配置或直接安装。
@@ -294,7 +296,7 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 
 | 证据项 | 当前可复核结果 | 可以说什么 | 不能说什么 |
 | --- | --- | --- | --- |
-| 工程回归 | **266/266** 全绿 | 双轨控制面、任务卡与跨平台 mini-SWE runtime 有持续回归保护 | 不能替代真实模型成功率 |
+| 工程回归 | **271/271** 全绿 | 双轨控制面、任务卡与跨平台 mini-SWE runtime 有持续回归保护 | 不能替代真实模型成功率 |
 | refine skill artifact | mini-SWE 生成 → verifier/gate → cold Loader → rollback 已跑通 | 隔离 skill bundle 的交付链可用 | 不证明任意 LLM 都会遵循该 skill |
 | scheduler prepare-overlap | 真实 Builder 候选在 2/4/8/16 calls 的受控路径中缩短 prepare span | 该 scheduler 改动的因果 workload 有改善 | 不等于 Actor 整体性能提升 |
 | Loop 复杂实现 | mini-SWE 有一条真实 source edit→tests→submit→gate→rollback 闭环 | mini-SWE 是已验证的实现 runtime 候选 | 不等于复杂源码重构已稳定可用 |
@@ -469,7 +471,8 @@ pnpm dsh --profile headless --patch "$runtime_root/loom-active-evolution.patch.y
 3. 你回复：“确认执行。”
 4. Actor 通知任务进入隔离实现；你可以继续对话。
 5. 你问：“演进进度怎么样？”只会看到关键状态。
-6. 裁决结束后，Actor 明确说明“已生效 / 未生效 / 未完成”；排队时可说“先取消”，终态后可说“按刚才的任务重做”。
+6. 你可以说“看看这次用了哪些证据”获得脱敏证据索引，或说“之前有哪些演进任务”查看最近结果。
+7. 裁决结束后，Actor 明确说明“已生效 / 未生效 / 未完成”；等待确认或排队时可说“先取消”，终态后可说“按刚才的任务重做”。
 
 建议在本节预留三张真实截图：
 
