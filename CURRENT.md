@@ -1,12 +1,12 @@
 # CURRENT.md — 当前状态与交接
 
-## 2026-08-21 v1.3 README 产品门面与视觉交接（待 GitHub 发布）
+## 2026-08-21 v1.3 README 产品门面与视觉交接（已发布到 GitHub main）
 
 - 根 README 的产品主线已从单一 Config/Skill/refine 案例调整为“多插件协同演进 + 通用插件生命周期 + 原子组合激活”。所有能力逐项标记为 `Verified / v1.3 Preview / Research`：v1.2.33 的对话委托和只读 Builder 诊断仍是当前稳定能力；多插件源码协同尚未冒充已发布；复杂 Loop 继续保留研究边界。
 - 新增两张可编辑深色蓝图 SVG：`fig-v13-multi-plugin-transaction.svg` 解释最多三插件的统一冻结、组合验证和整体生效/保持旧版本；`fig-v13-capability-map.svg` 区分多插件协同、插件管理、Harness 自演进和 Loop 更换的完成度。
 - Qwen2 生图按用户要求暂时留空，README 只保留不可渲染的 HTML 插入锚点，不制造缺图链接。完整的 Hero/上下文分离 prompts、固定参数、候选命名和验收表已放在 `docs/visuals/v1.3-readme/`；候选通过用户监督前不得进入 `docs/figures/`。
 - `docs/README-detailed.md` 已将 refine 降为 v1.0–v1.2 历史证据，不再作为首页产品主叙事。项目级插图偏好固定为无水印、技术蓝图混合、候选 batch size 2。
-- 验证：本地 Markdown 链接检查通过；SVG 根节点闭合检查通过；TypeScript check、全量 **288/288**、build、pack dry-run 与 `git diff --check` 均通过。本机缺少 SVG rasterizer，尚未生成本地 PNG 预览；发布后仍需检查 GitHub 实际渲染。
+- 首次文档发布提交为 `d46da81`。验证：本地 Markdown 链接检查通过；SVG 根节点闭合检查通过；TypeScript check、全量 **288/288**、build、pack dry-run 与 `git diff --check` 均通过。本机缺少 SVG rasterizer，尚未生成本地 PNG 预览；仍需检查 GitHub 实际渲染。
 
 ## 2026-08-21 v1.2.33 已发布：Actor + Builder 协作分诊
 
