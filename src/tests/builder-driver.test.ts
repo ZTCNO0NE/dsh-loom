@@ -103,6 +103,41 @@ describe('BuilderDriver', () => {
     expect(prompts[0]).not.toContain('"kind":"submit"')
   })
 
+  it.each([false, true])('keeps read-only diagnosis tool schemas and textual protocol aligned (compact=%s)', async (compactPrompt) => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-readonly-diagnosis-'))
+    const kernel = new BuilderKernel(root, 's', undefined, { readOnlyDiagnosis: true })
+    const run = kernel.create({ mode: 'diagnosis', actor: {}, targetBefore: {} })
+    const calls: LlmCallOptions[] = []
+    const llm: LlmStreamLike = {
+      async *stream(options) {
+        calls.push(options)
+        yield { kind: 'block-start', type: 'text' }
+        yield { kind: 'text-delta', text: JSON.stringify({ kind: 'abort', reason: 'protocol inspected' }) }
+        yield { kind: 'block-end', type: 'text' }
+      },
+    }
+    await new BuilderDriver({
+      llm, provider: 'test', model: 'test', systemPrompt: 'test', taskContext: 'task',
+      compactPrompt, readOnlyDiagnosis: true,
+    }).run(kernel, run.id)
+
+    const prompt = calls[0]?.prompt ?? ''
+    const names = calls[0]?.nativeTools?.map((tool) => tool.name) ?? []
+    expect(prompt).toContain(compactPrompt ? 'read-only Builder diagnosis loop' : '只读诊断回合')
+    expect(prompt).not.toContain('write_workspace_file {')
+    expect(prompt).not.toContain('run_workspace_command {')
+    expect(prompt).not.toContain('invoke_capability {')
+    expect(prompt).not.toContain('write_submission {')
+    expect(names).toContain('write_diagnosis_report')
+    expect(names).toContain('read_file')
+    expect(names).not.toContain('write_workspace_file')
+    expect(names).not.toContain('run_workspace_command')
+    expect(names).not.toContain('invoke_capability')
+    expect(names).not.toContain('write_candidate_draft')
+    expect(names).not.toContain('preflight_staging_entry')
+    expect(names).not.toContain('submit')
+  })
+
   it('can use a compact prompt with a durable context index instead of the full exemplar block', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-driver-compact-'))
     const kernel = new BuilderKernel(root, 's')

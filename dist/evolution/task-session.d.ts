@@ -28,6 +28,13 @@ export interface EvolutionTaskSession {
         jobId?: string;
         state: 'completed' | 'rejected' | 'aborted' | 'cancelled' | 'interrupted';
     };
+    diagnosis?: {
+        runId: string;
+        jobId: string;
+        userRequest: string;
+        state: 'queued' | 'diagnosing' | 'waiting_for_choice' | 'aborted';
+        evidenceManifest: string;
+    };
 }
 /**
  * A deliberately small, durable projection of a conversation's evolution
@@ -40,6 +47,10 @@ export declare class EvolutionTaskSessionStore {
     constructor(root: string, sessionId: string);
     read(): EvolutionTaskSession;
     beginPending(value: NonNullable<EvolutionTaskSession['pending']>): EvolutionTaskSession;
+    beginDiagnosis(value: NonNullable<EvolutionTaskSession['diagnosis']>): EvolutionTaskSession;
+    setDiagnosisState(runId: string, next: NonNullable<EvolutionTaskSession['diagnosis']>['state']): EvolutionTaskSession;
+    consumeDiagnosis(runId: string): EvolutionTaskSession;
+    replaceDiagnosisWithPending(runId: string, value: NonNullable<EvolutionTaskSession['pending']>): EvolutionTaskSession;
     beginActive(planId: string, jobId: string): EvolutionTaskSession;
     setCursor(planId: string, cursor: EvolutionTaskSession['active'] extends infer T ? T extends {
         cursor: infer C;

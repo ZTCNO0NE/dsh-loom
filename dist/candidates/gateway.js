@@ -39,6 +39,7 @@ function summarizeDiagnosis(report) {
         return [{
                 ...(typeof value.id === 'string' ? { id: value.id.slice(0, 160) } : {}),
                 ...(typeof value.goal === 'string' ? { goal: value.goal.slice(0, 1_000) } : {}),
+                ...(value.layer === 'config' || value.layer === 'skill' || value.layer === 'loop' || value.layer === 'no_change' ? { layer: value.layer } : {}),
                 ...(Array.isArray(value.evidenceRefs) ? { evidenceRefs: value.evidenceRefs.filter((ref) => typeof ref === 'string').slice(0, 12) } : {}),
                 ...(Array.isArray(value.unknowns) ? { unknowns: value.unknowns.filter((item) => typeof item === 'string').slice(0, 12) } : {}),
                 ...(typeof value.cost === 'string' ? { cost: value.cost.slice(0, 120) } : {}),
@@ -223,22 +224,28 @@ export class LoopCandidateGateway {
         }
         if (!llm)
             throw new Error('loop exploration: no independent builder llm available');
+        const directionDiagnosis = runContext.run.mode === 'diagnosis' && this.options.directionDiagnosis === true;
         const outcome = await new BuilderDriver({
             llm,
             provider: this.options.provider,
             model: this.options.model,
-            systemPrompt: 'You are the free exploratory loop-evolution Builder and an external improvement partner for the Actor. Based on real actor/user evidence, identify the most valuable concrete problem affecting user experience, task success, or safety; form a falsifiable hypothesis; use workspace evidence/simulation when useful; ask the Actor/user when a product tradeoff cannot be inferred; and submit a verifiable candidate when evidence is sufficient. Do not modify or install any live target.',
+            systemPrompt: directionDiagnosis
+                ? 'You are the Actor’s independent direction-diagnosis Builder. Read the frozen user/Actor evidence and relevant source facts, distinguish symptoms from causes, and propose 1–3 routes across config, skill, loop, or no-change. Actor translates your report and the user owns the choice. This pass is read-only: do not edit, execute commands, simulate, submit, verify, install, or claim improvement.'
+                : 'You are the free exploratory loop-evolution Builder and an external improvement partner for the Actor. Based on real actor/user evidence, identify the most valuable concrete problem affecting user experience, task success, or safety; form a falsifiable hypothesis; use workspace evidence/simulation when useful; ask the Actor/user when a product tradeoff cannot be inferred; and submit a verifiable candidate when evidence is sufficient. Do not modify or install any live target.',
             taskContext: [
                 'This run was actively requested through the actor, not passively scheduled.',
                 `User request relayed by actor: ${requirements.slice(0, 12_000)}`,
                 `Actor/runtime context: ${JSON.stringify(context).slice(0, 16_000)}`,
-                'You may choose a small edit, a complete replacement, or a new foundation. Use your tools and actual feedback; do not follow a prescribed strategy.',
+                directionDiagnosis
+                    ? 'For every direction include layer=config|skill|loop|no_change, a concrete goal, evidenceRefs, unknowns, and cost. Prefer the smallest layer that explains the evidence; do not avoid loop when the evidence is structural, and do not choose loop merely because the request is vague.'
+                    : 'You may choose a small edit, a complete replacement, or a new foundation. Use your tools and actual feedback; do not follow a prescribed strategy.',
                 runContext.run.mode === 'diagnosis'
                     ? 'This is the direction-selection pass. Completion means a durable diagnosis-report with 1-3 evidence-backed directions and a blocking user choice. Do not submit a proposal in this pass.'
                     : 'Completion means a concrete problem, a falsifiable hypothesis, evidence or simulation, and either a frozen write_submission→submit, a blocking choice question, or an evidence-backed abort.',
             ].join('\n'),
             draftKind: 'loop_candidate',
-            capabilities: [LOOP_EVOLUTION_CAPABILITY, WORKSPACE_SIMULATION_CAPABILITY],
+            capabilities: directionDiagnosis ? [] : [LOOP_EVOLUTION_CAPABILITY, WORKSPACE_SIMULATION_CAPABILITY],
+            readOnlyDiagnosis: directionDiagnosis,
             maxModelTurns: this.options.builderMaxModelTurns ?? 24,
             maxToolSteps: this.options.builderMaxToolSteps ?? 48,
             maxWallTimeMs: this.options.builderMaxWallTimeMs ?? 600_000,

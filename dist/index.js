@@ -25,7 +25,7 @@ import { ActorEvolutionGateway } from './candidates/actor-gateway.js';
 import { UserEvolutionController } from './evolution/controller.js';
 import { evolutionTaskCardExtras, userEvolutionEvidenceView, userEvolutionHistoryView, userEvolutionProgressNotice, userEvolutionTaskCard } from './evolution/presentation.js';
 import { EvolutionTaskSessionStore } from './evolution/task-session.js';
-import { evolutionPlanningClarification } from './evolution/planning.js';
+import { directionDiagnosisCard, evolutionPlanningClarification, resolveEvolutionDirectionSelection, routeEvolutionDirection } from './evolution/planning.js';
 import { agentDefaultModelServiceOf, effectiveHostConfig, writeEffectiveHostConfig } from './evolution/host-config.js';
 import { terminalJobFromPlan } from './evolution/job-recovery.js';
 import { CandidateImporter, CandidateRegistry } from './candidates/index.js';
@@ -286,11 +286,13 @@ export function apply(ctx, config) {
                 const reason = typeof job.request.requirements === 'string' && job.request.requirements.trim()
                     ? String(job.request.requirements).slice(0, 100)
                     : `检测到改进需求（${String(job.request.tool ?? 'refine')}）`;
-                injectNotice(isLoopExploration
-                    ? `Builder 正在后台探索 loop：${reason}。你可以继续当前对话，也可查询或补充该 run。`
-                    : evolutionPlan
-                        ? `演进已开始：${evolutionPlan.target.summary}。现在在隔离环境实现，尚未生效；Verifier/Gate 会决定是否放行。`
-                        : `正在后台优化：${reason}。完成会通知你，不影响当前对话。`, isLoopExploration ? 'Builder 开始探索' : evolutionPlan ? '用户演进已开始' : '开始后台优化');
+                injectNotice(job.request.kind === 'direction-diagnosis'
+                    ? 'Builder 正在后台只读诊断改进方向：它会区分 Config、Skill、Loop 或暂不修改；本阶段不会编辑、提交或安装。'
+                    : isLoopExploration
+                        ? `Builder 正在后台探索 loop：${reason}。你可以继续当前对话，也可查询或补充该 run。`
+                        : evolutionPlan
+                            ? `演进已开始：${evolutionPlan.target.summary}。现在在隔离环境实现，尚未生效；Verifier/Gate 会决定是否放行。`
+                            : `正在后台优化：${reason}。完成会通知你，不影响当前对话。`, job.request.kind === 'direction-diagnosis' ? 'Builder 开始方向诊断' : isLoopExploration ? 'Builder 开始探索' : evolutionPlan ? '用户演进已开始' : '开始后台优化');
             }
             updateJob(job.id, { status: 'running', request: job.request });
             try {
@@ -308,9 +310,27 @@ export function apply(ctx, config) {
                             ? `演进完成：${evolutionCard.result?.outcome ?? evolutionCard.phase}。${evolutionCard.result?.summary ?? evolutionCard.progress.current}`
                             : `优化完成：${outcome.summary}。reload 后生效。`, isLoopExploration ? 'Builder 探索结束' : evolutionCard ? '用户演进完成' : '优化完成');
                 }
+                if (config.notify.completion && job.request.kind === 'direction-diagnosis' && persistedStatus === 'waiting_for_input') {
+                    const diagnosisRunId = typeof job.request.runId === 'string' ? job.request.runId : undefined;
+                    const status = diagnosisRunId ? directionDiagnosisGateway.explorationStatus(diagnosisRunId) : undefined;
+                    const card = status ? directionDiagnosisCard(status) : undefined;
+                    injectNotice(card?.phase === 'waiting_for_choice'
+                        ? `方向诊断完成：Builder 提出了 ${card.directions.length} 个方向，等待你选择；尚未启动任何实现。`
+                        : '方向诊断已暂停，等待 Actor/用户补充信息；尚未启动任何实现。', 'Builder 方向诊断待选择');
+                }
             }
             catch (error) {
                 updateJob(job.id, { status: 'failed', request: job.request, error: String(error) });
+                const directionRunId = job.request.kind === 'direction-diagnosis' && typeof job.request.runId === 'string'
+                    ? job.request.runId : undefined;
+                if (directionRunId) {
+                    try {
+                        new EvolutionTaskSessionStore(root, config.sessionId).setDiagnosisState(directionRunId, 'aborted');
+                    }
+                    catch { /* Session may already have been cancelled or replaced. */ }
+                    injectNotice('方向诊断未完成：没有形成可供选择的报告，也没有创建实现计划或修改 Actor。详细错误仅保留在受控审计记录中。', 'Builder 方向诊断未完成');
+                    return;
+                }
                 const evolutionPlanId = job.request.kind === 'user-evolution' && typeof job.request.planId === 'string' ? job.request.planId : undefined;
                 if (evolutionPlanId) {
                     const planPath = join(root, 'user-evolution', config.sessionId, `${evolutionPlanId}.json`);
@@ -427,6 +447,23 @@ export function apply(ctx, config) {
                 },
             },
         } : {}),
+    });
+    const directionDiagnosisGateway = new LoopCandidateGateway({
+        enabled: true,
+        root: join(root, 'direction-diagnosis-runtime'),
+        sessionId: config.sessionId,
+        llm: metaLlm,
+        provider: config.llm.provider,
+        model: config.llm.model,
+        maxTokens: config.allowLoopCandidates.maxTokens,
+        builderMaxModelTurns: Math.min(config.allowLoopCandidates.builderMaxModelTurns, 16),
+        builderMaxToolSteps: Math.min(config.allowLoopCandidates.builderMaxToolSteps, 24),
+        builderMaxWallTimeMs: Math.min(config.allowLoopCandidates.builderMaxWallTimeMs, 300_000),
+        diagnosisFirst: true,
+        directionDiagnosis: true,
+        builderKernelOptions: { readOnlyDiagnosis: true },
+        onUsage: recordUsage('builder-direction-diagnosis'),
+        executionRuntime: 'loom-native',
     });
     const loopJobRunners = new Map();
     const loopRunHolders = new Map();
@@ -960,6 +997,22 @@ export function apply(ctx, config) {
         async execute(args) {
             const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
             const session = taskSession.read();
+            if (session.diagnosis) {
+                try {
+                    const status = directionDiagnosisGateway.explorationStatus(session.diagnosis.runId);
+                    return cleanToolResult({
+                        accepted: true,
+                        mode: 'direction-diagnosis',
+                        task: directionDiagnosisCard({ ...status, state: session.diagnosis.state === 'aborted' ? 'aborted' : status.state }),
+                        note: session.diagnosis.state === 'waiting_for_choice'
+                            ? 'Actor 应解释方向差异并保留用户选择；尚未创建 implementation plan。'
+                            : 'Builder 正在只读诊断；不会修改 Actor。',
+                    });
+                }
+                catch {
+                    return cleanToolResult({ accepted: false, mode: 'direction-diagnosis', error: '方向诊断状态不可用；不会猜测或自动进入实现。' });
+                }
+            }
             const jobId = typeof args.jobId === 'string' ? args.jobId : session.active?.jobId;
             const job = jobId ? readJson(jobPathFor(jobId)) : undefined;
             const planId = typeof args.planId === 'string' ? args.planId : typeof job?.request?.planId === 'string' ? job.request.planId : taskSession.currentPlanId();
@@ -987,9 +1040,9 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'meta_evolution_control',
-        description: 'Actor 对话任务卡的自然语言控制协议。用户只需说“查看进度”“查看证据”“查看历史”“取消”或“回滚”；本工具不会暴露 planId、路径、快照、凭据或隐藏推理。确认与重做由 Actor 依据当前卡片调用 meta_auto 的受控 Plan/Execute 链。',
+        description: 'Actor 对话任务卡的自然语言控制协议。用户只需说“查看进度”“查看证据”“查看历史”“取消诊断/任务”或“回滚”；本工具不会暴露内部 run/plan id、路径、快照、凭据或隐藏推理。',
         parameters: {
-            action: { type: 'string', description: 'status、view_evidence、history、cancel（兼容 cancel_pending/cancel_queued）或 rollback_recent。Actor 根据用户自然语言和当前卡片选择。' },
+            action: { type: 'string', description: 'status、view_evidence、history、cancel（兼容 cancel_diagnosis/cancel_pending/cancel_queued）或 rollback_recent。Actor 根据用户自然语言和当前卡片选择。' },
         },
         output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
         async execute(args) {
@@ -1008,6 +1061,22 @@ export function apply(ctx, config) {
                     history: userEvolutionHistoryView(plans),
                     note: plans.length > 0 ? '仅展示最近任务的脱敏结果；旧 plan/run 仍保持 immutable。' : '当前会话还没有演进任务历史。',
                 });
+            }
+            if (session.diagnosis) {
+                if (args.action === 'cancel' || args.action === 'cancel_diagnosis') {
+                    try {
+                        const cancelledQueuedJob = cancelQueuedJob(session.diagnosis.jobId);
+                        if (!cancelledQueuedJob)
+                            directionDiagnosisGateway.controlExploration(session.diagnosis.runId, 'cancel');
+                        taskSession.setDiagnosisState(session.diagnosis.runId, 'aborted');
+                        return cleanToolResult({ accepted: true, mode: 'direction-diagnosis', note: '已取消方向诊断；未创建 implementation plan，未修改 Actor。' });
+                    }
+                    catch (error) {
+                        return cleanToolResult({ accepted: false, mode: 'direction-diagnosis', error: `取消诊断失败：${String(error)}` });
+                    }
+                }
+                const status = directionDiagnosisGateway.explorationStatus(session.diagnosis.runId);
+                return cleanToolResult({ accepted: true, mode: 'direction-diagnosis', task: directionDiagnosisCard({ ...status, state: session.diagnosis.state === 'aborted' ? 'aborted' : status.state }), note: '方向卡来自只读 Builder report；用户选择前不会进入实现。' });
             }
             const planId = session.pending?.planId ?? session.active?.planId ?? session.recent?.planId;
             if (!planId)
@@ -1106,17 +1175,19 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'meta_auto',
-        description: '用户主动委托入口：exploreLoop=true 时冻结三层证据包，后台 Builder 自由探索并提交 proposal，随后经 verifier/gate 裁决；无被动触发。',
+        description: 'Actor 的用户主动演进入口。明确且低风险的 Config/Skill 目标直接 plan；模糊、跨层、Loop 或失败后的问题先交给只读 Builder 形成 1–3 个方向，Actor 向用户解释并等待选择。选择后才创建新的 immutable implementation plan；实现固定走 mini-SWE 与独立 Verifier/Gate。',
         parameters: {
             turn: { type: 'number', description: '当前回合号（宿主回合边界传入）' },
             requirements: { type: 'string', description: '用户需求原文（可选）' },
             actorAssessment: { type: 'string', description: 'actor 对当前会话问题的自然语言观察、怀疑和上下文；不是结构化 JSON 约束（可选）' },
             evolutionMode: { type: 'string', description: '用户主动 Config/Skill 演进：plan 冻结证据与宿主目标并展示风险；execute 确认当前会话的待确认任务。' },
-            targetKind: { type: 'string', description: 'plan 时必填：config 或 skill。' },
-            targetId: { type: 'string', description: 'plan 时的用户意图提示。Config 必须是现有宿主行；Skill 仅允许 kebab-case id，入口由宿主生成。' },
+            directionMode: { type: 'string', description: 'auto（默认）、direct 或 diagnose。明确 Config/Skill 目标走 direct；模糊、跨层、Loop 或失败后问题走只读 Builder diagnosis。' },
+            selectedDirectionId: { type: 'string', description: '内部路由字段：用户从 Builder 方向卡选择的 key；普通用户无需看到或输入。' },
+            targetKind: { type: 'string', description: 'Actor 已明确目标时填写 config 或 skill；模糊请求不应猜测，交给 direction diagnosis。' },
+            targetId: { type: 'string', description: 'Actor 已确认的宿主目标。Config 必须是现有宿主行；Skill 仅允许 kebab-case id。Builder 方向诊断无权生成该字段。' },
             redo: { type: 'boolean', description: '仅对上一条未生效/未完成/已取消任务：用原目标和原用户意图创建一条新的 immutable plan。' },
             planId: { type: 'string', description: '内部兼容字段；Actor 确认当前任务时无需提供。' },
-            exploreLoop: { type: 'boolean', description: '仅当 allowLoopCandidates 开启时，让独立 builder 阅读三层证据包并自由探索/演进 config/tool/skill/loop；proposal 经 verifier/gate 裁决后才应用。' },
+            exploreLoop: { type: 'boolean', description: '仅在用户二次确认已选择的 Loop 研究方向后启动；实现由 mini-SWE 承担，proposal 经 Loop 专用 verifier/gate 裁决后才可能应用。' },
             resumeJobId: { type: 'string', description: '可选：恢复一个被宿主重载中断的 Builder job。会创建新 immutable run，并只读继承旧 run 的 journal/workspace/artifacts。' },
             resumeRunId: { type: 'string', description: '可选：直接指定要恢复的 Builder run（与 resumeJobId 二选一）。' },
         },
@@ -1165,14 +1236,97 @@ export function apply(ctx, config) {
                 if (args.redo === true && (!redoSource || !['rejected', 'aborted', 'cancelled', 'interrupted'].includes(redoSource.state))) {
                     return cleanToolResult({ accepted: false, mode: evolutionMode, error: '只有未生效、未完成或已取消的最近任务可以重做。' });
                 }
-                const evolutionRequirements = requirements ?? redoSource?.requirements;
-                const targetKind = args.targetKind === 'config' || args.targetKind === 'skill'
+                let evolutionRequirements = requirements ?? redoSource?.requirements;
+                let targetKind = args.targetKind === 'config' || args.targetKind === 'skill'
                     ? args.targetKind : redoSource?.target.kind;
                 const requestedTargetId = typeof args.targetId === 'string' ? args.targetId : redoSource?.target.plan.targetId;
                 const currentConfig = currentConfigOf(ctx, baseline);
+                let consumedDiagnosisRunId;
                 if (evolutionMode === 'plan') {
                     if (!evolutionRequirements)
                         return cleanToolResult({ accepted: false, mode: 'plan', needsClarification: true, question: '你希望 Actor 改善什么？请描述当前问题、期望行为或想新增的能力。', choices: [] });
+                    const selectedDirectionId = typeof args.selectedDirectionId === 'string' ? args.selectedDirectionId : undefined;
+                    if (selectedDirectionId) {
+                        const diagnosis = taskSession.read().diagnosis;
+                        if (!diagnosis || diagnosis.state !== 'waiting_for_choice')
+                            return cleanToolResult({ accepted: false, mode: 'plan', error: '当前没有等待选择的 Builder 方向诊断。' });
+                        const status = directionDiagnosisGateway.explorationStatus(diagnosis.runId);
+                        const selection = resolveEvolutionDirectionSelection(status.diagnosisReport.directions ?? [], selectedDirectionId);
+                        if (selection.kind === 'invalid')
+                            return cleanToolResult({ accepted: false, mode: 'plan', error: selection.error });
+                        if (selection.kind === 'no_change') {
+                            taskSession.consumeDiagnosis(diagnosis.runId);
+                            return cleanToolResult({ accepted: true, mode: 'plan', noChange: true, direction: { layer: selection.direction.layer, goal: selection.direction.goal }, note: '用户选择暂不修改；没有创建 execution plan、workspace 或 proposal。' });
+                        }
+                        if (selection.kind === 'loop_confirmation') {
+                            return cleanToolResult({
+                                accepted: false,
+                                mode: 'plan',
+                                needsLoopDelegation: true,
+                                direction: { key: selection.direction.id, layer: selection.direction.layer, goal: selection.direction.goal, unknowns: selection.direction.unknowns ?? [], cost: selection.direction.cost ?? 'unknown' },
+                                question: '这是研究级 Loop 方向。是否按该目标启动独立 Loop implementation run，并接受更严格的契约、cold replay 与 rollback 门槛？',
+                                note: '尚未启动实现。Actor 获得用户再次确认后，应以 exploreLoop=true 转交该方向；不能伪装成 Config/Skill 产品执行。',
+                            });
+                        }
+                        targetKind = selection.targetKind;
+                        evolutionRequirements = `${diagnosis.userRequest}\n\nBuilder diagnosis selected by user: ${selection.direction.goal}`;
+                        consumedDiagnosisRunId = diagnosis.runId;
+                    }
+                    else {
+                        const directionMode = args.directionMode === 'direct' || args.directionMode === 'diagnose' || args.directionMode === 'auto'
+                            ? args.directionMode : 'auto';
+                        const route = routeEvolutionDirection({
+                            mode: directionMode,
+                            requirements: evolutionRequirements,
+                            targetKind,
+                            targetId: requestedTargetId,
+                            priorFailed: args.redo === true,
+                        });
+                        if (route.route === 'diagnose') {
+                            if (!builderCredential.configured || !metaLlm) {
+                                return cleanToolResult({ accepted: false, mode: 'diagnose', error: `Builder credential ${builderCredential.ref} is required for direction diagnosis`, routeReason: route.reason });
+                            }
+                            const currentSession = taskSession.read();
+                            if (currentSession.pending || currentSession.active || (currentSession.diagnosis && currentSession.diagnosis.state !== 'aborted')) {
+                                return cleanToolResult({ accepted: false, mode: 'diagnose', error: '该会话已有诊断、等待确认或进行中的任务；请先查看或完成当前任务。' });
+                            }
+                            const signals = observer.collect(config.thresholds);
+                            const diagnosisEvidence = createActorEvidencePack({
+                                root, sessionId: config.sessionId, observer, currentConfig, signals,
+                                state: readJson(paths.autopilotState(root, config.sessionId)) ?? {
+                                    schemaVersion: PROTOCOL_VERSION, epoch: 0, iterationsThisEpoch: 0, lastIterationTurn: 0, lastApplyTurn: 0,
+                                },
+                                requirements: evolutionRequirements, actorAssessment,
+                            });
+                            const started = directionDiagnosisGateway.startExploration(evolutionRequirements, {
+                                passMode: 'diagnosis',
+                                actorAssessment: actorAssessment ?? '',
+                                evidencePack: { manifestPath: diagnosisEvidence.manifestPath },
+                                runtimeCwd: process.cwd(),
+                                allowedLayers: ['config', 'skill', 'loop', 'no_change'],
+                            });
+                            if (!started.accepted)
+                                return cleanToolResult({ accepted: false, mode: 'diagnose', error: started.reason });
+                            const diagnosisJobId = scheduleRefine({ tool: 'meta_auto', kind: 'direction-diagnosis', runId: started.runId, requirements: evolutionRequirements }, async () => {
+                                taskSession.setDiagnosisState(started.runId, 'diagnosing');
+                                const outcome = await directionDiagnosisGateway.runExploration(started.runId);
+                                const finalStatus = directionDiagnosisGateway.explorationStatus(started.runId);
+                                const usable = outcome.state === 'waiting_for_input'
+                                    && finalStatus.diagnosisReport.available
+                                    && (finalStatus.diagnosisReport.directions ?? []).some((direction) => direction.id && direction.goal && direction.layer);
+                                taskSession.setDiagnosisState(started.runId, usable ? 'waiting_for_choice' : 'aborted');
+                                return { summary: usable ? 'Builder 已形成跨层方向报告，等待用户选择；尚未启动实现。' : `方向诊断未完成：${outcome.reason ?? outcome.state}`, status: usable ? 'waiting_for_input' : 'finished' };
+                            });
+                            taskSession.beginDiagnosis({ runId: started.runId, jobId: diagnosisJobId, userRequest: evolutionRequirements, state: 'queued', evidenceManifest: diagnosisEvidence.manifestPath });
+                            return cleanToolResult({
+                                accepted: true,
+                                mode: 'diagnose',
+                                routeReason: route.reason,
+                                task: directionDiagnosisCard({ state: 'created', diagnosisReport: { available: false } }),
+                                note: '只读 Builder 诊断已后台启动；不会编辑、提交、验证或安装。Actor 可继续对话并稍后查看方向卡。',
+                            });
+                        }
+                    }
                     const clarification = evolutionPlanningClarification(currentConfig, targetKind, requestedTargetId);
                     if (clarification) {
                         return cleanToolResult({ accepted: false, mode: 'plan', needsClarification: true, ...clarification, note: '尚未冻结 evidence pack，也未启动 Builder。Actor 应先向用户解释这些选择，再携带确认后的方向重新 plan。' });
@@ -1274,10 +1428,14 @@ export function apply(ctx, config) {
                             });
                         }
                         const plan = controller.plan(evolutionRequirements, targetKind);
-                        taskSession.beginPending({
+                        const pendingTask = {
                             planId: plan.id, userRequest: evolutionRequirements, actorExplanation: actorAssessment ?? plan.target.summary,
                             suggestions: [{ key: 'selected', title: plan.target.summary, summary: plan.target.verification, target: { kind: plan.target.kind, id: plan.target.plan.targetId } }],
-                        });
+                        };
+                        if (consumedDiagnosisRunId)
+                            taskSession.replaceDiagnosisWithPending(consumedDiagnosisRunId, pendingTask);
+                        else
+                            taskSession.beginPending(pendingTask);
                         return cleanToolResult({ accepted: true, mode: 'plan', task: userEvolutionTaskCard(plan, undefined, {
                                 suggestions: [{ key: 'selected', title: plan.target.summary, summary: plan.target.verification }],
                                 confirmation: '我已根据当前会话证据冻结这个候选。是否开始隔离实现，并交给独立 Verifier/Gate 裁决？',
@@ -1323,6 +1481,21 @@ export function apply(ctx, config) {
                 }
             }
             if (args.exploreLoop === true) {
+                let loopRequirements = requirements ?? '';
+                let selectedDiagnosisRunId;
+                const selectedDirectionId = typeof args.selectedDirectionId === 'string' ? args.selectedDirectionId : undefined;
+                if (selectedDirectionId) {
+                    const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
+                    const diagnosis = taskSession.read().diagnosis;
+                    if (!diagnosis || diagnosis.state !== 'waiting_for_choice')
+                        return cleanToolResult({ accepted: false, mode: 'loop-exploration', error: '当前没有等待选择的 Builder 方向诊断。' });
+                    const diagnosisStatus = directionDiagnosisGateway.explorationStatus(diagnosis.runId);
+                    const selection = resolveEvolutionDirectionSelection(diagnosisStatus.diagnosisReport.directions ?? [], selectedDirectionId);
+                    if (selection.kind !== 'loop_confirmation')
+                        return cleanToolResult({ accepted: false, mode: 'loop-exploration', error: '所选方向不是有效的 Loop 方向；不会跨层猜测执行。' });
+                    loopRequirements = `${diagnosis.userRequest}\n\nBuilder diagnosis selected by user: ${selection.direction.goal}`;
+                    selectedDiagnosisRunId = diagnosis.runId;
+                }
                 if (config.allowLoopCandidates.executionRuntime !== 'mini-swe') {
                     return cleanToolResult({
                         mode: 'loop-exploration', enabled: config.allowLoopCandidates.enabled,
@@ -1344,13 +1517,13 @@ export function apply(ctx, config) {
                         lastIterationTurn: 0,
                         lastApplyTurn: 0,
                     },
-                    requirements: requirements ?? '',
+                    requirements: loopRequirements,
                     actorAssessment,
                 });
-                const started = loopCandidateGateway.startExploration(requirements ?? '', {
+                const started = loopCandidateGateway.startExploration(loopRequirements, {
                     ...currentConfig,
                     runtimeCwd: process.cwd(),
-                    activeActorRequest: requirements ?? '',
+                    activeActorRequest: loopRequirements,
                     ...(actorAssessment ? { actorAssessment } : {}),
                     ...(resumeTarget?.runId ? { resumeFromRunId: resumeTarget.runId } : {}),
                     evidencePack,
@@ -1363,6 +1536,8 @@ export function apply(ctx, config) {
                         note: 'Builder exploration was not started.',
                     });
                 }
+                if (selectedDiagnosisRunId)
+                    new EvolutionTaskSessionStore(root, config.sessionId).consumeDiagnosis(selectedDiagnosisRunId);
                 const loopHolder = { runId: started.runId };
                 let loopRunner;
                 loopRunner = async (runnerJobId) => {
@@ -1392,7 +1567,7 @@ export function apply(ctx, config) {
                             rejections.push(String(rejection.failureSummary));
                             if (attempt < maxAttempts) {
                                 currentRunId = loopCandidateGateway.reopenExploration(currentRunId, rejection);
-                                loopRunHolders.set(currentRunId, { runId: currentRunId, runner: loopRunner, holder: loopHolder, request: { tool: 'meta_auto', kind: 'loop-exploration', runId: currentRunId, requirements: requirements ?? '' } });
+                                loopRunHolders.set(currentRunId, { runId: currentRunId, runner: loopRunner, holder: loopHolder, request: { tool: 'meta_auto', kind: 'loop-exploration', runId: currentRunId, requirements: loopRequirements } });
                                 updateJob(runnerJobId, { activeRunId: currentRunId, runLineage: [...(readJson(jobPathFor(runnerJobId))?.runLineage ?? [loopHolder.runId]), currentRunId] });
                                 summary += `；rejected → reopened=${currentRunId}`;
                             }
@@ -1428,7 +1603,7 @@ export function apply(ctx, config) {
                                     onApplied: async ({ patch, report, applied }) => {
                                         appendLedger(root, config.sessionId, {
                                             id: patch.id, triggeredBy: 'S9-explicit-request',
-                                            problem: report.failureSummary ?? requirements ?? 'user-initiated builder delegation',
+                                            problem: report.failureSummary ?? (loopRequirements || 'user-initiated builder delegation'),
                                             changes: [{ target: patch.targetId, kind: patch.targetKind, before: {}, after: patch.config }],
                                             verdict: report.verdict, applied: applied.applied, metricsBefore: {}, metricsAfter: {}, rolledBack: false,
                                             appliedAt: new Date().toISOString(),
@@ -1438,7 +1613,7 @@ export function apply(ctx, config) {
                                             const rerun = runIsolation(patch, {
                                                 dshCommand: config.isolation.dshCommand, cwd: config.isolation.cwd, profile: config.isolation.profile,
                                                 baseOverlays: config.isolation.baseOverlays, stagingRoot: paths.staging(root, config.sessionId, patch.id),
-                                                probe: requirements || config.isolation.probe, probeTimeoutMs: config.isolation.probeTimeoutMs,
+                                                probe: loopRequirements || config.isolation.probe, probeTimeoutMs: config.isolation.probeTimeoutMs,
                                             });
                                             appendReport(root, config.sessionId, `同任务重跑：exit=${rerun.probe?.exitCode ?? 'n/a'} ${rerun.probe?.outputTail?.slice(0, 200) ?? ''}`);
                                         }
@@ -1463,7 +1638,7 @@ export function apply(ctx, config) {
                                 summary += `；loop verdict=${result.verdict} candidate=${result.candidateId}${result.reason ? ` reason=${result.reason}` : ''}`;
                                 appendReport(root, config.sessionId, `loop 演进：${result.candidateId} → ${result.verdict}${result.install ? ` state=${result.install.state}` : ''}`);
                                 if (result.install?.state === 'installed') {
-                                    const comparison = replayInstalledLoopTask(result.candidateId, requirements || config.allowLoopCandidates.contractTask, config, root, config.sessionId, result);
+                                    const comparison = replayInstalledLoopTask(result.candidateId, loopRequirements || config.allowLoopCandidates.contractTask, config, root, config.sessionId, result);
                                     if (comparison)
                                         appendReport(root, config.sessionId, `同任务 before/after：${comparison.id} baseline=${comparison.baseline.durationMs}ms installed=${comparison.installed.durationMs}ms claim=${comparison.claimLevel}`);
                                 }
@@ -1481,7 +1656,7 @@ export function apply(ctx, config) {
                         if (attempt < maxAttempts) {
                             const priorLineage = readJson(jobPathFor(runnerJobId))?.runLineage ?? [loopHolder.runId];
                             currentRunId = loopCandidateGateway.reopenExploration(currentRunId, { ...rejectionReport, failureSummary: reason ?? rejectionReport.failureSummary ?? 'verifier rejected' });
-                            loopRunHolders.set(currentRunId, { runId: currentRunId, runner: loopRunner, holder: loopHolder, request: { tool: 'meta_auto', kind: 'loop-exploration', runId: currentRunId, requirements: requirements ?? '' } });
+                            loopRunHolders.set(currentRunId, { runId: currentRunId, runner: loopRunner, holder: loopHolder, request: { tool: 'meta_auto', kind: 'loop-exploration', runId: currentRunId, requirements: loopRequirements } });
                             updateJob(runnerJobId, { activeRunId: currentRunId, runLineage: [...priorLineage, currentRunId] });
                             summary += `；rejected → reopened=${currentRunId}`;
                         }
@@ -1498,12 +1673,12 @@ export function apply(ctx, config) {
                     tool: 'meta_auto',
                     kind: 'loop-exploration',
                     runId: started.runId,
-                    requirements: requirements ?? '',
+                    requirements: loopRequirements,
                     ...(resumeTarget?.runId ? { resumedFromRunId: resumeTarget.runId } : {}),
                 }, () => loopRunner(jobId));
                 loopJobRunners.set(jobId, loopRunner);
                 loopRunHolders.set(started.runId, { runId: started.runId, runner: loopRunner, holder: loopHolder, request: {
-                        tool: 'meta_auto', kind: 'loop-exploration', runId: started.runId, requirements: requirements ?? '', ...(resumeTarget?.runId ? { resumedFromRunId: resumeTarget.runId } : {}),
+                        tool: 'meta_auto', kind: 'loop-exploration', runId: started.runId, requirements: loopRequirements, ...(resumeTarget?.runId ? { resumedFromRunId: resumeTarget.runId } : {}),
                     } });
                 return cleanToolResult({
                     mode: 'loop-exploration',

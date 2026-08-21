@@ -27,9 +27,9 @@ bootstrap 会自动适配平台：Linux/macOS 使用 `python3` 与 `bin/mini`，
 
 ## 一次对话的正确预期
 
-1. 用户提出明确需求，例如“给我加一个复盘失败的技能”。
-2. 若方向不明确，Actor 先让用户选择“生成新技能 / 调整已有配置”；Config 候选只来自宿主真实存在、可编辑且不含凭据的行。澄清阶段不会冻结 evidence 或创建 Builder run。
-3. Actor 返回候选、风险、验收方式与确认问题；此时没有改动。Plan 不因 runtime/key 暂缺而被禁止，但会明确列为执行前风险。
+1. 用户提出需求。Actor 已能明确出一个低风险 Config/Skill 目标时直接进入 Plan；它不需要再唤起 Builder 证明一次显而易见的路由。
+2. 模糊症状、跨层目标、Loop 方向或前次失败会进入只读 Builder diagnosis。该 pass 冻结 evidence，只能 read/search/inspect/trace、维护公开状态、向 Actor 提问和写 1–3 个 `config | skill | loop | no_change` 方向；不能编辑 workspace、运行命令、仿真、提交、验证或安装。
+3. Actor 把方向、未知项和成本翻译成用户任务卡。用户选择 Config/Skill 后仍需确认一个宿主拥有的 target；选择 Loop 时还要再次确认研究级成本；选择 no-change 不创建 plan。随后才冻结新的 immutable implementation plan。Plan 不因 runtime/key 暂缺而被禁止，但会明确列为执行前风险。
 4. 用户确认后，Execute 才检查 runtime/凭据并由 mini-SWE 在隔离 workspace 实现候选；缺失时 fail closed。
 5. Verifier/Gate 独立决定已生效、未生效或未完成；Actor 只解释真实状态。
 6. waiting-for-confirmation 可放弃，queued 可取消；running/verifying 不强杀；终态重做永远是新的 immutable plan。
@@ -39,6 +39,7 @@ bootstrap 会自动适配平台：Linux/macOS 使用 `python3` 与 `bin/mini`，
 
 - **为什么安装后没有自动进化？** 这是 v1.2 的安全边界。默认关闭、用户确认、独立验证，避免旧版“自动自治”叙事掩盖未完成的产品验证。
 - **为什么没有 `planId`？** 它是内部不可变记录；用户只通过任务卡确认、查看状态/证据/历史、取消或重做。
+- **Actor 与 Builder 谁决定方向？** Actor 负责分诊、解释和维护用户选择；Builder 只在证据不足以直接路由时做技术诊断。Builder 可以建议层级，但不能决定用户取舍、生成宿主 target 或获得放行权。
 - **为什么需要 mini-SWE runtime？** Loom 负责证据、会话与裁决编排；明确实现 pass 交给成熟 coding runtime。运行一次 `dsh-loom setup` 即可安装；没有 runtime 不会回退为直接修改宿主。
 - **成功是否表示 Agent 整体变强？** 不表示。已安装只表示该候选通过了本次独立验证。性能主张仅限已测 scheduler prepare-overlap workload。
 - **如何关闭？** 不启用 `activeEvolution`，或从 profile 移除 Loom bundle。不要删除已产生的审计记录来伪造不存在过的任务。

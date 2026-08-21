@@ -17,6 +17,8 @@ export interface BuilderDriverOptions {
     /** Replace repeated full prompt exemplars with a durable context-index map. */
     compactPrompt?: boolean;
     capabilities?: readonly BuilderCapabilityPlugin[];
+    /** Expose only observation/dialogue/report tools during a diagnosis pass. */
+    readOnlyDiagnosis?: boolean;
     onUsage?: (usage: {
         prompt: number;
         completion: number;

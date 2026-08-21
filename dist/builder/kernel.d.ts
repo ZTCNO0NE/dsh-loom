@@ -170,6 +170,8 @@ export interface BuilderKernelOptions {
      * false so existing free exploration remains unchanged.
      */
     enforceProgressCheckpoints?: boolean;
+    /** Diagnosis may inspect host facts but cannot mutate a candidate workspace or execute commands. */
+    readOnlyDiagnosis?: boolean;
 }
 export type BuilderDecision = {
     kind: 'continue';

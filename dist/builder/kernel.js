@@ -530,6 +530,9 @@ export class BuilderKernel {
     }
     executeTool(id, action) {
         const paths = builderRunPaths(this.root, this.sessionId, id);
+        if (this.options?.readOnlyDiagnosis && this.load(id).mode === 'diagnosis' && isDiagnosisMutation(action.name)) {
+            throw new Error(`read-only diagnosis cannot execute ${action.name}; inspect evidence and write_diagnosis_report instead`);
+        }
         if (action.name === 'read_input') {
             const path = {
                 actor: paths.actor, target_before: paths.targetBefore, previous_attempt: paths.previousAttempt,
@@ -1265,6 +1268,18 @@ export class BuilderKernel {
             return null;
         return mapped;
     }
+}
+function isDiagnosisMutation(action) {
+    return action === 'write_workspace_file'
+        || action === 'apply_workspace_patch'
+        || action === 'run_workspace_command'
+        || action === 'invoke_capability'
+        || action === 'write_submission'
+        || action === 'compile_loop_submission'
+        || action === 'compile_config_submission'
+        || action === 'compile_module_submission'
+        || action === 'write_candidate_draft'
+        || action === 'preflight_staging_entry';
 }
 /** A skill bundle has an explicit DSH-compatible identity before verifier boot. */
 function isValidSkillEntry(content, targetId) {

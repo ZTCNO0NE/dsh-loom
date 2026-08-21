@@ -17,6 +17,7 @@ export interface EvolutionTaskSession {
   pending?: { planId: string; userRequest: string; actorExplanation: string; suggestions: EvolutionTaskSuggestion[] }
   active?: { planId: string; jobId: string; cursor: 'queued' | 'implementing' | 'verifying' }
   recent?: { planId: string; jobId?: string; state: 'completed' | 'rejected' | 'aborted' | 'cancelled' | 'interrupted' }
+  diagnosis?: { runId: string; jobId: string; userRequest: string; state: 'queued' | 'diagnosing' | 'waiting_for_choice' | 'aborted'; evidenceManifest: string }
 }
 
 /**
@@ -35,7 +36,45 @@ export class EvolutionTaskSessionStore {
 
   beginPending(value: NonNullable<EvolutionTaskSession['pending']>): EvolutionTaskSession {
     const state = this.read()
-    if (state.pending || state.active) throw new Error('该会话已有等待确认或进行中的演进任务；请保留、取消后替换，或先查看状态')
+    if (state.pending || state.active || (state.diagnosis && state.diagnosis.state !== 'aborted')) throw new Error('该会话已有诊断、等待确认或进行中的演进任务；请先查看、取消或完成当前任务')
+    state.pending = structuredClone(value)
+    state.updatedAt = new Date().toISOString()
+    this.write(state)
+    return state
+  }
+
+  beginDiagnosis(value: NonNullable<EvolutionTaskSession['diagnosis']>): EvolutionTaskSession {
+    const state = this.read()
+    if (state.pending || state.active || (state.diagnosis && state.diagnosis.state !== 'aborted')) throw new Error('该会话已有诊断、等待确认或进行中的演进任务')
+    state.diagnosis = structuredClone(value)
+    state.updatedAt = new Date().toISOString()
+    this.write(state)
+    return state
+  }
+
+  setDiagnosisState(runId: string, next: NonNullable<EvolutionTaskSession['diagnosis']>['state']): EvolutionTaskSession {
+    const state = this.read()
+    if (!state.diagnosis || state.diagnosis.runId !== runId) throw new Error('当前会话没有对应的方向诊断')
+    state.diagnosis.state = next
+    state.updatedAt = new Date().toISOString()
+    this.write(state)
+    return state
+  }
+
+  consumeDiagnosis(runId: string): EvolutionTaskSession {
+    const state = this.read()
+    if (!state.diagnosis || state.diagnosis.runId !== runId || state.diagnosis.state !== 'waiting_for_choice') throw new Error('方向诊断尚未等待用户选择')
+    delete state.diagnosis
+    state.updatedAt = new Date().toISOString()
+    this.write(state)
+    return state
+  }
+
+  replaceDiagnosisWithPending(runId: string, value: NonNullable<EvolutionTaskSession['pending']>): EvolutionTaskSession {
+    const state = this.read()
+    if (!state.diagnosis || state.diagnosis.runId !== runId || state.diagnosis.state !== 'waiting_for_choice') throw new Error('方向诊断尚未等待用户选择')
+    if (state.pending || state.active) throw new Error('该会话已有等待确认或进行中的演进任务')
+    delete state.diagnosis
     state.pending = structuredClone(value)
     state.updatedAt = new Date().toISOString()
     this.write(state)

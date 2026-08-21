@@ -19,6 +19,8 @@ export interface BuilderDriverOptions {
   /** Replace repeated full prompt exemplars with a durable context-index map. */
   compactPrompt?: boolean
   capabilities?: readonly BuilderCapabilityPlugin[]
+  /** Expose only observation/dialogue/report tools during a diagnosis pass. */
+  readOnlyDiagnosis?: boolean
   onUsage?: (usage: { prompt: number; completion: number }) => void
   /** Deterministic terminal signal: a run_workspace_command whose stdout/stderr
    * contains this marker with exit 0 marks the run ready_to_submit. */
@@ -176,6 +178,7 @@ export class BuilderDriver {
 
   private prompt(context: ReturnType<BuilderKernel['context']>): string {
     const diagnosisMode = context.run.mode === 'diagnosis'
+    const readOnlyDiagnosis = diagnosisMode && this.options.readOnlyDiagnosis === true
     const journal = context.journal.slice(-10).map((entry) => ({
       seq: entry.seq,
       kind: entry.kind,
@@ -202,7 +205,9 @@ export class BuilderDriver {
     if (this.options.compactPrompt) return this.compactPrompt(context, pendingMessages, progressBanner)
     return [
       this.options.systemPrompt,
-      '你是持久化 Builder 的一个极简 loop 回合。你可以按需读取输入、全局文件与目录，在自己的 workspace 写多文件，并运行工作区命令获得真实反馈。你自己决定下一步、是否继续探索或何时提交。',
+      readOnlyDiagnosis
+        ? '你是持久化 Builder 的一个只读诊断回合。你可以按需读取输入、文件、目录和溯源关系，并维护公开 world model/plan、向 Actor 提问或写出方向报告；本 pass 没有编辑、命令、仿真、提交或安装能力。'
+        : '你是持久化 Builder 的一个极简 loop 回合。你可以按需读取输入、全局文件与目录，在自己的 workspace 写多文件，并运行工作区命令获得真实反馈。你自己决定下一步、是否继续探索或何时提交。',
       diagnosisMode
         ? '当前是 diagnosis-first 对齐 pass：使命是从真实会话、状态和工具反馈中形成 1–3 个有证据的优化方向，并把无法由事实决定的优先级明确交给 Actor/用户。完成定义只有 write_diagnosis_report；报告持久化后必须等待用户方向。不得写 proposal、submit、修改或宣称已改进。'
         : '你的上层使命：作为 Actor 的外部协助者，基于真实会话、状态和工具反馈，找出最值得改进且能提升用户体验/任务成功率/安全性的具体问题，并形成可验证的改进候选。不是为了修改而修改，也不是为了证明自己做过探索。',
@@ -210,7 +215,7 @@ export class BuilderDriver {
         ? '最小必要探索后应立即 write_diagnosis_report；不要用重复读取、continue 或仿真替代报告。每个方向须绑定 evidenceRefs 与 unknowns；问题必须有两个以上选项、whyNow 和 evidenceRefs。'
         : '完成定义：至少形成一个具体问题和可证伪假设；优先用现有事实或 workspace simulation 区分假设；目标取舍无法从证据推出时向 Actor/用户提出 choice/clarification；证据足够时 write_submission→submit；没有有意义或安全的改进时带证据 abort。你可以选择小改、重建、替换、请求澄清或放弃，路线不由这些文字替你决定。',
       '你没有 verifier、gate、install 权限；提交只会冻结 proposal，绝不会直接改变 actor、builder 或 loop 的 live target。',
-      `Builder 起始工具：${BUILDER_BASE_TOOLS.join(', ')}`,
+      `Builder 起始工具：${(readOnlyDiagnosis ? BUILDER_BASE_TOOLS.filter((tool) => !['write_workspace_file', 'run_workspace_command', 'write_submission'].includes(tool)) : BUILDER_BASE_TOOLS).join(', ')}`,
       '只输出一个严格 JSON decision，禁止 Markdown、解释和额外字段。允许的形式：',
       diagnosisMode
         ? '硬性回合规则：本轮若尚未收到上一工具的真实反馈，必须先选择 tool；continue 只能紧跟一次工具反馈，不能连续空转。完成最小必要探索后应 write_diagnosis_report；不要用 continue 或重复读取代替报告。'
@@ -227,13 +232,15 @@ export class BuilderDriver {
       JSON.stringify({ kind: 'tool', action: { name: 'search_text', query: 'runActorLoop', roots: ['/path/to/project'], maxResults: 20 } }),
       JSON.stringify({ kind: 'tool', action: { name: 'inspect_file', path: '/path/to/candidate.mjs' } }),
       JSON.stringify({ kind: 'tool', action: { name: 'trace_artifact', artifact: 'artifact-id-or-absolute-path' } }),
-      JSON.stringify({ kind: 'tool', action: { name: 'write_workspace_file', path: 'notes/idea.md', content: '...' } }),
-      JSON.stringify({ kind: 'tool', action: { name: 'read_workspace_file', path: 'notes/idea.md' } }),
-      JSON.stringify({ kind: 'tool', action: { name: 'run_workspace_command', command: 'git', args: ['status', '--short'] } }),
+      ...(readOnlyDiagnosis ? [] : [
+        JSON.stringify({ kind: 'tool', action: { name: 'write_workspace_file', path: 'notes/idea.md', content: '...' } }),
+        JSON.stringify({ kind: 'tool', action: { name: 'read_workspace_file', path: 'notes/idea.md' } }),
+        JSON.stringify({ kind: 'tool', action: { name: 'run_workspace_command', command: 'git', args: ['status', '--short'] } }),
+      ]),
       JSON.stringify({ kind: 'tool', action: { name: 'acknowledge_message', messageId: 'message-id', status: 'accepted', understanding: '...', nextAction: '...' } }),
       JSON.stringify({ kind: 'tool', action: { name: 'publish_progress', phase: 'diagnosis', summary: '...' } }),
       JSON.stringify({ kind: 'tool', action: { name: 'request_input', kind: 'choice', question: '需要用户确认哪一项优先级？', options: [{ id: 'safe', label: '优先安全', description: '保留并发但不宣称提升' }, { id: 'speed', label: '优先吞吐' }], whyNow: '静态检查无法区分两个候选', evidenceRefs: ['journal:42'], context: '已完成的检查…' } }),
-      JSON.stringify({ kind: 'tool', action: { name: 'invoke_capability', capability: 'workspace-simulation', tool: 'run_simulation', input: { id: 'probe-1', command: 'node', args: ['fixture.mjs'], files: { 'fixture.mjs': 'console.log("ok")' }, expectedStdoutIncludes: ['ok'] } } }),
+      ...(readOnlyDiagnosis ? [] : [JSON.stringify({ kind: 'tool', action: { name: 'invoke_capability', capability: 'workspace-simulation', tool: 'run_simulation', input: { id: 'probe-1', command: 'node', args: ['fixture.mjs'], files: { 'fixture.mjs': 'console.log("ok")' }, expectedStdoutIncludes: ['ok'] } } })]),
       JSON.stringify({ kind: 'tool', action: { name: 'write_world_model', value: {} } }),
       JSON.stringify({ kind: 'tool', action: { name: 'write_plan', value: {} } }),
       JSON.stringify({ kind: 'tool', action: { name: 'write_diagnosis_report', report: { observations: [], directions: [{ id: 'convergence', goal: '...', evidenceRefs: [], unknowns: [], cost: 'low' }], question: { question: '请选择优先方向。', options: [{ id: 'convergence', label: '优先收敛' }, { id: 'task-success', label: '优先任务成功' }], whyNow: '现有证据无法推出优先级', evidenceRefs: [] } } } }),
@@ -275,6 +282,7 @@ export class BuilderDriver {
 
   private compactPrompt(context: ReturnType<BuilderKernel['context']>, pendingMessages: Array<{ id: string; rawUserText: unknown; actorMemo?: unknown; evidenceRefs?: unknown }>, progressBanner: string): string {
     const diagnosisMode = context.run.mode === 'diagnosis'
+    const readOnlyDiagnosis = diagnosisMode && this.options.readOnlyDiagnosis === true
     const capabilities = new BuilderCapabilityRegistry().registerAll(this.options.capabilities ?? [])
     const latestFeedback = [...context.journal].reverse().find((entry) => entry.kind === 'tool' || entry.kind === 'error')
     const evidenceSatisfied = context.run.state === 'ready_to_submit' && this.options.successMarker
@@ -295,11 +303,13 @@ export class BuilderDriver {
       'tool read_journal {limit}',
       'tool read_file {path}; list_directory {path}; inspect_file {path}; trace_artifact {artifact: id|absolutePath}',
       'tool search_text {query,roots?: string[],maxResults?: number}; it is read-only argv search, never write a shell pipeline into command.',
-      'tool read_workspace_file {path}; write_workspace_file {path,content}; apply_workspace_patch {patch: unified git diff}; run_workspace_command {command,args?: string[],timeoutMs?: number}',
+      readOnlyDiagnosis
+        ? 'No workspace mutation, command execution, simulation, submission, verifier, gate, or install tools exist in this pass.'
+        : 'tool read_workspace_file {path}; write_workspace_file {path,content}; apply_workspace_patch {patch: unified git diff}; run_workspace_command {command,args?: string[],timeoutMs?: number}',
       'tool acknowledge_message {messageId,status,understanding,nextAction?}',
       'tool request_input {kind?,question,options?,whyNow?,evidenceRefs?,blocking?}',
       'tool write_world_model/write_plan {value:{hypothesis:"...",nextIntent:"..."}}',
-      'tool invoke_capability {capability,tool,input}',
+      readOnlyDiagnosis ? '' : 'tool invoke_capability {capability,tool,input}',
       diagnosisMode ? 'tool write_diagnosis_report {report}; then wait for user direction' : 'tool write_submission {proposal}; for a workspace loop edit use compile_loop_submission {rationale,expectedOutcome?}; then submit when evidence is sufficient',
       !diagnosisMode ? 'For a verified workspace loop candidate, call compile_loop_submission after tests pass; Kernel derives exact beforeHash/after edits from the captured workspace, then call submit.' : '',
       'decision is exactly one JSON object: {kind:"tool",action} | {kind:"continue",summary} | {kind:"submit"} | {kind:"abort",reason}',
@@ -307,7 +317,9 @@ export class BuilderDriver {
     ].join('\n')
     return [
       this.options.systemPrompt,
-      'You are a persistent Builder micro-loop. Keep cognition open: choose whether to read, hypothesize, simulate, edit, ask Actor/user, submit, or abort. Do not ask when evidence is sufficient; do ask when a product choice or verification decision cannot be inferred. Actor is the translator; verifier/gate/install are independent final authorities. Tool errors are feedback: correct and retry or ask/abort; verifier rejection creates a new immutable run with previous-attempt evidence.',
+      readOnlyDiagnosis
+        ? 'You are a persistent read-only Builder diagnosis loop. Choose whether to read, inspect, trace, maintain a public hypothesis/plan, ask Actor/user, write a diagnosis report, or abort. Actor is the translator and the user owns the direction choice. This pass cannot edit, execute, simulate, submit, verify, install, or claim improvement.'
+        : 'You are a persistent Builder micro-loop. Keep cognition open: choose whether to read, hypothesize, simulate, edit, ask Actor/user, submit, or abort. Do not ask when evidence is sufficient; do ask when a product choice or verification decision cannot be inferred. Actor is the translator; verifier/gate/install are independent final authorities. Tool errors are feedback: correct and retry or ask/abort; verifier rejection creates a new immutable run with previous-attempt evidence.',
       diagnosisMode ? 'This is an explicitly requested diagnosis pass: report 1–3 evidence-backed directions and a blocking question, then wait. No proposal.' : 'This is an implementation pass: form a falsifiable hypothesis, use evidence/simulation as useful, and submit only a concrete auditable proposal.',
       `Tools (minimal protocol):\n${protocol}`,
       `Capability ids (metadata is available from the context index): ${capabilities.list().map((capability) => capability.id).join(', ') || '(none)'}`,
@@ -344,7 +356,7 @@ export class BuilderDriver {
       temperature: 0,
       maxTokens: this.options.maxTokens ?? 6000,
       sessionId: `${runId}:builder`,
-      nativeTools: builderNativeTools(),
+      nativeTools: builderNativeTools(this.options.readOnlyDiagnosis === true),
     })) {
       if (chunk.kind === 'block-start') inText = chunk.type === 'text'
       else if (chunk.kind === 'block-end') inText = false
@@ -478,7 +490,7 @@ export class BuilderDriver {
 
 /** Native schemas make the existing Kernel tools visible as callable actions.
  * They are transport metadata only; parseTool remains the sole allowlist. */
-function builderNativeTools(): LlmNativeTool[] {
+function builderNativeTools(readOnlyDiagnosis = false): LlmNativeTool[] {
   const object = (properties: Record<string, unknown> = {}, required: string[] = []): Record<string, unknown> => ({ type: 'object', properties, ...(required.length ? { required } : {}), additionalProperties: false })
   const string = { type: 'string' }
   const number = { type: 'number' }
@@ -510,7 +522,12 @@ function builderNativeTools(): LlmNativeTool[] {
     ['continue', 'Continue after tool feedback.', object({ summary: string }, ['summary'])],
     ['abort', 'Abort with an evidence-backed reason.', object({ reason: string }, ['reason'])],
   ]
-  return tools.map(([name, description, parameters]) => ({ name, description, parameters }))
+  const forbidden = new Set([
+    'write_workspace_file', 'apply_workspace_patch', 'run_workspace_command', 'invoke_capability',
+    'write_submission', 'compile_loop_submission', 'compile_config_submission', 'compile_module_submission',
+    'write_candidate_draft', 'preflight_staging_entry', 'submit',
+  ])
+  return tools.filter(([name]) => !readOnlyDiagnosis || !forbidden.has(name)).map(([name, description, parameters]) => ({ name, description, parameters }))
 }
 
 /**

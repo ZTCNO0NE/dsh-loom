@@ -64,6 +64,31 @@ function diagnosisThenImplementationLlm() {
   }
 }
 
+function crossLayerDirectionLlm(seenTools: string[]) {
+  return {
+    async *stream(options: { prompt: string; nativeTools?: Array<{ name: string }> }) {
+      seenTools.push(...(options.nativeTools ?? []).map((tool) => tool.name))
+      const pendingMatch = options.prompt.match(/"pendingMessageIds":\[([^\]]*)\]/)
+      const pendingIds = pendingMatch?.[1]
+        ? (JSON.parse(`[${pendingMatch[1]}]`) as unknown[]).filter((value): value is string => typeof value === 'string')
+        : []
+      const decision = pendingIds[0]
+        ? { kind: 'tool', action: { name: 'acknowledge_message', messageId: pendingIds[0], status: 'accepted', understanding: '先区分问题层级。', nextAction: '形成只读方向报告。' } }
+        : { kind: 'tool', action: { name: 'write_diagnosis_report', report: {
+            observations: [{ fact: '症状可能来自行为能力或结构循环', evidenceRefs: ['evidence/manifest.json'] }],
+            directions: [
+              { id: 'skill-route', layer: 'skill', goal: '补充失败复盘技能', evidenceRefs: ['evidence/manifest.json'], unknowns: ['遵循率'], cost: 'low' },
+              { id: 'loop-route', layer: 'loop', goal: '检查结构性循环问题', evidenceRefs: ['evidence/manifest.json'], unknowns: ['契约影响'], cost: 'high' },
+            ],
+            question: { question: '优先哪个方向？', options: [{ id: 'skill-route', label: 'Skill' }, { id: 'loop-route', label: 'Loop' }], whyNow: '证据无法替用户决定成本取舍', evidenceRefs: ['evidence/manifest.json'] },
+          } } }
+      yield { kind: 'block-start', type: 'text' }
+      yield { kind: 'text-delta', text: JSON.stringify(decision) }
+      yield { kind: 'block-end' }
+    },
+  }
+}
+
 function miniRuntimeFixture(root: string, program: string) {
   const baseline = join(root, 'baseline')
   const snapshot = join(root, 'dependency-snapshot')
@@ -108,6 +133,27 @@ function importerFixture(root: string) {
 }
 
 describe('loop candidate gateway', () => {
+  it('runs generic cross-layer diagnosis with mutation tools hidden', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-direction-diagnosis-'))
+    const seenTools: string[] = []
+    const gateway = new LoopCandidateGateway({
+      enabled: true, root, sessionId: 's', provider: 'test', model: 'test', maxTokens: 128,
+      llm: crossLayerDirectionLlm(seenTools), diagnosisFirst: true, directionDiagnosis: true,
+      builderKernelOptions: { readOnlyDiagnosis: true }, executionRuntime: 'loom-native',
+    })
+    const started = gateway.startExploration('最近越来越不聪明', { passMode: 'diagnosis', evidencePack: { manifestPath: 'evidence/manifest.json' } })
+    if (!started.accepted) throw new Error('test requires enabled diagnosis')
+    await expect(gateway.runExploration(started.runId)).resolves.toMatchObject({ state: 'waiting_for_input', passMode: 'diagnosis' })
+    expect(gateway.explorationStatus(started.runId)).toMatchObject({ diagnosisReport: { available: true, directions: [
+      expect.objectContaining({ id: 'skill-route', layer: 'skill' }),
+      expect.objectContaining({ id: 'loop-route', layer: 'loop' }),
+    ] } })
+    expect(seenTools).not.toContain('write_workspace_file')
+    expect(seenTools).not.toContain('run_workspace_command')
+    expect(seenTools).not.toContain('write_submission')
+    expect(seenTools).toContain('write_diagnosis_report')
+  })
+
   it('uses Loom-native only for a diagnosis pass when mini-SWE is selected for implementation', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-mini-diagnosis-'))
     const fixture = miniRuntimeFixture(root, '#!/bin/sh\nexit 1\n')

@@ -32,16 +32,21 @@
 
 > “给我加一个失败后先做证据复盘的 Skill。”
 
-Actor 会先展示目标、风险和验收方式。你确认后，Builder 才在隔离 workspace 实现；Verifier/Gate 独立决定它能否进入真实 Harness。用户不需要知道 `planId`、文件路径或内部工具名。
+目标已经明确时，Actor 会直接展示目标、风险和验收方式。你确认后，mini-SWE 才在隔离 workspace 实现；Verifier/Gate 独立决定它能否进入真实 Harness。用户不需要知道 `planId`、文件路径或内部工具名。
 
-如果方向还不够明确，Actor 会先让你选择“生成新技能”或“调整已有配置”；它只列出宿主真实存在、可编辑且不含凭据的配置项。Plan 可以先看，缺少 runtime 或 Builder 凭据只会显示为执行前风险；真正 Execute 时仍会 fail closed。
+如果你描述的是“最近变慢了”“回答不够聪明”这类症状，Actor 不会自己猜成 Config 或 Skill。它会把冻结证据交给只读 Builder：Builder 只能阅读、溯因和提出 1–3 个 `Config / Skill / Loop / 暂不修改` 方向，不能编辑、运行命令、提交或安装。Actor 负责把差异解释给你；你选择以后，系统才创建一条新的 immutable implementation plan。Config 的最终目标仍只能从宿主真实存在、可编辑且不含凭据的配置项中确认，Builder 不能替宿主发明 target。
 
 ```text
 用户需求
    ↓
-Actor 解释与任务卡
+Actor 分诊：明确目标 ───────────────┐
+   │ 模糊 / 跨层 / Loop / 前次失败 │
+   ↓                               │
+Builder 只读方向诊断 → Actor 解释 → 用户选择
+                                   ↓
+                              Plan 任务卡
    ↓  用户确认
-Builder 隔离实现
+mini-SWE 隔离实现
    ↓
 Verifier 独立核验
    ↓
@@ -54,7 +59,8 @@ Gate 安装 / 拒绝 / 回滚
 
 | 组件 | 它替你做什么 |
 | --- | --- |
-| Actor gateway | 接住自然语言需求，给候选、风险、任务卡和进度解释 |
+| Actor gateway | 接住自然语言需求并分诊；明确目标直接 Plan，模糊问题转 Builder 只读诊断 |
+| Builder diagnosis | 从冻结证据提出跨 Config/Skill/Loop/no-change 的方向，不接触实现与放行 |
 | Evidence pack | 冻结用户原话、会话事实、before snapshot 与失败反馈 |
 | mini-SWE runtime | 在隔离 workspace 读取、编辑、测试并提交候选 |
 | Verifier | 用固定检查、cold replay 和契约判断是否通过 |

@@ -22,12 +22,13 @@
 
 ![v1.2 用户主动演进任务卡](figures/fig-v12-dialogue-task-card.svg)
 
-用户只需描述想改善什么。Actor 基于当前会话的真实证据提出候选、风险与验收方式；确认前不会改动。确认后后台执行，不阻塞当前对话；用户只会看到关键节点：等待确认、开始隔离实现、独立裁决完成。
+用户只需描述想改善什么。明确的 Config/Skill 目标由 Actor 直接形成 Plan；模糊症状、跨层问题、Loop 或前次失败则先进入 Builder 只读方向诊断。Builder 从冻结证据提出 1–3 个 `config | skill | loop | no_change` 方向，Actor 负责解释，用户负责选择。选择前不会创建实现计划；确认后由 mini-SWE 后台执行，不阻塞当前对话。
 
 | 用户说的话 | Actor 任务卡会做什么 | v1.2 边界 |
 | --- | --- | --- |
 | “把这个配置调得更稳定” | 提出 Config 候选、风险与 cold replay/rollback 验收 | 只能改宿主已有且不含凭据的配置行 |
 | “给我加一个复盘失败的技能” | 提出 Skill 候选，确认后生成隔离 bundle | entry 由宿主固定；加载、使用、回滚均需独立验证 |
+| “最近越来越慢，也不太会判断何时停” | 后台只读诊断 Config/Skill/Loop/no-change 方向，再让用户选择 | diagnosis 不能编辑、运行命令、提交、验证或安装 |
 | “确认执行” | 只确认当前会话的待确认任务 | 用户不需要 `planId`、路径、before snapshot 或隐藏推理 |
 | “先取消” | 等待确认时直接放弃 plan；排队后则只取消尚未获得 workspace 的 job | 已运行的 mini-SWE pass 不强杀，避免破坏审计边界 |
 | “看看这次用了哪些证据” | 展示冻结帧/事件/信号的类型、数量和裁决状态 | 不返回原始转录、绝对路径、凭据或隐藏推理 |
@@ -36,7 +37,7 @@
 
 当前实现的完整交互状态是：`等待确认 → 排队 → 隔离实现 → 独立裁决 → 已生效 / 未生效 / 未完成 / 已取消`。默认关闭主动演进；运行一次 `dsh-loom setup` 会在用户状态目录安装固定 mini-SWE runtime 并生成受控 patch，系统不会退化为直接改配置或直接安装。
 
-目标不明确时不会让 Actor 猜内部参数，也不会先生成一条无主 evidence/run：系统先返回“生成新技能 / 调整已有配置”的澄清选择；Config 只列出宿主已有、可编辑且不包含 credential 字段的行。Plan 与 Execute 的就绪门分开：没有 mini-SWE 或 Builder 凭据时仍能查看方案和风险，确认执行时则继续 fail closed。
+目标不明确时不会让 Actor 猜内部参数：系统冻结一次方向证据并让只读 Builder 区分问题层级；Actor 将方向、未知项和成本翻译给用户。用户选中 Config/Skill 后，仍只能从宿主已有安全目标中确认 target；选中 Loop 要二次确认研究级成本；选中 no-change 不创建 workspace/proposal。Builder 诊断报告不能直接变成安装候选。Plan 与 Execute 的就绪门分开：没有 mini-SWE 或 Builder 凭据时仍能查看明确方案和风险，确认执行时则继续 fail closed。
 
 ## 它能帮你的 agent 做到什么（30 秒看懂）
 
@@ -475,6 +476,8 @@ pnpm dsh --profile headless --patch "$runtime_root/loom-active-evolution.patch.y
 5. 你问：“演进进度怎么样？”只会看到关键状态。
 6. 你可以说“看看这次用了哪些证据”获得脱敏证据索引，或说“之前有哪些演进任务”查看最近结果。
 7. 裁决结束后，Actor 明确说明“已生效 / 未生效 / 未完成”；等待确认或排队时可说“先取消”，终态后可说“按刚才的任务重做”。
+
+如果第一句改为“最近 Actor 用起来不顺手，也不确定是配置、技能还是循环的问题”，预期流程不同：Actor 启动后台只读方向诊断；Builder 形成 1–3 个方向后，Actor 解释各自证据、未知项与成本；用户选择后才进入上述 Plan/确认流程。诊断阶段不会产生候选代码，也不会触发 Verifier/Gate。
 
 建议在本节预留三张真实截图：
 

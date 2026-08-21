@@ -17,6 +17,8 @@ export interface LoopCandidateGatewayOptions {
     builderMaxWallTimeMs?: number;
     /** Broad user requests begin with an evidence-backed direction-selection pass. */
     diagnosisFirst?: boolean;
+    /** Generic Actor direction diagnosis across config/skill/loop; no loop-first bias. */
+    directionDiagnosis?: boolean;
     /** Optional no-progress experiment; omitted keeps free exploration unchanged. */
     builderKernelOptions?: BuilderKernelOptions;
     onUsage?: (usage: {
@@ -78,6 +80,7 @@ export interface LoopExplorationStatus {
         directions?: Array<{
             id?: string;
             goal?: string;
+            layer?: 'config' | 'skill' | 'loop' | 'no_change';
             evidenceRefs?: string[];
             unknowns?: string[];
             cost?: string;

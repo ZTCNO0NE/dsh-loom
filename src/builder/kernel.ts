@@ -197,6 +197,8 @@ export interface BuilderKernelOptions {
    * false so existing free exploration remains unchanged.
    */
   enforceProgressCheckpoints?: boolean
+  /** Diagnosis may inspect host facts but cannot mutate a candidate workspace or execute commands. */
+  readOnlyDiagnosis?: boolean
 }
 
 export type BuilderDecision =
@@ -785,6 +787,9 @@ export class BuilderKernel {
 
   private executeTool(id: string, action: BuilderToolAction): Record<string, unknown> {
     const paths = builderRunPaths(this.root, this.sessionId, id)
+    if (this.options?.readOnlyDiagnosis && this.load(id).mode === 'diagnosis' && isDiagnosisMutation(action.name)) {
+      throw new Error(`read-only diagnosis cannot execute ${action.name}; inspect evidence and write_diagnosis_report instead`)
+    }
     if (action.name === 'read_input') {
       const path = {
         actor: paths.actor, target_before: paths.targetBefore, previous_attempt: paths.previousAttempt,
@@ -1490,6 +1495,19 @@ export class BuilderKernel {
     if (relative(workspace, mapped).startsWith('..')) return null
     return mapped
   }
+}
+
+function isDiagnosisMutation(action: BuilderToolAction['name']): boolean {
+  return action === 'write_workspace_file'
+    || action === 'apply_workspace_patch'
+    || action === 'run_workspace_command'
+    || action === 'invoke_capability'
+    || action === 'write_submission'
+    || action === 'compile_loop_submission'
+    || action === 'compile_config_submission'
+    || action === 'compile_module_submission'
+    || action === 'write_candidate_draft'
+    || action === 'preflight_staging_entry'
 }
 
 /** A skill bundle has an explicit DSH-compatible identity before verifier boot. */

@@ -168,6 +168,23 @@ describe('BuilderKernel', () => {
     expect(kernel.load(malformed.id).state).toBe('exploring')
   })
 
+  it('can enforce a read-only diagnosis without blocking public diagnosis state', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-readonly-diagnosis-'))
+    const kernel = new BuilderKernel(root, 's', undefined, { readOnlyDiagnosis: true })
+    const run = kernel.create({ mode: 'diagnosis', actor: { requirements: '找出 actor 问题' }, targetBefore: {} })
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'write_workspace_file', path: 'candidate.ts', content: 'mutate' } })).toThrow(/read-only diagnosis/)
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'run_workspace_command', command: 'node', args: ['probe.mjs'] } })).toThrow(/read-only diagnosis/)
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'write_world_model', value: { hypothesis: 'skill is missing', nextIntent: 'report choices' } } })).toMatchObject({ written: 'world_model' })
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'write_diagnosis_report', report: {
+      observations: [],
+      directions: [
+        { id: 'skill', goal: 'add a bounded skill', layer: 'skill', evidenceRefs: ['actor'], unknowns: [], cost: 'low' },
+        { id: 'loop', goal: 'investigate the actor loop', layer: 'loop', evidenceRefs: ['actor'], unknowns: ['contract impact'], cost: 'high' },
+      ],
+      question: { question: '选哪个？', options: [{ id: 'skill', label: 'Skill' }, { id: 'loop', label: 'Loop' }], whyNow: '证据无法决定产品取舍', evidenceRefs: ['actor'] },
+    } } })).toMatchObject({ written: 'diagnosis_report' })
+  })
+
   it('does not permit a terminal builder run to be reopened', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-'))
     const kernel = new BuilderKernel(root, 's')

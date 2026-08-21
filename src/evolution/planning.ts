@@ -11,7 +11,102 @@ export interface EvolutionPlanningClarification {
   choices: EvolutionPlanningChoice[]
 }
 
+export type EvolutionDirectionMode = 'auto' | 'direct' | 'diagnose'
+
+export interface EvolutionRouteDecision {
+  route: 'direct' | 'diagnose'
+  reason: string
+}
+
+export interface DirectionDiagnosisCard {
+  phase: 'diagnosing' | 'waiting_for_choice' | 'not_completed'
+  headline: string
+  progress: { current: string; next: string }
+  directions: Array<{ key: string; layer: 'config' | 'skill' | 'loop' | 'no_change'; goal: string; unknowns: string[]; cost: string }>
+  question?: { text: string; whyNow: string; options: Array<{ key: string; label: string; description?: string }> }
+  controls: Array<'view_status' | 'choose_direction' | 'cancel_diagnosis'>
+}
+
+export type EvolutionDirection = {
+  id?: string
+  goal?: string
+  layer?: 'config' | 'skill' | 'loop' | 'no_change'
+  unknowns?: string[]
+  cost?: string
+}
+
+export type EvolutionDirectionSelection =
+  | { kind: 'invalid'; error: string }
+  | { kind: 'no_change'; direction: Required<Pick<EvolutionDirection, 'id' | 'goal' | 'layer'>> }
+  | { kind: 'loop_confirmation'; direction: Required<Pick<EvolutionDirection, 'id' | 'goal' | 'layer'>> & Pick<EvolutionDirection, 'unknowns' | 'cost'> }
+  | { kind: 'product'; targetKind: 'config' | 'skill'; direction: Required<Pick<EvolutionDirection, 'id' | 'goal' | 'layer'>> }
+
 const secretKey = /(api[_-]?key|token|secret|password|authorization)/i
+
+/** Actor triage: explicit bounded targets go direct; ambiguity and structural work get Builder diagnosis. */
+export function routeEvolutionDirection(input: {
+  mode?: EvolutionDirectionMode
+  requirements: string
+  targetKind?: UserEvolutionTargetKind
+  targetId?: string
+  priorFailed?: boolean
+}): EvolutionRouteDecision {
+  if (input.mode === 'direct') return { route: 'direct', reason: 'Actor explicitly identified a bounded Config/Skill target.' }
+  if (input.mode === 'diagnose') return { route: 'diagnose', reason: 'Actor or user explicitly requested evidence-backed direction diagnosis.' }
+  if (input.priorFailed) return { route: 'diagnose', reason: 'A prior attempt failed; Builder should re-diagnose the layer before another implementation.' }
+  if (input.targetKind && input.targetId?.trim()) return { route: 'direct', reason: 'The request already identifies one bounded product target.' }
+  return { route: 'diagnose', reason: 'The request describes a symptom or cross-layer goal without one bounded target.' }
+}
+
+/** Interpret one frozen Builder direction without allowing it to invent a host target identity. */
+export function resolveEvolutionDirectionSelection(directions: EvolutionDirection[], selectedId: string): EvolutionDirectionSelection {
+  const selected = directions.find((direction) => direction.id === selectedId)
+  if (!selected?.id || !selected.goal || !selected.layer) return { kind: 'invalid', error: '所选方向不存在或缺少可路由层级；不会猜测执行目标。' }
+  const direction = { id: selected.id, goal: selected.goal, layer: selected.layer }
+  if (selected.layer === 'no_change') return { kind: 'no_change', direction }
+  if (selected.layer === 'loop') return { kind: 'loop_confirmation', direction: { ...direction, unknowns: selected.unknowns, cost: selected.cost } }
+  return { kind: 'product', targetKind: selected.layer, direction }
+}
+
+export function directionDiagnosisCard(status: {
+  state: string
+  diagnosisReport: {
+    available: boolean
+    directions?: Array<{ id?: string; goal?: string; layer?: 'config' | 'skill' | 'loop' | 'no_change'; unknowns?: string[]; cost?: string }>
+    question?: { question?: string; whyNow?: string; options?: Array<{ id?: string; label?: string; description?: string }> }
+  }
+}): DirectionDiagnosisCard {
+  const directions = (status.diagnosisReport.directions ?? []).flatMap((direction) => {
+    if (!direction.id || !direction.goal || !direction.layer) return []
+    return [{ key: direction.id, layer: direction.layer, goal: direction.goal, unknowns: direction.unknowns ?? [], cost: direction.cost ?? 'unknown' }]
+  })
+  const waiting = status.state === 'waiting_for_input' && status.diagnosisReport.available && directions.length > 0
+  const failed = status.state === 'aborted' || status.state === 'cancelled'
+  const question = status.diagnosisReport.question
+  const directionKeys = new Set(directions.map((direction) => direction.key))
+  const reportedOptions = (question?.options ?? []).flatMap((option) => option.id && option.label && directionKeys.has(option.id)
+    ? [{ key: option.id, label: option.label, ...(option.description ? { description: option.description } : {}) }]
+    : [])
+  const options = reportedOptions.length > 0
+    ? reportedOptions
+    : directions.map((direction) => ({ key: direction.key, label: direction.goal }))
+  return {
+    phase: failed ? 'not_completed' : waiting ? 'waiting_for_choice' : 'diagnosing',
+    headline: failed ? '方向诊断未完成' : waiting ? 'Builder 已提出改进方向' : 'Builder 正在只读诊断改进方向',
+    progress: failed
+      ? { current: '没有形成可供选择的方向报告。', next: 'Actor 可解释失败并重新发起一次诊断。' }
+      : waiting
+        ? { current: '方向报告已冻结；尚未创建实现计划。', next: 'Actor 向用户解释差异，用户选择后再创建新的 immutable execution plan。' }
+        : { current: 'Builder 正在读取冻结证据并区分 Config、Skill、Loop 或不修改。', next: '形成 1–3 个有证据的方向；本阶段不能编辑、提交或安装。' },
+    directions,
+    ...(waiting && question?.question ? { question: {
+      text: question.question,
+      whyNow: question.whyNow ?? '现有事实无法替用户决定产品取舍。',
+      options,
+    } } : {}),
+    controls: waiting ? ['view_status', 'choose_direction', 'cancel_diagnosis'] : ['view_status', 'cancel_diagnosis'],
+  }
+}
 
 /** Host-owned config rows that are safe to name and freeze into a plan. */
 export function eligibleConfigTargetIds(currentConfig: Record<string, unknown>): string[] {
