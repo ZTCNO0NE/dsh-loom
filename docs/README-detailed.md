@@ -36,6 +36,8 @@
 
 当前实现的完整交互状态是：`等待确认 → 排队 → 隔离实现 → 独立裁决 → 已生效 / 未生效 / 未完成 / 已取消`。默认关闭主动演进；运行一次 `dsh-loom setup` 会在用户状态目录安装固定 mini-SWE runtime 并生成受控 patch，系统不会退化为直接改配置或直接安装。
 
+目标不明确时不会让 Actor 猜内部参数，也不会先生成一条无主 evidence/run：系统先返回“生成新技能 / 调整已有配置”的澄清选择；Config 只列出宿主已有、可编辑且不包含 credential 字段的行。Plan 与 Execute 的就绪门分开：没有 mini-SWE 或 Builder 凭据时仍能查看方案和风险，确认执行时则继续 fail closed。
+
 ## 它能帮你的 agent 做到什么（30 秒看懂）
 
 | 你遇到的情况 | v1.0–v1.1 历史案例 / 设计方向 | **v1.2 标记** |
@@ -296,7 +298,7 @@ dsh 的理念是"一切皆插件、结构层开放"。在这条链路上：
 
 | 证据项 | 当前可复核结果 | 可以说什么 | 不能说什么 |
 | --- | --- | --- | --- |
-| 工程回归 | **271/271** 全绿 | 双轨控制面、任务卡与跨平台 mini-SWE runtime 有持续回归保护 | 不能替代真实模型成功率 |
+| 工程回归 | **275/275** 全绿 | 双轨控制面、任务卡与跨平台 mini-SWE runtime 有持续回归保护 | 不能替代真实模型成功率 |
 | refine skill artifact | mini-SWE 生成 → verifier/gate → cold Loader → rollback 已跑通 | 隔离 skill bundle 的交付链可用 | 不证明任意 LLM 都会遵循该 skill |
 | scheduler prepare-overlap | 真实 Builder 候选在 2/4/8/16 calls 的受控路径中缩短 prepare span | 该 scheduler 改动的因果 workload 有改善 | 不等于 Actor 整体性能提升 |
 | Loop 复杂实现 | mini-SWE 有一条真实 source edit→tests→submit→gate→rollback 闭环 | mini-SWE 是已验证的实现 runtime 候选 | 不等于复杂源码重构已稳定可用 |

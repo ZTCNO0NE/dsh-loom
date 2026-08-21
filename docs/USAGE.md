@@ -28,11 +28,12 @@ bootstrap 会自动适配平台：Linux/macOS 使用 `python3` 与 `bin/mini`，
 ## 一次对话的正确预期
 
 1. 用户提出明确需求，例如“给我加一个复盘失败的技能”。
-2. Actor 返回候选、风险、验收方式与确认问题；此时没有改动。
-3. 用户确认后，mini-SWE 在隔离 workspace 实现候选。
-4. Verifier/Gate 独立决定已生效、未生效或未完成；Actor 只解释真实状态。
-5. waiting-for-confirmation 可放弃，queued 可取消；running/verifying 不强杀；终态重做永远是新的 immutable plan。
-6. 用户可随时要求“查看这次用了哪些证据”或“查看演进历史”：前者只展示冻结来源的类型、数量和裁决状态，后者只展示最近任务的时间、目标与结果；两者都不返回内部 ID、路径、原始转录、凭据或隐藏推理。
+2. 若方向不明确，Actor 先让用户选择“生成新技能 / 调整已有配置”；Config 候选只来自宿主真实存在、可编辑且不含凭据的行。澄清阶段不会冻结 evidence 或创建 Builder run。
+3. Actor 返回候选、风险、验收方式与确认问题；此时没有改动。Plan 不因 runtime/key 暂缺而被禁止，但会明确列为执行前风险。
+4. 用户确认后，Execute 才检查 runtime/凭据并由 mini-SWE 在隔离 workspace 实现候选；缺失时 fail closed。
+5. Verifier/Gate 独立决定已生效、未生效或未完成；Actor 只解释真实状态。
+6. waiting-for-confirmation 可放弃，queued 可取消；running/verifying 不强杀；终态重做永远是新的 immutable plan。
+7. 用户可随时要求“查看这次用了哪些证据”或“查看演进历史”：前者只展示冻结来源的类型、数量和裁决状态，后者只展示最近任务的时间、目标与结果；两者都不返回内部 ID、路径、原始转录、凭据或隐藏推理。
 
 ## 常见问题
 

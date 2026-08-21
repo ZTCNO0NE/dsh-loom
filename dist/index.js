@@ -25,6 +25,7 @@ import { ActorEvolutionGateway } from './candidates/actor-gateway.js';
 import { UserEvolutionController } from './evolution/controller.js';
 import { evolutionTaskCardExtras, userEvolutionEvidenceView, userEvolutionHistoryView, userEvolutionProgressNotice, userEvolutionTaskCard } from './evolution/presentation.js';
 import { EvolutionTaskSessionStore } from './evolution/task-session.js';
+import { evolutionPlanningClarification } from './evolution/planning.js';
 import { agentDefaultModelServiceOf, effectiveHostConfig, writeEffectiveHostConfig } from './evolution/host-config.js';
 import { terminalJobFromPlan } from './evolution/job-recovery.js';
 import { CandidateImporter, CandidateRegistry } from './candidates/index.js';
@@ -1151,11 +1152,11 @@ export function apply(ctx, config) {
                     metaRoot: root, packageRoot: PLUGIN_ROOT, runtimeRoot: config.activeEvolution.runtimeRoot,
                     executable: config.activeEvolution.miniSweExecutable, configPath: config.activeEvolution.miniSweConfigPath,
                 });
-                if (!config.activeEvolution.enabled || !bundledRuntime.ready) {
+                if (evolutionMode === 'execute' && (!config.activeEvolution.enabled || !bundledRuntime.ready)) {
                     return cleanToolResult({ accepted: false, mode: evolutionMode, error: config.activeEvolution.enabled ? 'mini-SWE runtime is not installed; run dsh-loom setup in the same DSH_META_VALIDATE_ROOT, then restart DSH' : 'activeEvolution is disabled' });
                 }
                 const builderCredential = await builderCredentials.describe();
-                if (!builderCredential.configured) {
+                if (evolutionMode === 'execute' && !builderCredential.configured) {
                     return cleanToolResult({ accepted: false, mode: evolutionMode, error: `Builder credential ${builderCredential.ref} is not configured in DSH credentials` });
                 }
                 const taskSession = new EvolutionTaskSessionStore(root, config.sessionId);
@@ -1169,6 +1170,19 @@ export function apply(ctx, config) {
                     ? args.targetKind : redoSource?.target.kind;
                 const requestedTargetId = typeof args.targetId === 'string' ? args.targetId : redoSource?.target.plan.targetId;
                 const currentConfig = currentConfigOf(ctx, baseline);
+                if (evolutionMode === 'plan') {
+                    if (!evolutionRequirements)
+                        return cleanToolResult({ accepted: false, mode: 'plan', needsClarification: true, question: '你希望 Actor 改善什么？请描述当前问题、期望行为或想新增的能力。', choices: [] });
+                    const clarification = evolutionPlanningClarification(currentConfig, targetKind, requestedTargetId);
+                    if (clarification) {
+                        return cleanToolResult({ accepted: false, mode: 'plan', needsClarification: true, ...clarification, note: '尚未冻结 evidence pack，也未启动 Builder。Actor 应先向用户解释这些选择，再携带确认后的方向重新 plan。' });
+                    }
+                }
+                const readinessRisks = [
+                    ...(!config.activeEvolution.enabled ? ['主动演进尚未启用；确认执行前需完成 Loom setup。'] : []),
+                    ...(config.activeEvolution.enabled && !bundledRuntime.ready ? ['mini-SWE runtime 尚未就绪；确认执行前需重新 setup 并加载生成的 patch。'] : []),
+                    ...(!builderCredential.configured ? [`Builder 凭据 ${builderCredential.ref} 尚未配置；确认执行前需在 DSH credentials 中补齐。`] : []),
+                ];
                 const signals = observer.collect(config.thresholds);
                 const evidencePack = createActorEvidencePack({
                     root, sessionId: config.sessionId, observer, currentConfig, signals,
@@ -1211,14 +1225,14 @@ export function apply(ctx, config) {
                                 throw new Error('config rows with credentials are not eligible for Builder execution');
                             return {
                                 kind, plan: { capability: 'config-evolution', targetId: requestedTargetId, before: structuredClone(row.config), expectedTrajectory },
-                                summary: `修改宿主已存在的 config 行 ${requestedTargetId}`, verification: '固定 Validator、Gate、cold replay 与 rollback', risks: ['配置修改可能要求宿主 reload'],
+                                summary: `修改宿主已存在的 config 行 ${requestedTargetId}`, verification: '固定 Validator、Gate、cold replay 与 rollback', risks: ['配置修改可能要求宿主 reload', ...readinessRisks],
                             };
                         }
                         if (!requestedTargetId || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(requestedTargetId))
                             throw new Error('skill plan requires a kebab-case targetId');
                         return {
                             kind, plan: { capability: 'skill-evolution', targetId: requestedTargetId, targetKind: 'skill', entry: `${requestedTargetId}/SKILL.md`, expectedTrajectory },
-                            summary: `生成隔离 skill bundle ${requestedTargetId}`, verification: 'catalog/load verifier、Gate install、cold Actor load/use 与 rollback', risks: ['技能内容不保证所有模型都遵循'],
+                            summary: `生成隔离 skill bundle ${requestedTargetId}`, verification: 'catalog/load verifier、Gate install、cold Actor load/use 与 rollback', risks: ['技能内容不保证所有模型都遵循', ...readinessRisks],
                         };
                     },
                     evidenceFor: () => ({ refs: [evidencePack.manifestPath, ...evidencePack.rawRefs.map((ref) => ref.snapshotPath ?? ref.path)], summary: `frozen evidence pack ${evidencePack.id}` }),
@@ -1244,7 +1258,7 @@ export function apply(ctx, config) {
                 try {
                     if (evolutionMode === 'plan') {
                         if (!evolutionRequirements || !targetKind)
-                            return cleanToolResult({ accepted: false, mode: 'plan', error: 'plan requires requirements and targetKind' });
+                            throw new Error('planning preflight did not resolve requirements and target kind');
                         const currentSession = taskSession.read();
                         const existingPlanId = currentSession.pending?.planId ?? currentSession.active?.planId;
                         if (existingPlanId) {

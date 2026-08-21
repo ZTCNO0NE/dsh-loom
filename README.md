@@ -15,7 +15,7 @@
   <p>
     <a href="https://www.npmjs.com/package/dsh-loom"><img src="https://img.shields.io/npm/v/dsh-loom?style=flat-square&label=npm" alt="npm version" /></a>
     <a href="https://github.com/ZTCNO0NE/dsh-loom/releases"><img src="https://img.shields.io/github/v/release/ZTCNO0NE/dsh-loom?style=flat-square" alt="GitHub release" /></a>
-    <img src="https://img.shields.io/badge/tests-271%2F271-22c55e?style=flat-square" alt="271/271 tests" />
+    <img src="https://img.shields.io/badge/tests-275%2F275-22c55e?style=flat-square" alt="275/275 tests" />
     <a href="LICENSE"><img src="https://img.shields.io/github/license/ZTCNO0NE/dsh-loom?style=flat-square" alt="MIT license" /></a>
   </p>
 </div>
@@ -33,6 +33,8 @@
 > “给我加一个失败后先做证据复盘的 Skill。”
 
 Actor 会先展示目标、风险和验收方式。你确认后，Builder 才在隔离 workspace 实现；Verifier/Gate 独立决定它能否进入真实 Harness。用户不需要知道 `planId`、文件路径或内部工具名。
+
+如果方向还不够明确，Actor 会先让你选择“生成新技能”或“调整已有配置”；它只列出宿主真实存在、可编辑且不含凭据的配置项。Plan 可以先看，缺少 runtime 或 Builder 凭据只会显示为执行前风险；真正 Execute 时仍会 fail closed。
 
 ```text
 用户需求
@@ -152,7 +154,7 @@ Windows 源码 checkout、Python、host fallback、凭据覆盖和取消/重做�
 
 | 验收项 | 当前结果 |
 | --- | --- |
-| 工程回归 | **271/271** |
+| 工程回归 | **275/275** |
 | Windows 独立 Skill 演进 | **6/6** 完成 `submit → verify → gate → cold-load` |
 | 动态 runtime profile | 5–6 回合主动提交，0 环境探查、0 非零工具结果 |
 | 正式包冷启动 | Windows registry 安装，Web HTTP 200 |

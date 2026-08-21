@@ -7,7 +7,8 @@
 - 补齐 waiting-for-confirmation 的安全取消。用户说“取消”会按阶段路由：未确认 plan 直接取消并释放会话；queued job 仍只在未被 worker 接手时取消；implementing/verifying 继续拒绝强杀。旧 plan/evidence 保持只读，后续可创建新任务。
 - 持久任务卡现在能跨轮恢复用户安全的候选标题、验收摘要和确认问题，不恢复内部 target 路由、用户原文或 Actor 隐藏解释。新增最近任务历史视图，只显示时间、目标、阶段、outcome 与 verdict，不返回 plan/job/run ID。
 - 新 plan 现在会在任何写盘前同时检查 pending 与 active 会话锁；进行中任务不会被覆盖，也不会先生成一条随后才被拒绝的孤儿 immutable plan。
-- 定向 12/12、全量 **271/271**、TypeScript check、build 与 diff-check 均通过。当前改动尚未发 npm/GitHub 版本；Benchmark 下载/运行保持暂停，不与另一条执行计划争用范围。
+- 自然语言 Plan 新增确定性澄清前置：缺方向时先给“新技能 / 已有配置”选择，Config 只列宿主真实存在、可编辑且无 credential 字段的目标，Skill 名称不合法时由 Actor 协助转为 kebab-case；澄清前不冻结 evidence、不创建 run。Plan 可在 runtime/key 未就绪时先展示方案并把缺口列为风险，Execute 仍严格 fail closed。
+- 定向 16/16、全量 **275/275**、TypeScript check、build 与 diff-check 均通过。当前改动尚未发 npm/GitHub 版本；Benchmark 下载/运行保持暂停，不与另一条执行计划争用范围。
 
 ## 2026-08-21 Qwen3.6-35B-A3B Q6 独立 runtime canary 已启动
 
