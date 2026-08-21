@@ -1,5 +1,12 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-21 Loom Benchmark 计划冻结与首个候选模型落地
+
+- 本地 Benchmark 与模型筛选计划已冻结到 `docs/research/loom-benchmark-localization-plan.md`（commit `0b7a599`）。首轮主表固定为 Terminal-Bench 2.1、SWE-bench Verified 与 SkillsBench v1.1；benchmark 仓库、metadata 与 Docker 镜像下载暂缓，未执行 Docker prune。
+- 首个 bake-off 候选 `Qwen3.6-35B-A3B` 的 Unsloth GGUF `UD-Q6_K` 已下载到 `/data2/chenzute/models/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q6_K.gguf`。文件为 `29,308,320,736` bytes（约 27.30 GiB），`.aria2` 控制文件已消失。
+- 完整 SHA-256 校验通过：`4fe53b148b46f9b88830e2a3055c5b15c3a4d1e3ddc9a1384a108d8b9d59f043`，与下载源 ETag 一致。模型旁已写 `model-provenance.json`；纯文本 Coding/Agent 实验未下载视觉 projector。
+- 下一步（用户恢复 Benchmark 工作后）：先做本地推理 runtime/model-load smoke，冻结 context、sampling、tool schema 与总预算；再下载轻量 benchmark metadata 并生成 `bench-source-lock.json`，不直接进入五级 Loom 主实验。
+
 ## 2026-08-21 README 双层门面
 
 - 参考 Reactive Resume 的公开首页信息架构，将原根 README 迁到 `docs/README-detailed.md`，保留全部案例、系统安装、架构、实验与边界；迁移后的图片/文档相对链接已同步改写。
