@@ -214,7 +214,7 @@ export class BuilderDriver {
             ...(readOnlyDiagnosis ? [] : [JSON.stringify({ kind: 'tool', action: { name: 'invoke_capability', capability: 'workspace-simulation', tool: 'run_simulation', input: { id: 'probe-1', command: 'node', args: ['fixture.mjs'], files: { 'fixture.mjs': 'console.log("ok")' }, expectedStdoutIncludes: ['ok'] } } })]),
             JSON.stringify({ kind: 'tool', action: { name: 'write_world_model', value: {} } }),
             JSON.stringify({ kind: 'tool', action: { name: 'write_plan', value: {} } }),
-            JSON.stringify({ kind: 'tool', action: { name: 'write_diagnosis_report', report: { observations: [], directions: [{ id: 'convergence', goal: '...', evidenceRefs: [], unknowns: [], cost: 'low' }], question: { question: '请选择优先方向。', options: [{ id: 'convergence', label: '优先收敛' }, { id: 'task-success', label: '优先任务成功' }], whyNow: '现有证据无法推出优先级', evidenceRefs: [] } } } }),
+            JSON.stringify({ kind: 'tool', action: { name: 'write_diagnosis_report', report: { observations: [], directions: [{ id: 'convergence', layer: 'skill', goal: '...', evidenceRefs: [], unknowns: [], cost: 'low' }, { id: 'no-change', layer: 'no_change', goal: '...', evidenceRefs: [], unknowns: [], cost: 'none' }], question: { question: '请选择优先方向。', options: [{ id: 'convergence', label: '优先收敛' }, { id: 'no-change', label: '暂不修改' }], whyNow: '现有证据无法推出优先级', evidenceRefs: [] } } } }),
             ...(diagnosisMode ? [] : [
                 JSON.stringify({ kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'loop-evolution', payload: { id: 'candidate-id', displayName: '...', source: { kind: 'builder-generated', baseline: { uri: '...', ref: '...' }, edits: [] }, packageName: '...', entry: 'lib/index.js', config: {}, expectedOutcome: '...', capabilities: [] }, rationale: '...' } } }),
                 JSON.stringify({ kind: 'tool', action: { name: 'write_submission', proposal: { capability: 'patch-evolution', payload: { id: 'patch-id', targetId: '...', targetKind: 'config', action: 'update', config: {}, dependencies: [], rationale: '...', expectedOutcome: '...', version: 1, createdAt: '...' }, rationale: '...' } } }),
@@ -280,7 +280,9 @@ export class BuilderDriver {
             'tool request_input {kind?,question,options?,whyNow?,evidenceRefs?,blocking?}',
             'tool write_world_model/write_plan {value:{hypothesis:"...",nextIntent:"..."}}',
             readOnlyDiagnosis ? '' : 'tool invoke_capability {capability,tool,input}',
-            diagnosisMode ? 'tool write_diagnosis_report {report}; then wait for user direction' : 'tool write_submission {proposal}; for a workspace loop edit use compile_loop_submission {rationale,expectedOutcome?}; then submit when evidence is sufficient',
+            diagnosisMode
+                ? 'tool write_diagnosis_report {report:{directions:[{id:string,layer:"config"|"skill"|"loop"|"no_change",goal:string,evidenceRefs:string[],unknowns:string[],cost:string}],question:{question:string,options:[{id:string,label:string,description?:string}],whyNow:string,evidenceRefs:string[]}}}; every option id must name a direction id; then wait for user direction'
+                : 'tool write_submission {proposal}; for a workspace loop edit use compile_loop_submission {rationale,expectedOutcome?}; then submit when evidence is sufficient',
             !diagnosisMode ? 'For a verified workspace loop candidate, call compile_loop_submission after tests pass; Kernel derives exact beforeHash/after edits from the captured workspace, then call submit.' : '',
             'decision is exactly one JSON object: {kind:"tool",action} | {kind:"continue",summary} | {kind:"submit"} | {kind:"abort",reason}',
             'Tool arguments are direct fields of action; action.input and action.params are equivalent wrappers.',

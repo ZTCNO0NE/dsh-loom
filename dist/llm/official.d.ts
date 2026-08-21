@@ -23,6 +23,9 @@ export interface OpenAiCompatibleLlmOptions {
     /** Expose one transport-level decision function for providers that need a
      * native tool surface to recognize Builder tools as callable. */
     nativeDecisionTool?: boolean;
+    /** Collapse a native tool catalog into one sequential Builder decision.
+     * Kernel validation still owns the concrete tool allowlist. */
+    nativeToolMode?: 'expanded' | 'decision-envelope';
 }
 /**
  * OpenAI-compatible SSE adapter for the official DeepSeek API.

@@ -1,6 +1,6 @@
 {
   "name": "dsh-loom",
-  "version": "1.2.32",
+  "version": "1.2.33",
   "description": "Loom (织机) — second-validator plugin for DeepSeek Harness: a silent external coach that weaves your agent's tools, skills, config and even its model from usage history, with deterministic verification and cold-apply.",
   "keywords": [
     "dsh",

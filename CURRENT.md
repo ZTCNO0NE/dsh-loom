@@ -1,5 +1,22 @@
 # CURRENT.md — 当前状态与交接
 
+## 2026-08-21 Actor + Builder 协作分诊（真实双平台验收完成，待发布）
+
+- `meta_auto(plan)` 现按证据确定路由：Actor 已确认一个安全的 Config/Skill `targetKind + targetId` 时直接 Plan；模糊症状、跨层目标、Loop、显式 diagnose 或前次失败进入独立 Builder 方向诊断。Actor 负责接住用户、分诊和解释，Builder 只在方向不明确时承担技术诊断，不重复审核明确目标。
+- 方向诊断复用现有 durable `BuilderKernel/Driver`，但启用新的 read-only diagnosis 权限：只允许 read/search/inspect/trace、公开 world-model/plan、Actor 通讯与 `write_diagnosis_report`；workspace 写入、patch、命令、simulation capability、proposal/compiler/submit 均由 Kernel 拒绝，并从 native schema 与文本协议中隐藏。
+- 报告提供 1–3 个 `config | skill | loop | no_change` 方向。任务卡只显示 goal、unknowns、cost 和可路由选择，不返回 evidence refs、run/path 或隐藏推理；报告中的无效 option 不会成为用户可选路由。异常/取消统一投影为 aborted/未修改，原始错误只留受控审计。
+- 用户选 Config/Skill 后仍必须由 Actor 确认宿主拥有的安全 target，Builder 不能发明 target identity；成功选择会原子替换为新的 immutable pending plan。Loop 方向必须二次确认研究级成本后才进入 mini-SWE + 专用 Verifier/Gate；`no_change` 不创建 plan/workspace/proposal。
+- 真实模型暴露并修复三类单测未覆盖的问题：SSE transport 忽略 native `tool_calls`；V4 Flash 无视 `parallel_tool_calls=false` 批量发出推测性调用；Kernel checkpoint 错误拒绝诊断报告且 compact prompt 缺完整 schema。官方 transport 现使用单一 `builder_decision` envelope，每轮只把最低 index 的一个决策交给 Kernel，其余推测性调用丢弃；expanded 模式多调用仍 fail closed。
+- 最终 `1.2.33` tarball 在 Linux 冷 profile 安装/setup/Web HTTP 200 后，官方 V4 Flash 以 **7 model turns / 7 tool steps** 形成 Config/Skill/Loop 方向并停在 `waiting_for_input`，无 workspace/proposal/submission；同一 tarball 在 Windows 隔离 profile 安装、普通控制台冷 Web HTTP 200，真模型诊断以 **3/3** 完成同一边界。另一次隔离 DSH home 的真实 Actor 主入口完成“自然语言 → `meta_auto` → 后台 Builder → durable task card → 下一 Actor 回合展示三个选择”，同样没有实现产物。
+- README、详细手册与 USAGE 已同步。Python compile、TypeScript check、全量 **288/288**、build、diff-check、pack 与最终同一 tarball 的双平台复装均通过；release evidence 为 `docs/evidence/v1.2.33.md`。尚未 npm/GitHub 发布。
+
+## 2026-08-21 Qwen3.6 27B Q4 vs 35B-A3B Q6 探索性对照
+
+- 按用户要求执行非全量、非排行榜口径的小样本 Terminal-Bench 2.1 对照；SkillsBench 本轮跳过。两边使用同一 llama.cpp 2.17.0、128K context、Q8 KV、Harbor qwen-coder 0.21.15、单并发/单 attempt；27B 为 Q4_K_M，35B-A3B 为 UD-Q6_K，故同时混合架构与量化差异。
+- `fix-git` 两模型均通过真实 verifier（reward 1.0）。35B-A3B agent execution 37.95s、11 steps、364,149 prompt / 325,634 cached / 1,612 completion tokens；27B 为 119.15s、8 steps、245,685 / 209,117 / 1,157。该单题中 35B-A3B 约快 3.14×，但不能外推整体能力或速度。
+- `overfull-hbox` 两边均在容器 agent setup 720s 超时，`agent_execution=null`，没有调用模型；Harbor mean 0.5 不得解释为两题模型正确率。下一轮应先预装固定 qwen-code agent 镜像，消除 apt/npm setup 噪声。
+- 报告、配置、逐题 trajectory、verifier 与 exception 全部落在 `/chenzute/inference-acceleration-lab/results/2026-08-21-qwen36-model-comparison/`。测试结束已恢复 35B-A3B 12424 backend 与 4021 adapter；scheduler 保持测试前的 inactive 状态。
+
 ## 2026-08-21 Actor 任务卡交互补全（待发布）
 
 - 修复任务卡宣称有 `view_evidence`、控制工具却没有真实分支的问题。用户现在可通过自然语言查看本轮 immutable evidence pack 的脱敏索引：帧/事件/来源数量、工具错误统计、信号类型和独立裁决状态；不返回原始内容、绝对路径、hash、凭据或隐藏推理，manifest 缺失时 fail closed，不拿实时会话冒充冻结证据。

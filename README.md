@@ -9,7 +9,7 @@
     ·
     <a href="docs/README-detailed.md"><strong>完整手册</strong></a>
     ·
-    <a href="docs/evidence/v1.2.32.md"><strong>查看证据</strong></a>
+    <a href="docs/evidence/v1.2.33.md"><strong>查看证据</strong></a>
   </p>
 
   <p>
@@ -96,7 +96,7 @@ Builder 有探索与实现空间，但没有放行权。成功必须经过独立
 ### 1. 安装并检查 bundle
 
 ```bash
-pnpm dsh plugin --profile web add dsh-loom@1.2.32
+pnpm dsh plugin --profile web add dsh-loom@1.2.33
 pnpm dsh web --dump-config
 ```
 
@@ -166,7 +166,7 @@ Windows 源码 checkout、Python、host fallback、凭据覆盖和取消/重做�
 | 正式包冷启动 | Windows registry 安装，Web HTTP 200 |
 | 安全边界 | Builder 不能修改 Verifier/Gate，也不能自我批准 |
 
-原始轨迹、聚合数据和主张边界见 [v1.2.32 release evidence](docs/evidence/v1.2.32.md)。这些数据证明交付链和受测任务的稳定性，不宣称任意模型、任意 Skill 或复杂源码重构必然成功。
+Actor + Builder 双平台真实链路、原始轨迹边界和发布门见 [v1.2.33 release evidence](docs/evidence/v1.2.33.md)；mini-SWE 的 6/6 Windows Skill 稳定性数据仍见 [v1.2.32 release evidence](docs/evidence/v1.2.32.md)。这些数据证明受测链路，不宣称任意模型、任意 Skill 或复杂源码重构必然成功。
 
 ## 产品范围与研究方向
 

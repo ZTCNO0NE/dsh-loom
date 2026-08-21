@@ -314,6 +314,7 @@ export class LoopCandidateGateway {
       draftKind: 'loop_candidate',
       capabilities: directionDiagnosis ? [] : [LOOP_EVOLUTION_CAPABILITY, WORKSPACE_SIMULATION_CAPABILITY],
       readOnlyDiagnosis: directionDiagnosis,
+      compactPrompt: directionDiagnosis,
       maxModelTurns: this.options.builderMaxModelTurns ?? 24,
       maxToolSteps: this.options.builderMaxToolSteps ?? 48,
       maxWallTimeMs: this.options.builderMaxWallTimeMs ?? 600_000,

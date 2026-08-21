@@ -11,6 +11,7 @@ export function officialDeepSeekLlm(options = {}) {
         apiKeyEnv: 'DEEPSEEK_API_KEY',
         resolveApiKey: options.resolveApiKey,
         includeThinking: true,
+        nativeToolMode: 'decision-envelope',
     }, options);
 }
 /**
@@ -43,11 +44,15 @@ export function openAiCompatibleLlm(options, deepSeekOptions = {}) {
                 body.response_format = { type: 'json_object' };
             if (options.includeThinking)
                 body.thinking = { type: deepSeekOptions.thinking ?? 'disabled' };
-            if (call.nativeTools?.length) {
+            if (call.nativeTools?.length && options.nativeToolMode !== 'decision-envelope') {
                 body.tools = call.nativeTools.map((tool) => ({ type: 'function', function: tool }));
                 body.tool_choice = 'auto';
+                // BuilderKernel is deliberately one-action-per-turn so each tool
+                // result becomes observable feedback before the next decision.  Do
+                // not let a provider batch mutually dependent actions in parallel.
+                body.parallel_tool_calls = false;
             }
-            else if (options.nativeDecisionTool) {
+            else if (call.nativeTools?.length || options.nativeDecisionTool) {
                 body.tools = [{
                         type: 'function',
                         function: {
@@ -62,6 +67,7 @@ export function openAiCompatibleLlm(options, deepSeekOptions = {}) {
                         },
                     }];
                 body.tool_choice = 'auto';
+                body.parallel_tool_calls = false;
             }
             const res = await fetch(`${baseURL}/chat/completions`, {
                 method: 'POST',
@@ -98,6 +104,7 @@ export function openAiCompatibleLlm(options, deepSeekOptions = {}) {
             let buffer = '';
             let usageYielded = false;
             let sawContent = false;
+            const nativeCalls = new Map();
             yield { kind: 'block-start', type: 'text' };
             for (;;) {
                 const { done, value } = await reader.read();
@@ -117,8 +124,17 @@ export function openAiCompatibleLlm(options, deepSeekOptions = {}) {
                         const chunk = JSON.parse(payload);
                         const delta = chunk.choices?.[0]?.delta;
                         if (delta?.content) {
-                            sawContent = true;
+                            if (delta.content.trim())
+                                sawContent = true;
                             yield { kind: 'text-delta', text: delta.content };
+                        }
+                        for (const toolCall of delta?.tool_calls ?? []) {
+                            const index = toolCall.index ?? 0;
+                            const prior = nativeCalls.get(index) ?? { name: '', argumentsText: '' };
+                            nativeCalls.set(index, {
+                                name: toolCall.function?.name ?? prior.name,
+                                argumentsText: prior.argumentsText + (toolCall.function?.arguments ?? ''),
+                            });
                         }
                         if (chunk.usage && !usageYielded) {
                             usageYielded = true;
@@ -135,6 +151,23 @@ export function openAiCompatibleLlm(options, deepSeekOptions = {}) {
                         // skip malformed SSE lines
                     }
                 }
+            }
+            if (nativeCalls.size > 1 && options.nativeToolMode !== 'decision-envelope') {
+                throw new Error(`openAiCompatibleLlm: expected one Builder decision, received ${nativeCalls.size} native tool calls`);
+            }
+            // Some compatible providers ignore parallel_tool_calls=false and emit
+            // the same decision-envelope function several times.  Execute only the
+            // lowest-index decision; all later speculative decisions are discarded
+            // so the next model turn must observe Kernel feedback before acting.
+            const nativeCall = [...nativeCalls.entries()].sort(([left], [right]) => left - right)[0]?.[1];
+            if (nativeCall) {
+                if (!nativeCall.name)
+                    throw new Error('openAiCompatibleLlm: native tool call ended without a name');
+                const nativeDecision = nativeCall.name === 'builder_decision'
+                    ? nativeCall.argumentsText
+                    : nativeToolDecision(nativeCall.name, nativeCall.argumentsText || '{}');
+                sawContent = true;
+                yield { kind: 'text-delta', text: nativeDecision };
             }
             if (!sawContent) {
                 throw new Error('openAiCompatibleLlm: stream ended without content');

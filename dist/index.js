@@ -461,7 +461,11 @@ export function apply(ctx, config) {
         builderMaxWallTimeMs: Math.min(config.allowLoopCandidates.builderMaxWallTimeMs, 300_000),
         diagnosisFirst: true,
         directionDiagnosis: true,
-        builderKernelOptions: { readOnlyDiagnosis: true },
+        builderKernelOptions: {
+            readOnlyDiagnosis: true,
+            repeatReadRejectAfter: 3,
+            enforceProgressCheckpoints: true,
+        },
         onUsage: recordUsage('builder-direction-diagnosis'),
         executionRuntime: 'loom-native',
     });

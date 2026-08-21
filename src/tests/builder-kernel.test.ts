@@ -405,6 +405,30 @@ describe('BuilderKernel', () => {
     ]))
   })
 
+  it('accepts a diagnosis report as the terminal public direction checkpoint', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-diagnosis-checkpoint-'))
+    const kernel = new BuilderKernel(root, 's', undefined, {
+      readOnlyDiagnosis: true,
+      repeatReadRejectAfter: 2,
+      enforceProgressCheckpoints: true,
+    })
+    const run = kernel.create({ mode: 'diagnosis', actor: {}, targetBefore: {} })
+    const source = join(root, 'stable.txt')
+    writeFileSync(source, 'stable feedback\n', 'utf8')
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })
+    kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })
+    expect(() => kernel.decide(run.id, { kind: 'tool', action: { name: 'read_file', path: source } })).toThrow(/unchanged read rejected/)
+
+    expect(kernel.decide(run.id, { kind: 'tool', action: { name: 'write_diagnosis_report', report: {
+      directions: [
+        { id: 'skill', layer: 'skill', goal: '增加受控复盘技能', evidenceRefs: ['stable.txt'], unknowns: [], cost: 'low' },
+        { id: 'none', layer: 'no_change', goal: '保持现状并继续观察', evidenceRefs: ['stable.txt'], unknowns: ['真实任务影响'], cost: 'none' },
+      ],
+      question: { question: '选择哪个方向？', options: [{ id: 'skill', label: 'Skill' }, { id: 'none', label: '不修改' }], whyNow: '事实不能替用户决定产品取舍', evidenceRefs: ['stable.txt'] },
+    } } })).toMatchObject({ written: 'diagnosis_report' })
+    expect(kernel.load(run.id)).toMatchObject({ state: 'waiting_for_input', phase: 'waiting_for_actor' })
+  })
+
   it('allows a repeated read when the workspace feedback changes', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-loom-builder-progress-'))
     const kernel = new BuilderKernel(root, 's')

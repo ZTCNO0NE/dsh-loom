@@ -1369,6 +1369,7 @@ function satisfiesProgressRequirement(requirement, action) {
     if (requirement === 'declare_direction') {
         return action === 'write_world_model'
             || action === 'write_plan'
+            || action === 'write_diagnosis_report'
             || action === 'request_input'
             || action === 'write_submission';
     }
@@ -1376,6 +1377,7 @@ function satisfiesProgressRequirement(requirement, action) {
         return action === 'invoke_capability'
             || action === 'run_workspace_command'
             || action === 'write_workspace_file'
+            || action === 'write_diagnosis_report'
             || action === 'request_input'
             || action === 'write_submission';
     }

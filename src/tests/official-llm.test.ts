@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { officialDeepSeekLlm, terraLlm } from '../llm/official.js'
+import { officialDeepSeekLlm, openAiCompatibleLlm, terraLlm } from '../llm/official.js'
 
 describe('official DeepSeek LLM adapter', () => {
   it('disables DeepSeek thinking so bounded JSON calls reserve tokens for content', async () => {
@@ -39,6 +39,78 @@ describe('official DeepSeek LLM adapter', () => {
       })) chunks.push(chunk)
       expect(request).toMatchObject({ thinking: { type: 'enabled' } })
       expect(chunks).toContainEqual({ kind: 'text-delta', text: '{}' })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('normalizes a streamed native function call into one Kernel decision', async () => {
+    const originalFetch = globalThis.fetch
+    let request: Record<string, unknown> | undefined
+    globalThis.fetch = async (_input, init) => {
+      request = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response([
+        'data: {"choices":[{"delta":{"content":"  ","tool_calls":[{"index":0,"id":"call-1","function":{"name":"builder_decision","arguments":"{\\"decision\\":{\\"kind\\":\\"tool\\",\\"action\\":{\\"name\\":\\"write_plan\\",\\"value\\":"}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"hypothesis\\":\\"route\\"}}}}"}}]}}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+        'data: [DONE]',
+        '',
+      ].join('\n\n'), { status: 200 })
+    }
+    try {
+      const chunks = []
+      for await (const chunk of officialDeepSeekLlm({ baseURL: 'https://example.test', apiKey: 'test' }).stream({
+        provider: 'deepseek-official', model: 'deepseek-v4-flash', prompt: 'choose one tool', maxTokens: 256,
+        nativeTools: [{ name: 'write_plan', description: 'write plan', parameters: { type: 'object', properties: { value: { type: 'object' } }, required: ['value'] } }],
+      })) chunks.push(chunk)
+      expect(request).toMatchObject({
+        tools: [expect.objectContaining({ function: expect.objectContaining({ name: 'builder_decision' }) })],
+        parallel_tool_calls: false,
+      })
+      expect(chunks).toContainEqual({ kind: 'text-delta', text: '{"decision":{"kind":"tool","action":{"name":"write_plan","value":{"hypothesis":"route"}}}}' })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('fails closed when a streamed response asks for multiple native actions', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async () => new Response([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"write_plan","arguments":"{\\"value\\":{}}"}},{"index":1,"function":{"name":"abort","arguments":"{\\"reason\\":\\"stop\\"}"}}]}}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n\n'), { status: 200 })
+    try {
+      const consume = async () => {
+        for await (const _chunk of openAiCompatibleLlm({ baseURL: 'https://example.test', apiKey: 'test', apiKeyEnv: 'TEST_KEY', nativeToolMode: 'expanded' }).stream({
+          provider: 'deepseek-official', model: 'deepseek-v4-flash', prompt: 'choose one tool', maxTokens: 256,
+          nativeTools: [
+            { name: 'write_plan', description: 'write plan', parameters: { type: 'object' } },
+            { name: 'abort', description: 'abort', parameters: { type: 'object' } },
+          ],
+        })) { /* consume */ }
+      }
+      await expect(consume()).rejects.toThrow('expected one Builder decision')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('serializes repeated decision-envelope calls by exposing only the first action', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async () => new Response([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"builder_decision","arguments":"{\\"decision\\":{\\"kind\\":\\"tool\\",\\"action\\":{\\"name\\":\\"write_plan\\",\\"value\\":{}}}}"}},{"index":1,"function":{"name":"builder_decision","arguments":"{\\"decision\\":{\\"kind\\":\\"abort\\",\\"reason\\":\\"speculative\\"}}"}}]}}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n\n'), { status: 200 })
+    try {
+      const text: string[] = []
+      for await (const chunk of officialDeepSeekLlm({ baseURL: 'https://example.test', apiKey: 'test' }).stream({
+        provider: 'deepseek-official', model: 'deepseek-v4-flash', prompt: 'choose one tool', maxTokens: 256,
+        nativeTools: [{ name: 'write_plan', description: 'write plan', parameters: { type: 'object' } }],
+      })) if (chunk.kind === 'text-delta' && chunk.text) text.push(chunk.text)
+      expect(text.join('')).toBe('{"decision":{"kind":"tool","action":{"name":"write_plan","value":{}}}}')
+      expect(text.join('')).not.toContain('speculative')
     } finally {
       globalThis.fetch = originalFetch
     }

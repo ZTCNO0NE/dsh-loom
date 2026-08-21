@@ -128,6 +128,8 @@ describe('BuilderDriver', () => {
     expect(prompt).not.toContain('run_workspace_command {')
     expect(prompt).not.toContain('invoke_capability {')
     expect(prompt).not.toContain('write_submission {')
+    expect(prompt).toContain('no_change')
+    expect(prompt).toContain('evidenceRefs')
     expect(names).toContain('write_diagnosis_report')
     expect(names).toContain('read_file')
     expect(names).not.toContain('write_workspace_file')
